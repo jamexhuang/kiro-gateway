@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 # Kiro OpenAI Gateway
+# https://github.com/jwadow/kiro-openai-gateway
 # Copyright (C) 2025 Jwadow
 #
 # This program is free software: you can redistribute it and/or modify
@@ -45,6 +46,7 @@ from kiro_gateway.config import (
     PROFILE_ARN,
     REGION,
     KIRO_CREDS_FILE,
+    KIRO_CLI_DB_FILE,
     PROXY_API_KEY,
     LOG_LEVEL,
     _warn_deprecated_debug_setting,
@@ -156,6 +158,7 @@ def validate_configuration() -> None:
         # .env exists, check for credentials
         has_refresh_token = bool(REFRESH_TOKEN)
         has_creds_file = bool(KIRO_CREDS_FILE)
+        has_cli_db = bool(KIRO_CLI_DB_FILE)
         
         # Check if creds file actually exists
         if KIRO_CREDS_FILE:
@@ -164,7 +167,14 @@ def validate_configuration() -> None:
                 has_creds_file = False
                 logger.warning(f"KIRO_CREDS_FILE not found: {KIRO_CREDS_FILE}")
         
-        if not has_refresh_token and not has_creds_file:
+        # Check if CLI database file actually exists
+        if KIRO_CLI_DB_FILE:
+            cli_db_path = Path(KIRO_CLI_DB_FILE).expanduser()
+            if not cli_db_path.exists():
+                has_cli_db = False
+                logger.warning(f"KIRO_CLI_DB_FILE not found: {KIRO_CLI_DB_FILE}")
+        
+        if not has_refresh_token and not has_creds_file and not has_cli_db:
             errors.append(
                 "No Kiro credentials configured!\n"
                 "\n"
@@ -178,6 +188,9 @@ def validate_configuration() -> None:
                 "\n"
                 "   Option 2: Refresh token\n"
                 "      REFRESH_TOKEN=\"your_refresh_token_here\"\n"
+                "\n"
+                "   Option 3: kiro-cli SQLite database (AWS SSO)\n"
+                "      KIRO_CLI_DB_FILE=\"~/.local/share/kiro-cli/data.sqlite3\"\n"
                 "\n"
                 "   See README.md for how to obtain credentials."
             )
@@ -196,7 +209,9 @@ def validate_configuration() -> None:
         sys.exit(1)
     
     # Log successful configuration
-    if KIRO_CREDS_FILE:
+    if KIRO_CLI_DB_FILE:
+        logger.info(f"Using kiro-cli SQLite database: {KIRO_CLI_DB_FILE}")
+    elif KIRO_CREDS_FILE:
         logger.info(f"Using credentials file: {KIRO_CREDS_FILE}")
     elif REFRESH_TOKEN:
         logger.info("Using refresh token from environment")
@@ -225,11 +240,13 @@ async def lifespan(app: FastAPI):
     logger.info("Starting application... Creating state managers.")
     
     # Create AuthManager
+    # Priority: SQLite DB > JSON file > environment variables
     app.state.auth_manager = KiroAuthManager(
         refresh_token=REFRESH_TOKEN,
         profile_arn=PROFILE_ARN,
         region=REGION,
-        creds_file=KIRO_CREDS_FILE if KIRO_CREDS_FILE else None
+        creds_file=KIRO_CREDS_FILE if KIRO_CREDS_FILE else None,
+        sqlite_db=KIRO_CLI_DB_FILE if KIRO_CLI_DB_FILE else None,
     )
     
     # Create model cache

@@ -19,9 +19,11 @@
 
 import json
 import os
+import sqlite3
 import sys
 import uuid
 from pathlib import Path
+from enum import Enum
 
 import requests
 from dotenv import load_dotenv
@@ -30,32 +32,160 @@ from loguru import logger
 # --- Load environment variables ---
 load_dotenv()
 
+
+class AuthType(Enum):
+    """Type of authentication mechanism."""
+    KIRO_DESKTOP = "kiro_desktop"
+    AWS_SSO_OIDC = "aws_sso_oidc"
+
+
 # --- Configuration ---
-KIRO_API_HOST = "https://q.us-east-1.amazonaws.com"
-TOKEN_URL = "https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken"
+KIRO_REGION = os.getenv("KIRO_REGION", "us-east-1")
+KIRO_API_HOST = f"https://q.{KIRO_REGION}.amazonaws.com"
+KIRO_DESKTOP_TOKEN_URL = f"https://prod.{KIRO_REGION}.auth.desktop.kiro.dev/refreshToken"
+AWS_SSO_OIDC_TOKEN_URL = f"https://oidc.{KIRO_REGION}.amazonaws.com/token"
+
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 PROFILE_ARN = os.getenv("PROFILE_ARN", "arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK")
 KIRO_CREDS_FILE = os.getenv("KIRO_CREDS_FILE", "")
+KIRO_CLI_DB_FILE = os.getenv("KIRO_CLI_DB_FILE", "")
 
-# --- Load credentials from file if REFRESH_TOKEN not in env ---
-if not REFRESH_TOKEN and KIRO_CREDS_FILE:
+# AWS SSO OIDC specific credentials
+CLIENT_ID = None
+CLIENT_SECRET = None
+AUTH_TYPE = AuthType.KIRO_DESKTOP
+
+
+def load_credentials_from_json(file_path: str) -> bool:
+    """Load credentials from JSON file."""
+    global REFRESH_TOKEN, PROFILE_ARN, CLIENT_ID, CLIENT_SECRET, AUTH_TYPE, KIRO_REGION
+    global KIRO_API_HOST, KIRO_DESKTOP_TOKEN_URL, AWS_SSO_OIDC_TOKEN_URL
+    
     try:
-        creds_path = Path(KIRO_CREDS_FILE).expanduser()
-        if creds_path.exists():
-            with open(creds_path, 'r', encoding='utf-8') as f:
-                creds_data = json.load(f)
-            REFRESH_TOKEN = creds_data.get("refreshToken", "")
-            if creds_data.get("profileArn"):
-                PROFILE_ARN = creds_data["profileArn"]
-            logger.info(f"Credentials loaded from {KIRO_CREDS_FILE}")
+        creds_path = Path(file_path).expanduser()
+        if not creds_path.exists():
+            logger.warning(f"Credentials file not found: {file_path}")
+            return False
+        
+        with open(creds_path, 'r', encoding='utf-8') as f:
+            creds_data = json.load(f)
+        
+        # Load common fields
+        if 'refreshToken' in creds_data:
+            REFRESH_TOKEN = creds_data['refreshToken']
+        if 'profileArn' in creds_data:
+            PROFILE_ARN = creds_data['profileArn']
+        if 'region' in creds_data:
+            KIRO_REGION = creds_data['region']
+            KIRO_API_HOST = f"https://q.{KIRO_REGION}.amazonaws.com"
+            KIRO_DESKTOP_TOKEN_URL = f"https://prod.{KIRO_REGION}.auth.desktop.kiro.dev/refreshToken"
+            AWS_SSO_OIDC_TOKEN_URL = f"https://oidc.{KIRO_REGION}.amazonaws.com/token"
+        
+        # Load AWS SSO OIDC specific fields
+        if 'clientId' in creds_data:
+            CLIENT_ID = creds_data['clientId']
+        if 'clientSecret' in creds_data:
+            CLIENT_SECRET = creds_data['clientSecret']
+        
+        # Detect auth type
+        if CLIENT_ID and CLIENT_SECRET:
+            AUTH_TYPE = AuthType.AWS_SSO_OIDC
+            logger.info(f"Detected auth type: AWS SSO OIDC")
         else:
-            logger.warning(f"Credentials file not found: {KIRO_CREDS_FILE}")
+            AUTH_TYPE = AuthType.KIRO_DESKTOP
+            logger.info(f"Detected auth type: Kiro Desktop")
+        
+        logger.info(f"Credentials loaded from {file_path}")
+        return True
+        
     except Exception as e:
         logger.error(f"Error loading credentials from file: {e}")
+        return False
+
+
+def load_credentials_from_sqlite(db_path: str) -> bool:
+    """Load credentials from kiro-cli SQLite database."""
+    global REFRESH_TOKEN, CLIENT_ID, CLIENT_SECRET, AUTH_TYPE, KIRO_REGION
+    global KIRO_API_HOST, KIRO_DESKTOP_TOKEN_URL, AWS_SSO_OIDC_TOKEN_URL
+    
+    try:
+        path = Path(db_path).expanduser()
+        if not path.exists():
+            logger.warning(f"SQLite database not found: {db_path}")
+            return False
+        
+        conn = sqlite3.connect(str(path))
+        cursor = conn.cursor()
+        
+        # Load token data
+        cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:token",))
+        token_row = cursor.fetchone()
+        
+        if token_row:
+            token_data = json.loads(token_row[0])
+            if token_data:
+                if 'access_token' in token_data:
+                    # We have a valid access token, but we need refresh_token
+                    pass
+                if 'refresh_token' in token_data:
+                    REFRESH_TOKEN = token_data['refresh_token']
+                if 'region' in token_data:
+                    KIRO_REGION = token_data['region']
+                    KIRO_API_HOST = f"https://q.{KIRO_REGION}.amazonaws.com"
+                    KIRO_DESKTOP_TOKEN_URL = f"https://prod.{KIRO_REGION}.auth.desktop.kiro.dev/refreshToken"
+                    AWS_SSO_OIDC_TOKEN_URL = f"https://oidc.{KIRO_REGION}.amazonaws.com/token"
+        
+        # Load device registration (client_id, client_secret)
+        cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:device-registration",))
+        registration_row = cursor.fetchone()
+        
+        if registration_row:
+            registration_data = json.loads(registration_row[0])
+            if registration_data:
+                if 'client_id' in registration_data:
+                    CLIENT_ID = registration_data['client_id']
+                if 'client_secret' in registration_data:
+                    CLIENT_SECRET = registration_data['client_secret']
+        
+        conn.close()
+        
+        # Detect auth type
+        if CLIENT_ID and CLIENT_SECRET:
+            AUTH_TYPE = AuthType.AWS_SSO_OIDC
+            logger.info(f"Detected auth type: AWS SSO OIDC (from SQLite)")
+        else:
+            AUTH_TYPE = AuthType.KIRO_DESKTOP
+            logger.info(f"Detected auth type: Kiro Desktop (from SQLite)")
+        
+        logger.info(f"Credentials loaded from SQLite: {db_path}")
+        return True
+        
+    except sqlite3.Error as e:
+        logger.error(f"SQLite error: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Error loading credentials from SQLite: {e}")
+        return False
+
+
+# --- Load credentials (priority: SQLite > JSON > env) ---
+cred_source = "REFRESH_TOKEN"
+
+if KIRO_CLI_DB_FILE:
+    if load_credentials_from_sqlite(KIRO_CLI_DB_FILE):
+        cred_source = "KIRO_CLI_DB_FILE (SQLite)"
+elif KIRO_CREDS_FILE:
+    if load_credentials_from_json(KIRO_CREDS_FILE):
+        cred_source = "KIRO_CREDS_FILE (JSON)"
 
 # --- Validate required credentials ---
 if not REFRESH_TOKEN:
-    logger.error("Neither REFRESH_TOKEN env variable nor KIRO_CREDS_FILE is configured. Exiting.")
+    logger.error("No credentials configured. Set REFRESH_TOKEN, KIRO_CREDS_FILE, or KIRO_CLI_DB_FILE. Exiting.")
+    sys.exit(1)
+
+# Additional validation for AWS SSO OIDC
+if AUTH_TYPE == AuthType.AWS_SSO_OIDC and (not CLIENT_ID or not CLIENT_SECRET):
+    logger.error("AWS SSO OIDC requires clientId and clientSecret. Exiting.")
     sys.exit(1)
 
 # Global variables
@@ -71,9 +201,19 @@ HEADERS = {
 
 
 def refresh_auth_token():
-    """Refreshes AUTH_TOKEN via Kiro API."""
+    """Refreshes AUTH_TOKEN via appropriate endpoint based on auth type."""
     global AUTH_TOKEN, HEADERS
-    logger.info("Refreshing Kiro token...")
+    
+    if AUTH_TYPE == AuthType.AWS_SSO_OIDC:
+        return refresh_auth_token_aws_sso_oidc()
+    else:
+        return refresh_auth_token_kiro_desktop()
+
+
+def refresh_auth_token_kiro_desktop():
+    """Refreshes AUTH_TOKEN via Kiro Desktop Auth endpoint."""
+    global AUTH_TOKEN, HEADERS
+    logger.info("Refreshing Kiro token via Kiro Desktop Auth...")
     
     payload = {"refreshToken": REFRESH_TOKEN}
     headers = {
@@ -82,7 +222,7 @@ def refresh_auth_token():
     }
     
     try:
-        response = requests.post(TOKEN_URL, json=payload, headers=headers)
+        response = requests.post(KIRO_DESKTOP_TOKEN_URL, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         
@@ -93,13 +233,53 @@ def refresh_auth_token():
             logger.error("Failed to get accessToken from response")
             return False
 
-        logger.success(f"Token successfully refreshed. Expires in: {expires_in}s")
+        logger.success(f"Token refreshed via Kiro Desktop Auth. Expires in: {expires_in}s")
         AUTH_TOKEN = new_token
         HEADERS['Authorization'] = f"Bearer {AUTH_TOKEN}"
         return True
         
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error refreshing token: {e}")
+        logger.error(f"Error refreshing token via Kiro Desktop Auth: {e}")
+        if hasattr(e, 'response') and e.response:
+            logger.error(f"Server response: {e.response.status_code} {e.response.text}")
+        return False
+
+
+def refresh_auth_token_aws_sso_oidc():
+    """Refreshes AUTH_TOKEN via AWS SSO OIDC endpoint."""
+    global AUTH_TOKEN, HEADERS
+    logger.info("Refreshing Kiro token via AWS SSO OIDC...")
+    
+    # AWS SSO OIDC uses form-urlencoded data
+    data = {
+        "grant_type": "refresh_token",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "refresh_token": REFRESH_TOKEN,
+    }
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    
+    try:
+        response = requests.post(AWS_SSO_OIDC_TOKEN_URL, data=data, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+        
+        new_token = result.get("accessToken")
+        expires_in = result.get("expiresIn", 3600)
+        
+        if not new_token:
+            logger.error(f"Failed to get accessToken from AWS SSO OIDC response: {result}")
+            return False
+
+        logger.success(f"Token refreshed via AWS SSO OIDC. Expires in: {expires_in}s")
+        AUTH_TOKEN = new_token
+        HEADERS['Authorization'] = f"Bearer {AUTH_TOKEN}"
+        return True
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error refreshing token via AWS SSO OIDC: {e}")
         if hasattr(e, 'response') and e.response:
             logger.error(f"Server response: {e.response.status_code} {e.response.text}")
         return False
@@ -173,9 +353,11 @@ def test_generate_content():
 
 
 if __name__ == "__main__":
-    # Determine credential source for logging
-    cred_source = "KIRO_CREDS_FILE" if KIRO_CREDS_FILE else "REFRESH_TOKEN"
-    logger.info(f"Starting Kiro API tests (credentials from {cred_source})...")
+    logger.info(f"Starting Kiro API tests...")
+    logger.info(f"  Credentials source: {cred_source}")
+    logger.info(f"  Auth type: {AUTH_TYPE.value}")
+    logger.info(f"  Region: {KIRO_REGION}")
+    logger.info(f"  API Host: {KIRO_API_HOST}")
 
     token_ok = refresh_auth_token()
 
@@ -184,8 +366,12 @@ if __name__ == "__main__":
         generate_ok = test_generate_content()
 
         if models_ok and generate_ok:
-            logger.success(f"All tests passed successfully! (credentials from {cred_source})")
+            logger.success(f"All tests passed successfully!")
+            logger.success(f"  Auth type: {AUTH_TYPE.value}")
+            logger.success(f"  Credentials: {cred_source}")
         else:
-            logger.warning(f"One or more tests failed. (credentials from {cred_source})")
+            logger.warning(f"One or more tests failed.")
     else:
         logger.error("Failed to refresh token. Tests not started.")
+        logger.error(f"  Auth type: {AUTH_TYPE.value}")
+        logger.error(f"  Token URL: {AWS_SSO_OIDC_TOKEN_URL if AUTH_TYPE == AuthType.AWS_SSO_OIDC else KIRO_DESKTOP_TOKEN_URL}")

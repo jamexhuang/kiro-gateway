@@ -105,6 +105,83 @@ PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
 KIRO_REGION="us-east-1"
 ```
 
+### Option 3: AWS SSO Credentials (kiro-cli)
+
+If you use `kiro-cli` with AWS IAM Identity Center (SSO), the gateway will automatically detect and use AWS SSO OIDC authentication.
+
+```env
+KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
+
+# Required for AWS SSO (not included in SSO cache file)
+PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
+
+# Password to protect YOUR proxy server
+PROXY_API_KEY="my-super-secret-password-123"
+```
+
+<details>
+<summary>📄 AWS SSO JSON file format</summary>
+
+AWS SSO credentials files (from `~/.aws/sso/cache/`) contain:
+
+```json
+{
+  "accessToken": "eyJ...",
+  "refreshToken": "eyJ...",
+  "expiresAt": "2025-01-12T23:00:00.000Z",
+  "region": "us-east-1",
+  "clientId": "...",
+  "clientSecret": "..."
+}
+```
+
+**Note:** AWS SSO credentials don't include `profileArn`. You must specify it separately via `PROFILE_ARN` environment variable. You can get your profile ARN by running `kiro-cli whoami`.
+
+</details>
+
+<details>
+<summary>🔍 How it works</summary>
+
+The gateway automatically detects the authentication type based on the credentials file:
+
+- **Kiro Desktop Auth** (default): Used when `clientId` and `clientSecret` are NOT present
+  - Endpoint: `https://prod.{region}.auth.desktop.kiro.dev/refreshToken`
+  
+- **AWS SSO OIDC**: Used when `clientId` and `clientSecret` ARE present
+  - Endpoint: `https://oidc.{region}.amazonaws.com/token`
+
+No additional configuration is needed — just point to your credentials file!
+
+</details>
+
+### Option 4: kiro-cli SQLite Database
+
+If you use `kiro-cli` and prefer to use its SQLite database directly:
+
+```env
+KIRO_CLI_DB_FILE="~/.local/share/kiro-cli/data.sqlite3"
+
+# Required for AWS SSO (not included in database)
+PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
+
+# Password to protect YOUR proxy server
+PROXY_API_KEY="my-super-secret-password-123"
+```
+
+<details>
+<summary>📄 Database locations</summary>
+
+| CLI Tool | Database Path |
+|----------|---------------|
+| kiro-cli | `~/.local/share/kiro-cli/data.sqlite3` |
+| amazon-q-developer-cli | `~/.local/share/amazon-q/data.sqlite3` |
+
+The gateway reads credentials from the `auth_kv` table which stores:
+- `codewhisperer:odic:token` — access token, refresh token, expiration
+- `codewhisperer:odic:device-registration` — client ID and secret
+
+</details>
+
 ### Getting the Refresh Token
 
 The refresh token can be obtained by intercepting Kiro IDE traffic. Look for requests to:

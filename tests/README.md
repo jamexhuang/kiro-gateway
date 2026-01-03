@@ -107,9 +107,29 @@ Shared fixtures and utilities for all tests:
   - **What it does**: Generates Kiro auth endpoint response structure
   - **Purpose**: Testing various token refresh scenarios
 
-- **`temp_creds_file()`**: Creates a temporary JSON file with credentials
+- **`temp_creds_file()`**: Creates a temporary JSON file with credentials (Kiro Desktop format)
   - **What it does**: Provides a file for testing credentials loading
   - **Purpose**: Testing credentials file operations
+
+- **`temp_aws_sso_creds_file()`**: Creates a temporary JSON file with AWS SSO OIDC credentials
+  - **What it does**: Provides a file with clientId and clientSecret for testing AWS SSO auth
+  - **Purpose**: Testing AWS SSO OIDC credentials loading
+
+- **`temp_sqlite_db()`**: Creates a temporary SQLite database (kiro-cli format)
+  - **What it does**: Provides a database with auth_kv table for testing SQLite loading
+  - **Purpose**: Testing kiro-cli SQLite credentials loading
+
+- **`temp_sqlite_db_token_only()`**: Creates SQLite database with token only (no device-registration)
+  - **What it does**: Provides a partial database for testing error handling
+  - **Purpose**: Testing partial SQLite data loading
+
+- **`temp_sqlite_db_invalid_json()`**: Creates SQLite database with invalid JSON
+  - **What it does**: Provides a database with corrupted data for testing error handling
+  - **Purpose**: Testing JSON decode error handling
+
+- **`mock_aws_sso_oidc_token_response()`**: Factory for creating mock AWS SSO OIDC token responses
+  - **What it does**: Generates AWS SSO OIDC token endpoint response structure
+  - **Purpose**: Testing various AWS SSO OIDC token refresh scenarios
 
 - **`sample_openai_chat_request()`**: Factory for creating OpenAI requests
   - **What it does**: Generates valid chat completion requests
@@ -240,6 +260,154 @@ Unit tests for **KiroAuthManager** (Kiro token management).
 - **`test_fingerprint_property()`**:
   - **What it does**: Verifies fingerprint property
   - **Purpose**: Ensure fingerprint is accessible via property
+
+#### `TestAuthTypeEnum`
+
+Tests for AuthType enum (AWS SSO OIDC support).
+
+- **`test_auth_type_enum_values()`**:
+  - **What it does**: Verifies AuthType enum contains KIRO_DESKTOP and AWS_SSO_OIDC
+  - **Purpose**: Ensure enum values are correctly defined
+
+#### `TestKiroAuthManagerDetectAuthType`
+
+Tests for `_detect_auth_type()` method.
+
+- **`test_detect_auth_type_kiro_desktop_when_no_client_credentials()`**:
+  - **What it does**: Verifies KIRO_DESKTOP is detected without clientId/clientSecret
+  - **Purpose**: Ensure default auth type is KIRO_DESKTOP
+
+- **`test_detect_auth_type_aws_sso_oidc_when_client_credentials_present()`**:
+  - **What it does**: Verifies AWS_SSO_OIDC is detected with clientId and clientSecret
+  - **Purpose**: Ensure AWS SSO OIDC is auto-detected from credentials
+
+- **`test_detect_auth_type_kiro_desktop_when_only_client_id()`**:
+  - **What it does**: Verifies KIRO_DESKTOP when only clientId is present
+  - **Purpose**: Ensure both clientId AND clientSecret are required for AWS SSO OIDC
+
+- **`test_detect_auth_type_kiro_desktop_when_only_client_secret()`**:
+  - **What it does**: Verifies KIRO_DESKTOP when only clientSecret is present
+  - **Purpose**: Ensure both clientId AND clientSecret are required for AWS SSO OIDC
+
+#### `TestKiroAuthManagerAwsSsoCredentialsFile`
+
+Tests for loading AWS SSO OIDC credentials from JSON file.
+
+- **`test_load_credentials_from_file_with_client_id_and_secret()`**:
+  - **What it does**: Verifies clientId and clientSecret are loaded from JSON file
+  - **Purpose**: Ensure AWS SSO fields are correctly read from file
+
+- **`test_load_credentials_from_file_auto_detects_aws_sso_oidc()`**:
+  - **What it does**: Verifies auth_type is auto-detected as AWS_SSO_OIDC after loading
+  - **Purpose**: Ensure auth type is automatically determined from file contents
+
+- **`test_load_kiro_desktop_file_stays_kiro_desktop()`**:
+  - **What it does**: Verifies Kiro Desktop file doesn't change auth type to AWS SSO
+  - **Purpose**: Ensure file without clientId/clientSecret stays KIRO_DESKTOP
+
+#### `TestKiroAuthManagerSqliteCredentials`
+
+Tests for loading credentials from SQLite database (kiro-cli format).
+
+- **`test_load_credentials_from_sqlite_success()`**:
+  - **What it does**: Verifies successful credentials loading from SQLite
+  - **Purpose**: Ensure all data is correctly read from database
+
+- **`test_load_credentials_from_sqlite_file_not_found()`**:
+  - **What it does**: Verifies handling of missing SQLite file
+  - **Purpose**: Ensure application doesn't crash when file is missing
+
+- **`test_load_credentials_from_sqlite_loads_token_data()`**:
+  - **What it does**: Verifies token data loading from SQLite
+  - **Purpose**: Ensure access_token, refresh_token, region are loaded
+
+- **`test_load_credentials_from_sqlite_loads_device_registration()`**:
+  - **What it does**: Verifies device registration loading from SQLite
+  - **Purpose**: Ensure client_id and client_secret are loaded
+
+- **`test_load_credentials_from_sqlite_auto_detects_aws_sso_oidc()`**:
+  - **What it does**: Verifies auth_type is auto-detected as AWS_SSO_OIDC after loading
+  - **Purpose**: Ensure auth type is automatically determined from SQLite contents
+
+- **`test_load_credentials_from_sqlite_handles_missing_registration_key()`**:
+  - **What it does**: Verifies handling of missing device-registration key
+  - **Purpose**: Ensure application doesn't crash without device-registration
+
+- **`test_load_credentials_from_sqlite_handles_invalid_json()`**:
+  - **What it does**: Verifies handling of invalid JSON in SQLite
+  - **Purpose**: Ensure application doesn't crash with invalid JSON
+
+- **`test_sqlite_takes_priority_over_json_file()`**:
+  - **What it does**: Verifies SQLite takes priority over JSON file
+  - **Purpose**: Ensure SQLite is loaded instead of JSON when both are specified
+
+#### `TestKiroAuthManagerRefreshTokenRouting`
+
+Tests for `_refresh_token_request()` routing based on auth_type.
+
+- **`test_refresh_token_request_routes_to_kiro_desktop()`**:
+  - **What it does**: Verifies KIRO_DESKTOP calls _refresh_token_kiro_desktop
+  - **Purpose**: Ensure correct routing for Kiro Desktop auth
+
+- **`test_refresh_token_request_routes_to_aws_sso_oidc()`**:
+  - **What it does**: Verifies AWS_SSO_OIDC calls _refresh_token_aws_sso_oidc
+  - **Purpose**: Ensure correct routing for AWS SSO OIDC auth
+
+#### `TestKiroAuthManagerAwsSsoOidcRefresh`
+
+Tests for `_refresh_token_aws_sso_oidc()` method.
+
+- **`test_refresh_token_aws_sso_oidc_success()`**:
+  - **What it does**: Tests successful token refresh via AWS SSO OIDC
+  - **Purpose**: Verify access_token and expires_at are set on success
+
+- **`test_refresh_token_aws_sso_oidc_raises_without_refresh_token()`**:
+  - **What it does**: Verifies ValueError is raised without refresh_token
+  - **Purpose**: Ensure exception is thrown without refresh_token
+
+- **`test_refresh_token_aws_sso_oidc_raises_without_client_id()`**:
+  - **What it does**: Verifies ValueError is raised without client_id
+  - **Purpose**: Ensure exception is thrown without client_id
+
+- **`test_refresh_token_aws_sso_oidc_raises_without_client_secret()`**:
+  - **What it does**: Verifies ValueError is raised without client_secret
+  - **Purpose**: Ensure exception is thrown without client_secret
+
+- **`test_refresh_token_aws_sso_oidc_uses_correct_endpoint()`**:
+  - **What it does**: Verifies correct endpoint is used
+  - **Purpose**: Ensure request goes to https://oidc.{region}.amazonaws.com/token
+
+- **`test_refresh_token_aws_sso_oidc_uses_form_urlencoded()`**:
+  - **What it does**: Verifies form-urlencoded format is used
+  - **Purpose**: Ensure Content-Type = application/x-www-form-urlencoded
+
+- **`test_refresh_token_aws_sso_oidc_sends_correct_grant_type()`**:
+  - **What it does**: Verifies correct grant_type is sent
+  - **Purpose**: Ensure grant_type=refresh_token
+
+- **`test_refresh_token_aws_sso_oidc_updates_tokens()`**:
+  - **What it does**: Verifies access_token and refresh_token are updated
+  - **Purpose**: Ensure both tokens are updated from response
+
+- **`test_refresh_token_aws_sso_oidc_calculates_expiration()`**:
+  - **What it does**: Verifies expiration time is calculated correctly
+  - **Purpose**: Ensure expires_at is calculated based on expiresIn
+
+#### `TestKiroAuthManagerAuthTypeProperty`
+
+Tests for auth_type property and constructor with new parameters.
+
+- **`test_auth_type_property_returns_correct_value()`**:
+  - **What it does**: Verifies auth_type property returns correct value
+  - **Purpose**: Ensure property works correctly
+
+- **`test_init_with_client_id_and_secret()`**:
+  - **What it does**: Verifies initialization with client_id and client_secret
+  - **Purpose**: Ensure parameters are stored in private fields
+
+- **`test_init_with_sqlite_db_parameter()`**:
+  - **What it does**: Verifies initialization with sqlite_db parameter
+  - **Purpose**: Ensure data is loaded from SQLite
 
 ---
 
@@ -403,6 +571,34 @@ Tests for `_warn_timeout_configuration()` function.
 - **`test_warning_contains_recommendation()`**:
   - **What it does**: Verifies warning contains recommendation text
   - **Purpose**: Ensure user gets helpful information about correct configuration
+
+#### `TestAwsSsoOidcUrlConfig`
+
+Tests for AWS SSO OIDC URL configuration.
+
+- **`test_aws_sso_oidc_url_template_exists()`**:
+  - **What it does**: Verifies AWS_SSO_OIDC_URL_TEMPLATE constant exists
+  - **Purpose**: Ensure the template is defined in config
+
+- **`test_get_aws_sso_oidc_url_returns_correct_url()`**:
+  - **What it does**: Verifies get_aws_sso_oidc_url returns correct URL
+  - **Purpose**: Ensure the function formats URL correctly
+
+- **`test_get_aws_sso_oidc_url_with_different_regions()`**:
+  - **What it does**: Verifies URL generation for different regions
+  - **Purpose**: Ensure the function works with various AWS regions
+
+#### `TestKiroCliDbFileConfig`
+
+Tests for KIRO_CLI_DB_FILE configuration.
+
+- **`test_kiro_cli_db_file_config_exists()`**:
+  - **What it does**: Verifies KIRO_CLI_DB_FILE constant exists
+  - **Purpose**: Ensure the config parameter is defined
+
+- **`test_kiro_cli_db_file_from_environment()`**:
+  - **What it does**: Verifies loading KIRO_CLI_DB_FILE from environment variable
+  - **Purpose**: Ensure the value from environment is used
 
 ---
 

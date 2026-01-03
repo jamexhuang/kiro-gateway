@@ -103,12 +103,21 @@ _raw_creds_file = _get_raw_env_value("KIRO_CREDS_FILE") or os.getenv("KIRO_CREDS
 # Normalize path for cross-platform compatibility
 KIRO_CREDS_FILE: str = str(Path(_raw_creds_file)) if _raw_creds_file else ""
 
+# Path to kiro-cli SQLite database (optional, for AWS SSO OIDC authentication)
+# Default location: ~/.local/share/kiro-cli/data.sqlite3 (Linux/macOS)
+# or ~/.local/share/amazon-q/data.sqlite3 (amazon-q-developer-cli)
+_raw_cli_db_file = _get_raw_env_value("KIRO_CLI_DB_FILE") or os.getenv("KIRO_CLI_DB_FILE", "")
+KIRO_CLI_DB_FILE: str = str(Path(_raw_cli_db_file)) if _raw_cli_db_file else ""
+
 # ==================================================================================================
 # Kiro API URL Templates
 # ==================================================================================================
 
-# URL for token refresh
+# URL for token refresh (Kiro Desktop Auth)
 KIRO_REFRESH_URL_TEMPLATE: str = "https://prod.{region}.auth.desktop.kiro.dev/refreshToken"
+
+# URL for token refresh (AWS SSO OIDC - used by kiro-cli)
+AWS_SSO_OIDC_URL_TEMPLATE: str = "https://oidc.{region}.amazonaws.com/token"
 
 # Host for main API (generateAssistantResponse)
 KIRO_API_HOST_TEMPLATE: str = "https://codewhisperer.{region}.amazonaws.com"
@@ -331,14 +340,19 @@ def _warn_timeout_configuration():
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "1.0.7"
+APP_VERSION: str = "1.0.8"
 APP_TITLE: str = "Kiro API Gateway"
 APP_DESCRIPTION: str = "OpenAI-compatible interface for Kiro API (AWS CodeWhisperer). Made by @jwadow"
 
 
 def get_kiro_refresh_url(region: str) -> str:
-    """Return token refresh URL for the specified region."""
+    """Return Kiro Desktop Auth token refresh URL for the specified region."""
     return KIRO_REFRESH_URL_TEMPLATE.format(region=region)
+
+
+def get_aws_sso_oidc_url(region: str) -> str:
+    """Return AWS SSO OIDC token URL for the specified region."""
+    return AWS_SSO_OIDC_URL_TEMPLATE.format(region=region)
 
 
 def get_kiro_api_host(region: str) -> str:
