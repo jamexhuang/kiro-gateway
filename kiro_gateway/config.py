@@ -337,10 +337,58 @@ def _warn_timeout_configuration():
         print(warning_text, file=sys.stderr)
 
 # ==================================================================================================
+# Fake Reasoning Settings (Extended Thinking via Tag Injection)
+# ==================================================================================================
+
+# Enable fake reasoning - injects special tags into requests to enable model reasoning.
+# When enabled, the model will include its reasoning process in the response wrapped in tags.
+# The response is then parsed and converted to OpenAI-compatible reasoning_content format.
+#
+# WHY "FAKE"? This is NOT native extended thinking API support. Instead, we inject
+# <thinking_mode>enabled</thinking_mode> tags into the prompt, and the model responds
+# with <thinking>...</thinking> blocks that we parse and convert to reasoning_content.
+# It works great, but it's a hack - hence "fake" reasoning.
+#
+# Default: true (enabled) - provides premium experience out of the box
+_FAKE_REASONING_RAW: str = os.getenv("FAKE_REASONING", "").lower()
+# Default is True - if env var is not set or empty, enable fake reasoning
+FAKE_REASONING_ENABLED: bool = _FAKE_REASONING_RAW not in ("false", "0", "no", "disabled", "off")
+
+# Maximum thinking length in tokens.
+# This value is injected into the request as <max_thinking_length>{value}</max_thinking_length>
+# Higher values allow for more detailed reasoning but increase response time and token usage.
+# Default: 4000 tokens
+FAKE_REASONING_MAX_TOKENS: int = int(os.getenv("FAKE_REASONING_MAX_TOKENS", "4000"))
+
+# How to handle the thinking block in responses:
+# - "as_reasoning_content": Extract to reasoning_content field (OpenAI-compatible, recommended)
+# - "remove": Remove thinking block completely, return only final answer
+# - "pass": Pass through as-is with original tags in content
+# - "strip_tags": Remove tags but keep thinking content in regular content
+#
+# Default: "as_reasoning_content"
+_FAKE_REASONING_HANDLING_RAW: str = os.getenv("FAKE_REASONING_HANDLING", "as_reasoning_content").lower()
+if _FAKE_REASONING_HANDLING_RAW in ("as_reasoning_content", "remove", "pass", "strip_tags"):
+    FAKE_REASONING_HANDLING: str = _FAKE_REASONING_HANDLING_RAW
+else:
+    FAKE_REASONING_HANDLING: str = "as_reasoning_content"
+
+# List of opening tags to detect thinking blocks.
+# The parser will look for any of these tags at the start of the response.
+# Order matters - first match wins.
+FAKE_REASONING_OPEN_TAGS: List[str] = ["<thinking>", "<think>", "<reasoning>", "<thought>"]
+
+# Maximum size of initial buffer for tag detection (characters).
+# If no thinking tag is found within this limit, content is treated as regular response.
+# Default: 100 characters
+FAKE_REASONING_INITIAL_BUFFER_SIZE: int = 100
+
+
+# ==================================================================================================
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "1.0.8"
+APP_VERSION: str = "1.0.9"
 APP_TITLE: str = "Kiro API Gateway"
 APP_DESCRIPTION: str = "OpenAI-compatible interface for Kiro API (AWS CodeWhisperer). Made by @jwadow"
 

@@ -79,6 +79,7 @@ tests/
 │   ├── test_debug_logger.py        # DebugLogger tests (off/errors/all modes)
 │   ├── test_parsers.py             # AwsEventStreamParser tests
 │   ├── test_streaming.py           # Streaming function tests
+│   ├── test_thinking_parser.py     # ThinkingParser tests (FSM for thinking blocks)
 │   ├── test_tokenizer.py           # Tokenizer tests (tiktoken)
 │   ├── test_http_client.py         # KiroHttpClient tests
 │   └── test_routes.py              # API endpoint tests
@@ -732,7 +733,7 @@ Tests for application log capture (app_logs.txt).
 
 ### `tests/unit/test_converters.py`
 
-Unit tests for **OpenAI <-> Kiro** converters. **68 tests.**
+Unit tests for **OpenAI <-> Kiro** converters. **84 tests.**
 
 #### `TestExtractTextContent`
 
@@ -945,6 +946,74 @@ Tests for `_sanitize_json_schema` function that cleans JSON Schema from fields n
   - **What it does**: Verifies handling of mixed tools list
   - **Purpose**: Ensure empty descriptions are replaced while normal ones are preserved (real scenario from Cline)
 
+#### `TestInjectThinkingTags`
+
+Tests for inject_thinking_tags function with thinking instruction.
+
+- **`test_returns_original_content_when_disabled()`**:
+  - **What it does**: Verifies that content is returned unchanged when fake reasoning is disabled
+  - **Purpose**: Ensure no modification occurs when FAKE_REASONING_ENABLED=False
+
+- **`test_injects_tags_when_enabled()`**:
+  - **What it does**: Verifies that thinking tags are injected when enabled
+  - **Purpose**: Ensure tags are prepended to content when FAKE_REASONING_ENABLED=True
+
+- **`test_injects_thinking_instruction_tag()`**:
+  - **What it does**: Verifies that thinking_instruction tag is injected
+  - **Purpose**: Ensure the quality improvement prompt is included
+
+- **`test_thinking_instruction_contains_english_directive()`**:
+  - **What it does**: Verifies that thinking instruction includes English language directive
+  - **Purpose**: Ensure model is instructed to think in English for better reasoning quality
+
+- **`test_thinking_instruction_contains_systematic_approach()`**:
+  - **What it does**: Verifies that thinking instruction includes systematic approach guidance
+  - **Purpose**: Ensure model is instructed to think systematically
+
+- **`test_thinking_instruction_contains_understanding_step()`**:
+  - **What it does**: Verifies that thinking instruction includes understanding step
+  - **Purpose**: Ensure model is instructed to understand the problem first
+
+- **`test_thinking_instruction_contains_alternatives_consideration()`**:
+  - **What it does**: Verifies that thinking instruction includes alternatives consideration
+  - **Purpose**: Ensure model is instructed to consider multiple approaches
+
+- **`test_thinking_instruction_contains_edge_cases()`**:
+  - **What it does**: Verifies that thinking instruction includes edge cases consideration
+  - **Purpose**: Ensure model is instructed to think about edge cases and potential issues
+
+- **`test_thinking_instruction_contains_verification_step()`**:
+  - **What it does**: Verifies that thinking instruction includes verification step
+  - **Purpose**: Ensure model is instructed to verify reasoning before concluding
+
+- **`test_thinking_instruction_contains_assumptions_challenge()`**:
+  - **What it does**: Verifies that thinking instruction includes assumptions challenge
+  - **Purpose**: Ensure model is instructed to challenge initial assumptions
+
+- **`test_thinking_instruction_contains_quality_over_speed()`**:
+  - **What it does**: Verifies that thinking instruction emphasizes quality over speed
+  - **Purpose**: Ensure model is instructed to prioritize quality of thought
+
+- **`test_uses_configured_max_tokens()`**:
+  - **What it does**: Verifies that FAKE_REASONING_MAX_TOKENS config value is used
+  - **Purpose**: Ensure the configured max tokens value is injected into the tag
+
+- **`test_preserves_empty_content()`**:
+  - **What it does**: Verifies that empty content is handled correctly
+  - **Purpose**: Ensure empty string doesn't cause issues
+
+- **`test_preserves_multiline_content()`**:
+  - **What it does**: Verifies that multiline content is preserved correctly
+  - **Purpose**: Ensure newlines in original content are not corrupted
+
+- **`test_preserves_special_characters()`**:
+  - **What it does**: Verifies that special characters in content are preserved
+  - **Purpose**: Ensure XML-like content in user message doesn't break injection
+
+- **`test_tag_order_is_correct()`**:
+  - **What it does**: Verifies that tags are in the correct order
+  - **Purpose**: Ensure thinking_mode comes first, then max_thinking_length, then instruction, then content
+
 #### `TestBuildKiroPayload`
 
 - **`test_builds_simple_payload()`**: Verifies simple payload building
@@ -1078,6 +1147,121 @@ Unit tests for **AwsEventStreamParser** and helper parsing functions. **52 tests
 - **`test_handles_mixed_events()`**: Verifies mixed events parsing
 - **`test_handles_garbage_between_events()`**: Verifies garbage handling between events
 - **`test_handles_empty_chunk()`**: Verifies empty chunk handling
+
+---
+
+### `tests/unit/test_thinking_parser.py`
+
+Unit tests for **ThinkingParser** (FSM-based parser for thinking blocks in streaming responses). **63 tests.**
+
+#### `TestParserStateEnum`
+
+- **`test_pre_content_value()`**: Verifies PRE_CONTENT enum value is 0
+- **`test_in_thinking_value()`**: Verifies IN_THINKING enum value is 1
+- **`test_streaming_value()`**: Verifies STREAMING enum value is 2
+
+#### `TestThinkingParseResult`
+
+- **`test_default_values()`**: Verifies default values of ThinkingParseResult dataclass
+- **`test_custom_values()`**: Verifies custom values can be set in ThinkingParseResult
+
+#### `TestThinkingParserInitialization`
+
+- **`test_default_initialization()`**: Verifies parser starts in PRE_CONTENT state with empty buffers
+- **`test_custom_handling_mode()`**: Verifies handling_mode can be overridden
+- **`test_custom_open_tags()`**: Verifies open_tags can be overridden
+- **`test_custom_initial_buffer_size()`**: Verifies initial_buffer_size can be overridden
+- **`test_max_tag_length_calculated()`**: Verifies max_tag_length is calculated from open_tags
+
+#### `TestThinkingParserFeedPreContent`
+
+- **`test_empty_content_returns_empty_result()`**: Verifies empty content doesn't change state
+- **`test_detects_thinking_tag()`**: Verifies `<thinking>` tag detection and state transition
+- **`test_detects_think_tag()`**: Verifies `<think>` tag detection
+- **`test_detects_reasoning_tag()`**: Verifies `<reasoning>` tag detection
+- **`test_detects_thought_tag()`**: Verifies `<thought>` tag detection
+- **`test_strips_leading_whitespace_for_tag_detection()`**: Verifies leading whitespace is stripped
+- **`test_buffers_partial_tag()`**: Verifies partial tag is buffered
+- **`test_completes_partial_tag()`**: Verifies partial tag is completed across chunks
+- **`test_no_tag_transitions_to_streaming()`**: Verifies transition to STREAMING when no tag found
+- **`test_buffer_exceeds_limit_transitions_to_streaming()`**: Verifies transition when buffer exceeds limit
+
+#### `TestThinkingParserFeedInThinking`
+
+- **`test_accumulates_thinking_content()`**: Verifies thinking content is accumulated
+- **`test_detects_closing_tag()`**: Verifies closing tag detection and state transition
+- **`test_regular_content_after_closing_tag()`**: Verifies content after closing tag is regular_content
+- **`test_strips_whitespace_after_closing_tag()`**: Verifies whitespace is stripped after closing tag
+- **`test_cautious_buffering()`**: Verifies cautious buffering keeps last max_tag_length chars
+- **`test_split_closing_tag()`**: Verifies split closing tag is handled
+
+#### `TestThinkingParserFeedStreaming`
+
+- **`test_passes_content_through()`**: Verifies content is passed through in STREAMING state
+- **`test_ignores_thinking_tags_in_streaming()`**: Verifies thinking tags are ignored in STREAMING state
+
+#### `TestThinkingParserFinalize`
+
+- **`test_flushes_thinking_buffer()`**: Verifies thinking buffer is flushed on finalize
+- **`test_flushes_initial_buffer()`**: Verifies initial buffer is flushed on finalize
+- **`test_clears_buffers_after_finalize()`**: Verifies buffers are cleared after finalize
+
+#### `TestThinkingParserReset`
+
+- **`test_resets_to_initial_state()`**: Verifies reset returns parser to initial state
+
+#### `TestThinkingParserFoundThinkingBlock`
+
+- **`test_false_initially()`**: Verifies found_thinking_block is False initially
+- **`test_true_after_tag_detection()`**: Verifies found_thinking_block is True after tag detection
+- **`test_false_when_no_tag()`**: Verifies found_thinking_block is False when no tag found
+
+#### `TestThinkingParserProcessForOutput`
+
+- **`test_as_reasoning_content_mode()`**: Verifies as_reasoning_content mode returns content as-is
+- **`test_remove_mode()`**: Verifies remove mode returns None
+- **`test_pass_mode_first_chunk()`**: Verifies pass mode adds opening tag to first chunk
+- **`test_pass_mode_last_chunk()`**: Verifies pass mode adds closing tag to last chunk
+- **`test_pass_mode_first_and_last_chunk()`**: Verifies pass mode adds both tags when first and last
+- **`test_pass_mode_middle_chunk()`**: Verifies pass mode returns content as-is for middle chunk
+- **`test_strip_tags_mode()`**: Verifies strip_tags mode returns content without tags
+- **`test_none_content_returns_none()`**: Verifies None content returns None
+- **`test_empty_content_returns_none()`**: Verifies empty content returns None
+
+#### `TestThinkingParserFullFlow`
+
+Integration tests for full parsing flow.
+
+- **`test_complete_thinking_block()`**: Verifies complete thinking block parsing
+- **`test_multi_chunk_thinking_block()`**: Verifies thinking block split across multiple chunks
+- **`test_no_thinking_block()`**: Verifies handling of content without thinking block
+- **`test_thinking_block_with_newlines()`**: Verifies thinking block with newlines after closing tag
+- **`test_empty_thinking_block()`**: Verifies empty thinking block handling
+- **`test_thinking_block_only_whitespace_after()`**: Verifies thinking block with only whitespace after
+
+#### `TestThinkingParserEdgeCases`
+
+- **`test_nested_tags_not_supported()`**: Verifies nested tags are not specially handled
+- **`test_tag_in_middle_of_content()`**: Verifies tag in middle of content is not detected
+- **`test_malformed_closing_tag()`**: Verifies malformed closing tag is not detected
+- **`test_unicode_content()`**: Verifies Unicode content is handled correctly
+- **`test_very_long_thinking_content()`**: Verifies very long thinking content is handled
+- **`test_special_characters_in_content()`**: Verifies special characters are handled
+- **`test_multiple_feeds_after_streaming()`**: Verifies multiple feeds in STREAMING state
+
+#### `TestThinkingParserConfigIntegration`
+
+- **`test_uses_config_handling_mode()`**: Verifies parser uses FAKE_REASONING_HANDLING from config
+- **`test_uses_config_open_tags()`**: Verifies parser uses FAKE_REASONING_OPEN_TAGS from config
+- **`test_default_initial_buffer_size_from_config()`**: Verifies parser uses default initial_buffer_size from config
+
+#### `TestInjectThinkingTags`
+
+Tests for inject_thinking_tags function in converters.
+
+- **`test_injects_tags_when_enabled()`**: Verifies tags are injected when FAKE_REASONING_ENABLED is True
+- **`test_no_injection_when_disabled()`**: Verifies tags are not injected when FAKE_REASONING_ENABLED is False
+- **`test_injection_preserves_content()`**: Verifies original content is preserved after injection
 
 ---
 
