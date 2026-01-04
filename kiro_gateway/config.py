@@ -389,7 +389,7 @@ FAKE_REASONING_INITIAL_BUFFER_SIZE: int = int(os.getenv("FAKE_REASONING_INITIAL_
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "1.0.9"
+APP_VERSION: str = "1.0.8"
 APP_TITLE: str = "Kiro API Gateway"
 APP_DESCRIPTION: str = "OpenAI-compatible interface for Kiro API (AWS CodeWhisperer). Made by @jwadow"
 
