@@ -36,7 +36,9 @@
 ### Prerequisites
 
 - Python 3.10+
-- [Kiro IDE](https://kiro.dev/) with logged in account
+- One of the following:
+  - [Kiro IDE](https://kiro.dev/) with logged in account, OR
+  - [Kiro CLI](https://kiro.dev/cli/) with AWS SSO (Builder ID)
 
 ### Installation
 
@@ -184,10 +186,23 @@ Both key formats are supported for compatibility with different kiro-cli version
 
 </details>
 
-### Getting the Refresh Token
+### Getting Credentials
 
-The refresh token can be obtained by intercepting Kiro IDE traffic. Look for requests to:
-- `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
+**For Kiro IDE users:**
+- Log in to Kiro IDE and use Option 1 above (JSON credentials file)
+- The credentials file is created automatically after login
+
+**For Kiro CLI users:**
+- Log in with `kiro-cli login` and use Option 3 or Option 4 above
+- No manual token extraction needed!
+
+<details>
+<summary>🔧 Advanced: Manual token extraction</summary>
+
+If you need to manually extract the refresh token (e.g., for debugging), you can intercept Kiro IDE traffic:
+- Look for requests to: `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
+
+</details>
 
 ---
 
