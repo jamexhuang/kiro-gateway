@@ -131,6 +131,7 @@ class KiroAuthManager:
         # AWS SSO OIDC specific fields
         self._client_id: Optional[str] = client_id
         self._client_secret: Optional[str] = client_secret
+        self._scopes: Optional[list] = None  # OAuth scopes for AWS SSO OIDC
         
         self._access_token: Optional[str] = None
         self._expires_at: Optional[datetime] = None
@@ -191,9 +192,12 @@ class KiroAuthManager:
             conn = sqlite3.connect(str(path))
             cursor = conn.cursor()
             
-            # Load token data
-            cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:token",))
+            # Load token data (try both kiro-cli and codewhisperer key formats)
+            cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("kirocli:odic:token",))
             token_row = cursor.fetchone()
+            if not token_row:
+                cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:token",))
+                token_row = cursor.fetchone()
             
             if token_row:
                 token_data = json.loads(token_row[0])
@@ -210,6 +214,10 @@ class KiroAuthManager:
                         self._api_host = get_kiro_api_host(self._region)
                         self._q_host = get_kiro_q_host(self._region)
                     
+                    # Load scopes if available
+                    if 'scopes' in token_data:
+                        self._scopes = token_data['scopes']
+                    
                     # Parse expires_at (RFC3339 format)
                     if 'expires_at' in token_data:
                         try:
@@ -222,9 +230,12 @@ class KiroAuthManager:
                         except Exception as e:
                             logger.warning(f"Failed to parse expires_at from SQLite: {e}")
             
-            # Load device registration (client_id, client_secret)
-            cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:device-registration",))
+            # Load device registration (client_id, client_secret) - try both key formats
+            cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("kirocli:odic:device-registration",))
             registration_row = cursor.fetchone()
+            if not registration_row:
+                cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:device-registration",))
+                registration_row = cursor.fetchone()
             
             if registration_row:
                 registration_data = json.loads(registration_row[0])
@@ -470,6 +481,10 @@ class KiroAuthManager:
             "client_secret": self._client_secret,
             "refresh_token": self._refresh_token,
         }
+        
+        # Add scopes if available (required for some AWS SSO configurations)
+        if self._scopes:
+            data["scope"] = " ".join(self._scopes)
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
         }

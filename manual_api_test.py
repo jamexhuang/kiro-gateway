@@ -53,6 +53,8 @@ KIRO_CLI_DB_FILE = os.getenv("KIRO_CLI_DB_FILE", "")
 # AWS SSO OIDC specific credentials
 CLIENT_ID = None
 CLIENT_SECRET = None
+SCOPES = None
+AUTH_TOKEN = None
 AUTH_TYPE = AuthType.KIRO_DESKTOP
 
 
@@ -105,7 +107,7 @@ def load_credentials_from_json(file_path: str) -> bool:
 
 def load_credentials_from_sqlite(db_path: str) -> bool:
     """Load credentials from kiro-cli SQLite database."""
-    global REFRESH_TOKEN, CLIENT_ID, CLIENT_SECRET, AUTH_TYPE, KIRO_REGION
+    global REFRESH_TOKEN, CLIENT_ID, CLIENT_SECRET, AUTH_TYPE, KIRO_REGION, SCOPES, AUTH_TOKEN
     global KIRO_API_HOST, KIRO_DESKTOP_TOKEN_URL, AWS_SSO_OIDC_TOKEN_URL
     
     try:
@@ -117,27 +119,39 @@ def load_credentials_from_sqlite(db_path: str) -> bool:
         conn = sqlite3.connect(str(path))
         cursor = conn.cursor()
         
-        # Load token data
-        cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:token",))
+        # Load token data (try both kiro-cli and codewhisperer key formats)
+        cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("kirocli:odic:token",))
         token_row = cursor.fetchone()
+        if not token_row:
+            cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:token",))
+            token_row = cursor.fetchone()
         
         if token_row:
             token_data = json.loads(token_row[0])
             if token_data:
-                if 'access_token' in token_data:
-                    # We have a valid access token, but we need refresh_token
-                    pass
+                # Check if we have a valid access token
+                if 'access_token' in token_data and 'expires_at' in token_data:
+                    from datetime import datetime
+                    expires_at = datetime.fromisoformat(token_data['expires_at'].replace('Z', '+00:00'))
+                    if expires_at > datetime.now().astimezone():
+                        AUTH_TOKEN = token_data['access_token']
+                        logger.info("Found valid access token in database (will use after HEADERS init)")
                 if 'refresh_token' in token_data:
                     REFRESH_TOKEN = token_data['refresh_token']
+                if 'scopes' in token_data:
+                    SCOPES = token_data['scopes']
                 if 'region' in token_data:
                     KIRO_REGION = token_data['region']
                     KIRO_API_HOST = f"https://q.{KIRO_REGION}.amazonaws.com"
                     KIRO_DESKTOP_TOKEN_URL = f"https://prod.{KIRO_REGION}.auth.desktop.kiro.dev/refreshToken"
                     AWS_SSO_OIDC_TOKEN_URL = f"https://oidc.{KIRO_REGION}.amazonaws.com/token"
         
-        # Load device registration (client_id, client_secret)
-        cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:device-registration",))
+        # Load device registration (client_id, client_secret) - try both key formats
+        cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("kirocli:odic:device-registration",))
         registration_row = cursor.fetchone()
+        if not registration_row:
+            cursor.execute("SELECT value FROM auth_kv WHERE key = ?", ("codewhisperer:odic:device-registration",))
+            registration_row = cursor.fetchone()
         
         if registration_row:
             registration_data = json.loads(registration_row[0])
@@ -257,6 +271,11 @@ def refresh_auth_token_aws_sso_oidc():
         "client_secret": CLIENT_SECRET,
         "refresh_token": REFRESH_TOKEN,
     }
+    
+    # Add scopes if available
+    if SCOPES:
+        data["scope"] = " ".join(SCOPES)
+    
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
     }
@@ -280,7 +299,34 @@ def refresh_auth_token_aws_sso_oidc():
         
     except requests.exceptions.RequestException as e:
         logger.error(f"Error refreshing token via AWS SSO OIDC: {e}")
-        if hasattr(e, 'response') and e.response:
+        if hasattr(e, 'response') and e.response is not None:
+            logger.error(f"Server response: {e.response.status_code} {e.response.text}")
+        return False
+
+
+def get_profile_arn():
+    """Gets the profile ARN from ListAvailableProfiles endpoint."""
+    global PROFILE_ARN
+    logger.info("Getting profile ARN from /ListAvailableProfiles...")
+    url = f"{KIRO_API_HOST}/ListAvailableProfiles"
+    
+    try:
+        response = requests.get(url, headers=HEADERS)
+        response.raise_for_status()
+        data = response.json()
+        
+        profiles = data.get("profiles", [])
+        if profiles:
+            # Use the first available profile
+            PROFILE_ARN = profiles[0].get("arn")
+            logger.info(f"Found profile ARN: {PROFILE_ARN}")
+            return True
+        else:
+            logger.warning("No profiles found")
+            return False
+    except requests.exceptions.RequestException as e:
+        logger.error(f"ListAvailableProfiles failed: {e}")
+        if hasattr(e, 'response') and e.response is not None:
             logger.error(f"Server response: {e.response.status_code} {e.response.text}")
         return False
 
@@ -329,9 +375,13 @@ def test_generate_content():
                 }
             },
             "history": []
-        },
-        "profileArn": PROFILE_ARN
+        }
     }
+    
+    # Only add profileArn if it's set and not AWS SSO OIDC
+    # AWS SSO OIDC (Builder ID) users don't need profileArn and it causes 403 if sent
+    if PROFILE_ARN and AUTH_TYPE != AuthType.AWS_SSO_OIDC:
+        payload["profileArn"] = PROFILE_ARN
 
     try:
         with requests.post(url, headers=HEADERS, json=payload, stream=True) as response:
@@ -359,9 +409,19 @@ if __name__ == "__main__":
     logger.info(f"  Region: {KIRO_REGION}")
     logger.info(f"  API Host: {KIRO_API_HOST}")
 
-    token_ok = refresh_auth_token()
+    # Check if we already have a valid token from the database
+    if AUTH_TOKEN:
+        HEADERS['Authorization'] = f"Bearer {AUTH_TOKEN}"
+        logger.info("Using existing valid access token from database")
+        token_ok = True
+    else:
+        token_ok = refresh_auth_token()
 
     if token_ok:
+        # Get profile ARN dynamically for AWS SSO OIDC users
+        if AUTH_TYPE == AuthType.AWS_SSO_OIDC:
+            get_profile_arn()
+        
         models_ok = test_get_models()
         generate_ok = test_generate_content()
 
