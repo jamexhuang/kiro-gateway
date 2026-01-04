@@ -112,11 +112,11 @@ If you use `kiro-cli` with AWS IAM Identity Center (SSO), the gateway will autom
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
 
-# Required for AWS SSO (not included in SSO cache file)
-PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
-
 # Password to protect YOUR proxy server
 PROXY_API_KEY="my-super-secret-password-123"
+
+# Note: PROFILE_ARN is NOT needed for AWS SSO OIDC (Builder ID) users
+# The gateway will work without it
 ```
 
 <details>
@@ -135,7 +135,7 @@ AWS SSO credentials files (from `~/.aws/sso/cache/`) contain:
 }
 ```
 
-**Note:** AWS SSO credentials don't include `profileArn`. You must specify it separately via `PROFILE_ARN` environment variable. You can get your profile ARN by running `kiro-cli whoami`.
+**Note:** AWS SSO OIDC (Builder ID) users do NOT need `profileArn`. The gateway will work without it (if specified, it will be ignored).
 
 </details>
 
@@ -161,11 +161,11 @@ If you use `kiro-cli` and prefer to use its SQLite database directly:
 ```env
 KIRO_CLI_DB_FILE="~/.local/share/kiro-cli/data.sqlite3"
 
-# Required for AWS SSO (not included in database)
-PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
-
 # Password to protect YOUR proxy server
 PROXY_API_KEY="my-super-secret-password-123"
+
+# Note: PROFILE_ARN is NOT needed for AWS SSO OIDC (Builder ID) users
+# The gateway will work without it
 ```
 
 <details>
@@ -177,8 +177,10 @@ PROXY_API_KEY="my-super-secret-password-123"
 | amazon-q-developer-cli | `~/.local/share/amazon-q/data.sqlite3` |
 
 The gateway reads credentials from the `auth_kv` table which stores:
-- `codewhisperer:odic:token` — access token, refresh token, expiration
-- `codewhisperer:odic:device-registration` — client ID and secret
+- `kirocli:odic:token` or `codewhisperer:odic:token` — access token, refresh token, expiration
+- `kirocli:odic:device-registration` or `codewhisperer:odic:device-registration` — client ID and secret
+
+Both key formats are supported for compatibility with different kiro-cli versions.
 
 </details>
 
