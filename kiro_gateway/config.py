@@ -77,11 +77,26 @@ def _get_raw_env_value(var_name: str, env_file: str = ".env") -> Optional[str]:
     return None
 
 # ==================================================================================================
+# Server Settings
+# ==================================================================================================
+
+# Server host (default: 0.0.0.0 - listen on all interfaces)
+# Use "127.0.0.1" to only allow local connections
+DEFAULT_SERVER_HOST: str = "0.0.0.0"
+SERVER_HOST: str = os.getenv("SERVER_HOST", DEFAULT_SERVER_HOST)
+
+# Server port (default: 8000)
+# Can be overridden by CLI: python main.py --port 9000
+# Or by uvicorn directly: uvicorn main:app --port 9000
+DEFAULT_SERVER_PORT: int = 8000
+SERVER_PORT: int = int(os.getenv("SERVER_PORT", str(DEFAULT_SERVER_PORT)))
+
+# ==================================================================================================
 # Proxy Server Settings
 # ==================================================================================================
 
 # API key for proxy access (clients must pass it in Authorization header)
-PROXY_API_KEY: str = os.getenv("PROXY_API_KEY", "changeme_proxy_secret")
+PROXY_API_KEY: str = os.getenv("PROXY_API_KEY", "my-super-secret-password-123")
 
 # ==================================================================================================
 # Kiro API Credentials
@@ -389,8 +404,8 @@ FAKE_REASONING_INITIAL_BUFFER_SIZE: int = int(os.getenv("FAKE_REASONING_INITIAL_
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "1.0.8"
-APP_TITLE: str = "Kiro API Gateway"
+APP_VERSION: str = "2.0-dev"
+APP_TITLE: str = "Kiro Gateway"
 APP_DESCRIPTION: str = "OpenAI-compatible interface for Kiro API (AWS CodeWhisperer). Made by @jwadow"
 
 

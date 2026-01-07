@@ -341,6 +341,135 @@ class TestAwsSsoOidcUrlConfig:
             assert url == expected
 
 
+class TestServerHostConfig:
+    """Tests for SERVER_HOST configuration."""
+    
+    def test_default_server_host_is_0_0_0_0(self):
+        """
+        What it does: Verifies that SERVER_HOST defaults to 0.0.0.0.
+        Purpose: Ensure that 0.0.0.0 (all interfaces) is used when no environment variable is set.
+        """
+        print("Setup: Removing SERVER_HOST from environment...")
+        
+        with patch.dict(os.environ, {}, clear=False):
+            if "SERVER_HOST" in os.environ:
+                del os.environ["SERVER_HOST"]
+            
+            import importlib
+            import kiro_gateway.config as config_module
+            importlib.reload(config_module)
+            
+            print(f"SERVER_HOST: {config_module.SERVER_HOST}")
+            print(f"DEFAULT_SERVER_HOST: {config_module.DEFAULT_SERVER_HOST}")
+            print(f"Comparing: Expected '0.0.0.0', Got '{config_module.SERVER_HOST}'")
+            assert config_module.SERVER_HOST == "0.0.0.0"
+            assert config_module.DEFAULT_SERVER_HOST == "0.0.0.0"
+    
+    def test_server_host_from_environment(self):
+        """
+        What it does: Verifies loading SERVER_HOST from environment variable.
+        Purpose: Ensure that the value from environment is used.
+        """
+        print("Setup: Setting SERVER_HOST=127.0.0.1...")
+        
+        with patch.dict(os.environ, {"SERVER_HOST": "127.0.0.1"}):
+            import importlib
+            import kiro_gateway.config as config_module
+            importlib.reload(config_module)
+            
+            print(f"SERVER_HOST: {config_module.SERVER_HOST}")
+            print(f"Comparing: Expected '127.0.0.1', Got '{config_module.SERVER_HOST}'")
+            assert config_module.SERVER_HOST == "127.0.0.1"
+    
+    def test_server_host_custom_value(self):
+        """
+        What it does: Verifies setting SERVER_HOST to a custom IP address.
+        Purpose: Ensure that any valid IP address can be used.
+        """
+        print("Setup: Setting SERVER_HOST=192.168.1.100...")
+        
+        with patch.dict(os.environ, {"SERVER_HOST": "192.168.1.100"}):
+            import importlib
+            import kiro_gateway.config as config_module
+            importlib.reload(config_module)
+            
+            print(f"SERVER_HOST: {config_module.SERVER_HOST}")
+            assert config_module.SERVER_HOST == "192.168.1.100"
+
+
+class TestServerPortConfig:
+    """Tests for SERVER_PORT configuration."""
+    
+    def test_default_server_port_is_8000(self):
+        """
+        What it does: Verifies that SERVER_PORT defaults to 8000.
+        Purpose: Ensure that 8000 is used when no environment variable is set.
+        """
+        print("Setup: Removing SERVER_PORT from environment...")
+        
+        with patch.dict(os.environ, {}, clear=False):
+            if "SERVER_PORT" in os.environ:
+                del os.environ["SERVER_PORT"]
+            
+            import importlib
+            import kiro_gateway.config as config_module
+            importlib.reload(config_module)
+            
+            print(f"SERVER_PORT: {config_module.SERVER_PORT}")
+            print(f"DEFAULT_SERVER_PORT: {config_module.DEFAULT_SERVER_PORT}")
+            print(f"Comparing: Expected 8000, Got {config_module.SERVER_PORT}")
+            assert config_module.SERVER_PORT == 8000
+            assert config_module.DEFAULT_SERVER_PORT == 8000
+    
+    def test_server_port_from_environment(self):
+        """
+        What it does: Verifies loading SERVER_PORT from environment variable.
+        Purpose: Ensure that the value from environment is used.
+        """
+        print("Setup: Setting SERVER_PORT=9000...")
+        
+        with patch.dict(os.environ, {"SERVER_PORT": "9000"}):
+            import importlib
+            import kiro_gateway.config as config_module
+            importlib.reload(config_module)
+            
+            print(f"SERVER_PORT: {config_module.SERVER_PORT}")
+            print(f"Comparing: Expected 9000, Got {config_module.SERVER_PORT}")
+            assert config_module.SERVER_PORT == 9000
+    
+    def test_server_port_custom_value(self):
+        """
+        What it does: Verifies setting SERVER_PORT to a custom port number.
+        Purpose: Ensure that any valid port number can be used.
+        """
+        print("Setup: Setting SERVER_PORT=3000...")
+        
+        with patch.dict(os.environ, {"SERVER_PORT": "3000"}):
+            import importlib
+            import kiro_gateway.config as config_module
+            importlib.reload(config_module)
+            
+            print(f"SERVER_PORT: {config_module.SERVER_PORT}")
+            assert config_module.SERVER_PORT == 3000
+    
+    def test_server_port_is_integer(self):
+        """
+        What it does: Verifies that SERVER_PORT is converted to integer.
+        Purpose: Ensure that string from environment is converted to int.
+        """
+        print("Setup: Setting SERVER_PORT=8080 (as string)...")
+        
+        with patch.dict(os.environ, {"SERVER_PORT": "8080"}):
+            import importlib
+            import kiro_gateway.config as config_module
+            importlib.reload(config_module)
+            
+            print(f"SERVER_PORT: {config_module.SERVER_PORT}")
+            print(f"Type: {type(config_module.SERVER_PORT)}")
+            assert isinstance(config_module.SERVER_PORT, int)
+            assert config_module.SERVER_PORT == 8080
+
+
 class TestKiroCliDbFileConfig:
     """Tests for KIRO_CLI_DB_FILE configuration."""
     

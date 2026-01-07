@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚀 Kiro Gateway
+# 👻 Kiro Gateway
 
 **OpenAI-compatible proxy gateway for Kiro IDE API (AWS CodeWhisperer)**
 
@@ -52,10 +52,13 @@ pip install -r requirements.txt
 
 # Configure (see Configuration section)
 cp .env.example .env
-# Edit .env with your credentials
+# Copy and edit .env with your credentials
 
 # Start the server
 python main.py
+
+# Or with custom port (if 8000 is busy)
+python main.py --port 9000
 ```
 
 The server will be available at `http://localhost:8000`

@@ -18,16 +18,28 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 """
-Kiro API Gateway - OpenAI-compatible interface for Kiro API.
+Kiro Gateway - OpenAI-compatible interface for Kiro API.
 
 Application entry point. Creates FastAPI app and connects routes.
 
 Usage:
-    uvicorn main:app --host 0.0.0.0 --port 8000
-    or directly:
+    # Using default settings (host: 0.0.0.0, port: 8000)
     python main.py
+    
+    # With CLI arguments (highest priority)
+    python main.py --port 9000
+    python main.py --host 127.0.0.1 --port 9000
+    
+    # With environment variables (medium priority)
+    SERVER_PORT=9000 python main.py
+    
+    # Using uvicorn directly (uvicorn handles its own CLI args)
+    uvicorn main:app --host 0.0.0.0 --port 8000
+
+Priority: CLI args > Environment variables > Default values
 """
 
+import argparse
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -49,6 +61,10 @@ from kiro_gateway.config import (
     KIRO_CLI_DB_FILE,
     PROXY_API_KEY,
     LOG_LEVEL,
+    SERVER_HOST,
+    SERVER_PORT,
+    DEFAULT_SERVER_HOST,
+    DEFAULT_SERVER_PORT,
     _warn_deprecated_debug_setting,
     _warn_timeout_configuration,
 )
@@ -299,15 +315,154 @@ UVICORN_LOG_CONFIG = {
 }
 
 
+def parse_cli_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments for server configuration.
+    
+    CLI arguments have the highest priority, overriding both
+    environment variables and default values.
+    
+    Returns:
+        Parsed arguments namespace with host and port values
+    """
+    parser = argparse.ArgumentParser(
+        description=f"{APP_TITLE} - {APP_DESCRIPTION}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Configuration Priority (highest to lowest):
+  1. CLI arguments (--host, --port)
+  2. Environment variables (SERVER_HOST, SERVER_PORT)
+  3. Default values (0.0.0.0:8000)
+
+Examples:
+  python main.py                          # Use defaults or env vars
+  python main.py --port 9000              # Override port only
+  python main.py --host 127.0.0.1         # Local connections only
+  python main.py -H 0.0.0.0 -p 8080       # Short form
+  
+  SERVER_PORT=9000 python main.py         # Via environment
+  uvicorn main:app --port 9000            # Via uvicorn directly
+        """
+    )
+    
+    parser.add_argument(
+        "-H", "--host",
+        type=str,
+        default=None,  # None means "use env or default"
+        metavar="HOST",
+        help=f"Server host address (default: {DEFAULT_SERVER_HOST}, env: SERVER_HOST)"
+    )
+    
+    parser.add_argument(
+        "-p", "--port",
+        type=int,
+        default=None,  # None means "use env or default"
+        metavar="PORT",
+        help=f"Server port (default: {DEFAULT_SERVER_PORT}, env: SERVER_PORT)"
+    )
+    
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"%(prog)s {APP_VERSION}"
+    )
+    
+    return parser.parse_args()
+
+
+def resolve_server_config(args: argparse.Namespace) -> tuple[str, int]:
+    """
+    Resolve final server configuration using priority hierarchy.
+    
+    Priority (highest to lowest):
+    1. CLI arguments (--host, --port)
+    2. Environment variables (SERVER_HOST, SERVER_PORT)
+    3. Default values (0.0.0.0:8000)
+    
+    Args:
+        args: Parsed CLI arguments
+        
+    Returns:
+        Tuple of (host, port) with resolved values
+    """
+    # Host resolution: CLI > ENV > Default
+    if args.host is not None:
+        final_host = args.host
+        host_source = "CLI argument"
+    elif SERVER_HOST != DEFAULT_SERVER_HOST:
+        final_host = SERVER_HOST
+        host_source = "environment variable"
+    else:
+        final_host = DEFAULT_SERVER_HOST
+        host_source = "default"
+    
+    # Port resolution: CLI > ENV > Default
+    if args.port is not None:
+        final_port = args.port
+        port_source = "CLI argument"
+    elif SERVER_PORT != DEFAULT_SERVER_PORT:
+        final_port = SERVER_PORT
+        port_source = "environment variable"
+    else:
+        final_port = DEFAULT_SERVER_PORT
+        port_source = "default"
+    
+    # Log configuration sources for transparency
+    logger.debug(f"Host: {final_host} (from {host_source})")
+    logger.debug(f"Port: {final_port} (from {port_source})")
+    
+    return final_host, final_port
+
+
+def print_startup_banner(host: str, port: int) -> None:
+    """
+    Print a startup banner with server information.
+    
+    Args:
+        host: Server host address
+        port: Server port
+    """
+    # ANSI color codes
+    GREEN = "\033[92m"
+    WHITE = "\033[97m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RESET = "\033[0m"
+    
+    # Determine display URL
+    display_host = "localhost" if host == "0.0.0.0" else host
+    url = f"http://{display_host}:{port}"
+    
+    print()
+    print(f"  {WHITE}{BOLD}👻 {APP_TITLE} v{APP_VERSION}{RESET}")
+    print()
+    print(f"  {WHITE}Server running at:{RESET}")
+    print(f"  {GREEN}{BOLD}➜  {url}{RESET}")
+    print()
+    print(f"  {DIM}API Docs:      {url}/docs{RESET}")
+    print(f"  {DIM}Health Check:  {url}/health{RESET}")
+    print()
+
+
 # --- Entry Point ---
 if __name__ == "__main__":
     import uvicorn
-    logger.info("Starting Uvicorn server...")
+    
+    # Parse CLI arguments
+    args = parse_cli_args()
+    
+    # Resolve final configuration with priority hierarchy
+    final_host, final_port = resolve_server_config(args)
+    
+    # Print startup banner
+    print_startup_banner(final_host, final_port)
+    
+    logger.info(f"Starting Uvicorn server on {final_host}:{final_port}...")
     
     # Use string reference to avoid double module import
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8000,
+        host=final_host,
+        port=final_port,
         log_config=UVICORN_LOG_CONFIG,
     )

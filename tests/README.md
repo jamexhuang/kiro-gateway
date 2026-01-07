@@ -74,9 +74,10 @@ tests/
 ├── unit/                            # Unit tests for individual components
 │   ├── test_auth_manager.py        # KiroAuthManager tests
 │   ├── test_cache.py               # ModelInfoCache tests
-│   ├── test_config.py              # Configuration tests (LOG_LEVEL, etc.)
+│   ├── test_config.py              # Configuration tests (SERVER_HOST, SERVER_PORT, LOG_LEVEL, etc.)
 │   ├── test_converters.py          # OpenAI <-> Kiro converter tests
 │   ├── test_debug_logger.py        # DebugLogger tests (off/errors/all modes)
+│   ├── test_main_cli.py            # CLI argument parsing tests (--host, --port)
 │   ├── test_parsers.py             # AwsEventStreamParser tests
 │   ├── test_streaming.py           # Streaming function tests
 │   ├── test_thinking_parser.py     # ThinkingParser tests (FSM for thinking blocks)
@@ -545,7 +546,43 @@ Unit tests for **ModelInfoCache** (model metadata cache). **23 tests.**
 
 ### `tests/unit/test_config.py`
 
-Unit tests for **configuration module** (loading settings from environment variables). **13 tests.**
+Unit tests for **configuration module** (loading settings from environment variables). **21 tests.**
+
+#### `TestServerHostConfig`
+
+Tests for SERVER_HOST configuration.
+
+- **`test_default_server_host_is_0_0_0_0()`**:
+  - **What it does**: Verifies that SERVER_HOST defaults to 0.0.0.0
+  - **Purpose**: Ensure that 0.0.0.0 (all interfaces) is used when no environment variable is set
+
+- **`test_server_host_from_environment()`**:
+  - **What it does**: Verifies loading SERVER_HOST from environment variable
+  - **Purpose**: Ensure that the value from environment is used
+
+- **`test_server_host_custom_value()`**:
+  - **What it does**: Verifies setting SERVER_HOST to a custom IP address
+  - **Purpose**: Ensure that any valid IP address can be used
+
+#### `TestServerPortConfig`
+
+Tests for SERVER_PORT configuration.
+
+- **`test_default_server_port_is_8000()`**:
+  - **What it does**: Verifies that SERVER_PORT defaults to 8000
+  - **Purpose**: Ensure that 8000 is used when no environment variable is set
+
+- **`test_server_port_from_environment()`**:
+  - **What it does**: Verifies loading SERVER_PORT from environment variable
+  - **Purpose**: Ensure that the value from environment is used
+
+- **`test_server_port_custom_value()`**:
+  - **What it does**: Verifies setting SERVER_PORT to a custom port number
+  - **Purpose**: Ensure that any valid port number can be used
+
+- **`test_server_port_is_integer()`**:
+  - **What it does**: Verifies that SERVER_PORT is converted to integer
+  - **Purpose**: Ensure that string from environment is converted to int
 
 #### `TestLogLevelConfig`
 
@@ -1756,6 +1793,112 @@ Unit tests for **API endpoints** (/v1/models, /v1/chat/completions). **22 tests.
 
 - **`test_router_has_all_endpoints()`**: Verifies all endpoints presence in router
 - **`test_router_methods()`**: Verifies endpoint HTTP methods
+
+---
+
+### `tests/unit/test_main_cli.py`
+
+Unit tests for **main.py CLI functions** (command-line argument parsing and server configuration). **17 tests.**
+
+#### `TestParseCliArgs`
+
+Tests for parse_cli_args() function.
+
+- **`test_default_values_are_none()`**:
+  - **What it does**: Verifies that default values for host and port are None
+  - **Purpose**: Ensure that None indicates "use env or default" in priority resolution
+
+- **`test_port_argument_long_form()`**:
+  - **What it does**: Verifies that --port argument is parsed correctly
+  - **Purpose**: Ensure long form --port works
+
+- **`test_port_argument_short_form()`**:
+  - **What it does**: Verifies that -p argument is parsed correctly
+  - **Purpose**: Ensure short form -p works
+
+- **`test_host_argument_long_form()`**:
+  - **What it does**: Verifies that --host argument is parsed correctly
+  - **Purpose**: Ensure long form --host works
+
+- **`test_host_argument_short_form()`**:
+  - **What it does**: Verifies that -H argument is parsed correctly
+  - **Purpose**: Ensure short form -H works
+
+- **`test_both_arguments_together()`**:
+  - **What it does**: Verifies that both --host and --port can be used together
+  - **Purpose**: Ensure both arguments work simultaneously
+
+- **`test_short_forms_together()`**:
+  - **What it does**: Verifies that both -H and -p can be used together
+  - **Purpose**: Ensure short forms work simultaneously
+
+#### `TestResolveServerConfig`
+
+Tests for resolve_server_config() function - priority hierarchy.
+
+- **`test_cli_args_take_priority_over_env()`**:
+  - **What it does**: Verifies that CLI arguments have highest priority
+  - **Purpose**: Ensure CLI args override environment variables
+
+- **`test_env_vars_take_priority_over_defaults()`**:
+  - **What it does**: Verifies that env vars have priority over defaults
+  - **Purpose**: Ensure env vars are used when CLI args are not provided
+
+- **`test_defaults_used_when_nothing_set()`**:
+  - **What it does**: Verifies that defaults are used when nothing else is set
+  - **Purpose**: Ensure default values work correctly
+
+- **`test_cli_host_only_env_port()`**:
+  - **What it does**: Verifies mixed priority - CLI host with env port
+  - **Purpose**: Ensure each argument is resolved independently
+
+- **`test_cli_port_only_env_host()`**:
+  - **What it does**: Verifies mixed priority - CLI port with env host
+  - **Purpose**: Ensure each argument is resolved independently
+
+#### `TestPrintStartupBanner`
+
+Tests for print_startup_banner() function.
+
+- **`test_banner_contains_url()`**:
+  - **What it does**: Verifies that banner contains the server URL
+  - **Purpose**: Ensure URL is displayed to user
+
+- **`test_banner_contains_custom_port()`**:
+  - **What it does**: Verifies that banner shows custom port
+  - **Purpose**: Ensure custom port is displayed correctly
+
+- **`test_banner_contains_docs_url()`**:
+  - **What it does**: Verifies that banner contains API docs URL
+  - **Purpose**: Ensure /docs endpoint is mentioned
+
+- **`test_banner_contains_health_url()`**:
+  - **What it does**: Verifies that banner contains health check URL
+  - **Purpose**: Ensure /health endpoint is mentioned
+
+#### `TestCliHelp`
+
+Tests for CLI help output.
+
+- **`test_help_shows_port_option()`**:
+  - **What it does**: Verifies that --help shows port option
+  - **Purpose**: Ensure help is informative
+
+- **`test_help_shows_host_option()`**:
+  - **What it does**: Verifies that --help output contains host option
+  - **Purpose**: Ensure host option is documented
+
+#### `TestCliVersion`
+
+Tests for CLI version output.
+
+- **`test_version_flag_exits_with_zero()`**:
+  - **What it does**: Verifies that --version exits with code 0
+  - **Purpose**: Ensure version flag works correctly
+
+- **`test_version_shows_app_version()`**:
+  - **What it does**: Verifies that --version shows application version
+  - **Purpose**: Ensure version is displayed
 
 ---
 

@@ -98,7 +98,7 @@ async def root():
     """
     return {
         "status": "ok",
-        "message": "Kiro API Gateway is running",
+        "message": "Kiro Gateway is running",
         "version": APP_VERSION
     }
 

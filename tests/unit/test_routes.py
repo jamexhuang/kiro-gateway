@@ -112,7 +112,7 @@ class TestRootEndpoint:
         print(f"Результат: {response.json()}")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
-        assert "Kiro API Gateway" in response.json()["message"]
+        assert "Kiro Gateway" in response.json()["message"]
     
     def test_root_returns_version(self, test_client):
         """
