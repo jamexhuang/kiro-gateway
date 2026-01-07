@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Common fixtures and utilities for testing Kiro OpenAI Gateway.
+Common fixtures and utilities for testing Kiro Gateway.
 
 Provides test isolation from external services and global state.
 All tests MUST be completely isolated from the network.

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-# Kiro OpenAI Gateway
-# https://github.com/jwadow/kiro-openai-gateway
+# Kiro Gateway
+# https://github.com/jwadow/kiro-gateway
 # Copyright (C) 2025 Jwadow
 #
 # This program is free software: you can redistribute it and/or modify

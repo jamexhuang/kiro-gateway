@@ -1,6 +1,6 @@
-# Tests for Kiro OpenAI Gateway
+# Tests for Kiro Gateway
 
-A comprehensive set of unit and integration tests for Kiro OpenAI Gateway, providing full coverage of all system components.
+A comprehensive set of unit and integration tests for Kiro Gateway, providing full coverage of all system components.
 
 ## Testing Philosophy: Complete Network Isolation
 
@@ -1834,7 +1834,7 @@ When adding new tests:
 
 ```bash
 # Make sure you're in project root
-cd /path/to/kiro-openai-gateway
+cd /path/to/kiro-gateway
 
 # pytest.ini already contains pythonpath = .
 # Just run pytest

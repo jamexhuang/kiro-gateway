@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚀 Kiro OpenAI Gateway
+# 🚀 Kiro Gateway
 
 **OpenAI-compatible proxy gateway for Kiro IDE API (AWS CodeWhisperer)**
 
@@ -44,8 +44,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/Jwadow/kiro-openai-gateway.git
-cd kiro-openai-gateway
+git clone https://github.com/Jwadow/kiro-gateway.git
+cd kiro-gateway
 
 # Install dependencies
 pip install -r requirements.txt
@@ -422,6 +422,6 @@ This project is not affiliated with, endorsed by, or sponsored by Amazon Web Ser
 
 <div align="center">
 
-**[⬆ Back to Top](#-kiro-openai-gateway)**
+**[⬆ Back to Top](#-kiro-gateway)**
 
 </div>
