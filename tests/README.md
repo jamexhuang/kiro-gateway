@@ -320,7 +320,7 @@ Tests for loading credentials from SQLite database (kiro-cli format).
 
 - **`test_load_credentials_from_sqlite_loads_token_data()`**:
   - **What it does**: Verifies token data loading from SQLite
-  - **Purpose**: Ensure access_token, refresh_token, region are loaded
+  - **Purpose**: Ensure access_token, refresh_token, sso_region are loaded (API region stays at us-east-1)
 
 - **`test_load_credentials_from_sqlite_loads_device_registration()`**:
   - **What it does**: Verifies device registration loading from SQLite
@@ -340,7 +340,7 @@ Tests for loading credentials from SQLite database (kiro-cli format).
 
 - **`test_sqlite_takes_priority_over_json_file()`**:
   - **What it does**: Verifies SQLite takes priority over JSON file
-  - **Purpose**: Ensure SQLite is loaded instead of JSON when both are specified
+  - **Purpose**: Ensure SQLite is loaded instead of JSON when both are specified (checks sso_region, not api_region)
 
 #### `TestKiroAuthManagerRefreshTokenRouting`
 
@@ -417,6 +417,36 @@ Tests for auth_type property and constructor with new parameters.
 - **`test_init_with_sqlite_db_parameter()`**:
   - **What it does**: Verifies initialization with sqlite_db parameter
   - **Purpose**: Ensure data is loaded from SQLite
+
+#### `TestKiroAuthManagerSsoRegionSeparation`
+
+Tests for SSO region separation from API region (Issue #16 fix).
+
+Background: CodeWhisperer API only exists in us-east-1, but users may have SSO credentials from other regions (e.g., ap-southeast-1 for Singapore). The fix separates SSO region (for OIDC token refresh) from API region.
+
+- **`test_api_region_stays_us_east_1_when_loading_from_sqlite()`**:
+  - **What it does**: Verifies API region doesn't change when loading from SQLite
+  - **Purpose**: Ensure CodeWhisperer API calls go to us-east-1 regardless of SSO region
+
+- **`test_sso_region_stored_separately_from_api_region()`**:
+  - **What it does**: Verifies SSO region is stored in _sso_region field
+  - **Purpose**: Ensure SSO region is available for OIDC token refresh
+
+- **`test_sso_region_none_when_not_loaded_from_sqlite()`**:
+  - **What it does**: Verifies _sso_region is None when not loading from SQLite
+  - **Purpose**: Ensure backward compatibility with direct credential initialization
+
+- **`test_oidc_refresh_uses_sso_region()`**:
+  - **What it does**: Verifies OIDC token refresh uses SSO region, not API region
+  - **Purpose**: Ensure token refresh goes to correct regional OIDC endpoint (e.g., ap-southeast-1)
+
+- **`test_oidc_refresh_falls_back_to_api_region_when_no_sso_region()`**:
+  - **What it does**: Verifies OIDC refresh uses API region when SSO region not set
+  - **Purpose**: Ensure backward compatibility when _sso_region is None
+
+- **`test_api_hosts_not_updated_when_loading_from_sqlite()`**:
+  - **What it does**: Verifies API hosts don't change when loading from SQLite
+  - **Purpose**: Ensure all API calls go to us-east-1 where CodeWhisperer exists
 
 ---
 

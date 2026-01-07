@@ -664,14 +664,20 @@ class TestKiroAuthManagerSqliteCredentials:
     def test_load_credentials_from_sqlite_loads_token_data(self, temp_sqlite_db):
         """
         What it does: Verifies loading token data from SQLite.
-        Purpose: Ensure access_token, refresh_token, region are loaded.
+        Purpose: Ensure access_token, refresh_token, sso_region are loaded.
+        Note: API region stays at us-east-1 (CodeWhisperer API only exists there),
+              SSO region is stored separately for OIDC token refresh.
         """
         print(f"Setup: Creating KiroAuthManager with SQLite: {temp_sqlite_db}")
         manager = KiroAuthManager(sqlite_db=temp_sqlite_db)
         
-        print("Verification: region loaded from SQLite...")
-        print(f"Comparing region: Expected 'eu-west-1', Got '{manager._region}'")
-        assert manager._region == "eu-west-1"
+        print("Verification: SSO region loaded from SQLite...")
+        print(f"Comparing sso_region: Expected 'eu-west-1', Got '{manager._sso_region}'")
+        assert manager._sso_region == "eu-west-1"
+        
+        print("Verification: API region stays at us-east-1...")
+        print(f"Comparing region: Expected 'us-east-1', Got '{manager._region}'")
+        assert manager._region == "us-east-1"
         
         print("Verification: expires_at parsed...")
         assert manager._expires_at is not None
@@ -752,9 +758,13 @@ class TestKiroAuthManagerSqliteCredentials:
         print(f"Comparing access_token: Expected 'sqlite_access_token', Got '{manager._access_token}'")
         assert manager._access_token == "sqlite_access_token"
         
-        print("Verification: region from SQLite...")
-        print(f"Comparing region: Expected 'eu-west-1', Got '{manager._region}'")
-        assert manager._region == "eu-west-1"
+        print("Verification: SSO region from SQLite...")
+        print(f"Comparing sso_region: Expected 'eu-west-1', Got '{manager._sso_region}'")
+        assert manager._sso_region == "eu-west-1"
+        
+        print("Verification: API region stays at us-east-1...")
+        print(f"Comparing region: Expected 'us-east-1', Got '{manager._region}'")
+        assert manager._region == "us-east-1"
 
 
 # =============================================================================
@@ -1244,3 +1254,164 @@ class TestKiroAuthManagerAuthTypeProperty:
         print("Verification: auth_type = KIRO_DESKTOP (both id and secret required)...")
         print(f"Comparing auth_type: Expected KIRO_DESKTOP, Got {manager.auth_type}")
         assert manager.auth_type == AuthType.KIRO_DESKTOP
+
+
+# =============================================================================
+# Tests for SSO region separation (Issue #16)
+# =============================================================================
+
+class TestKiroAuthManagerSsoRegionSeparation:
+    """Tests for SSO region separation from API region (Issue #16 fix).
+    
+    Background: CodeWhisperer API only exists in us-east-1, but users may have
+    SSO credentials from other regions (e.g., ap-southeast-1 for Singapore).
+    The fix separates SSO region (for OIDC token refresh) from API region.
+    """
+    
+    def test_api_region_stays_us_east_1_when_loading_from_sqlite(self, temp_sqlite_db):
+        """
+        What it does: Verifies API region doesn't change when loading from SQLite.
+        Purpose: Ensure CodeWhisperer API calls go to us-east-1 regardless of SSO region.
+        """
+        print(f"Setup: Creating KiroAuthManager with SQLite (region=eu-west-1)...")
+        manager = KiroAuthManager(sqlite_db=temp_sqlite_db)
+        
+        print("Verification: API region stays at us-east-1...")
+        print(f"Comparing _region: Expected 'us-east-1', Got '{manager._region}'")
+        assert manager._region == "us-east-1"
+        
+        print("Verification: api_host contains us-east-1...")
+        print(f"api_host: {manager._api_host}")
+        assert "us-east-1" in manager._api_host
+        
+        print("Verification: q_host contains us-east-1...")
+        print(f"q_host: {manager._q_host}")
+        assert "us-east-1" in manager._q_host
+    
+    def test_sso_region_stored_separately_from_api_region(self, temp_sqlite_db):
+        """
+        What it does: Verifies SSO region is stored in _sso_region field.
+        Purpose: Ensure SSO region is available for OIDC token refresh.
+        """
+        print(f"Setup: Creating KiroAuthManager with SQLite (region=eu-west-1)...")
+        manager = KiroAuthManager(sqlite_db=temp_sqlite_db)
+        
+        print("Verification: SSO region stored in _sso_region...")
+        print(f"Comparing _sso_region: Expected 'eu-west-1', Got '{manager._sso_region}'")
+        assert manager._sso_region == "eu-west-1"
+        
+        print("Verification: API region is different from SSO region...")
+        assert manager._region != manager._sso_region
+    
+    def test_sso_region_none_when_not_loaded_from_sqlite(self):
+        """
+        What it does: Verifies _sso_region is None when not loading from SQLite.
+        Purpose: Ensure backward compatibility with direct credential initialization.
+        """
+        print("Setup: Creating KiroAuthManager with direct credentials...")
+        manager = KiroAuthManager(
+            refresh_token="test_token",
+            region="us-east-1"
+        )
+        
+        print("Verification: _sso_region is None...")
+        print(f"Comparing _sso_region: Expected None, Got '{manager._sso_region}'")
+        assert manager._sso_region is None
+    
+    @pytest.mark.asyncio
+    async def test_oidc_refresh_uses_sso_region(self, mock_aws_sso_oidc_token_response):
+        """
+        What it does: Verifies OIDC token refresh uses SSO region, not API region.
+        Purpose: Ensure token refresh goes to correct regional OIDC endpoint.
+        """
+        print("Setup: Creating KiroAuthManager with SSO region=ap-southeast-1...")
+        manager = KiroAuthManager(
+            refresh_token="test_refresh",
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+            region="us-east-1"  # API region
+        )
+        # Simulate SSO region loaded from SQLite
+        manager._sso_region = "ap-southeast-1"
+        
+        print("Setup: Mocking HTTP client...")
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.json = Mock(return_value=mock_aws_sso_oidc_token_response())
+        mock_response.raise_for_status = Mock()
+        
+        with patch('kiro_gateway.auth.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+            
+            await manager._refresh_token_aws_sso_oidc()
+            
+            print("Verification: OIDC request went to SSO region (ap-southeast-1)...")
+            call_args = mock_client.post.call_args
+            url = call_args[0][0]
+            expected_url = "https://oidc.ap-southeast-1.amazonaws.com/token"
+            print(f"Comparing URL: Expected '{expected_url}', Got '{url}'")
+            assert url == expected_url
+            assert "ap-southeast-1" in url
+            assert "us-east-1" not in url
+    
+    @pytest.mark.asyncio
+    async def test_oidc_refresh_falls_back_to_api_region_when_no_sso_region(self, mock_aws_sso_oidc_token_response):
+        """
+        What it does: Verifies OIDC refresh uses API region when SSO region not set.
+        Purpose: Ensure backward compatibility when _sso_region is None.
+        """
+        print("Setup: Creating KiroAuthManager without SSO region...")
+        manager = KiroAuthManager(
+            refresh_token="test_refresh",
+            client_id="test_client_id",
+            client_secret="test_client_secret",
+            region="eu-west-1"  # API region (also used for OIDC when no SSO region)
+        )
+        # Ensure _sso_region is None
+        manager._sso_region = None
+        
+        print("Setup: Mocking HTTP client...")
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.json = Mock(return_value=mock_aws_sso_oidc_token_response())
+        mock_response.raise_for_status = Mock()
+        
+        with patch('kiro_gateway.auth.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+            
+            await manager._refresh_token_aws_sso_oidc()
+            
+            print("Verification: OIDC request fell back to API region (eu-west-1)...")
+            call_args = mock_client.post.call_args
+            url = call_args[0][0]
+            expected_url = "https://oidc.eu-west-1.amazonaws.com/token"
+            print(f"Comparing URL: Expected '{expected_url}', Got '{url}'")
+            assert url == expected_url
+    
+    def test_api_hosts_not_updated_when_loading_from_sqlite(self, temp_sqlite_db):
+        """
+        What it does: Verifies API hosts don't change when loading from SQLite.
+        Purpose: Ensure all API calls go to us-east-1 where CodeWhisperer exists.
+        """
+        print(f"Setup: Creating KiroAuthManager with SQLite (region=eu-west-1)...")
+        manager = KiroAuthManager(sqlite_db=temp_sqlite_db)
+        
+        print("Verification: _api_host points to us-east-1...")
+        assert "us-east-1" in manager._api_host
+        assert "eu-west-1" not in manager._api_host
+        
+        print("Verification: _q_host points to us-east-1...")
+        assert "us-east-1" in manager._q_host
+        assert "eu-west-1" not in manager._q_host
+        
+        print("Verification: _refresh_url points to us-east-1...")
+        assert "us-east-1" in manager._refresh_url
+        assert "eu-west-1" not in manager._refresh_url

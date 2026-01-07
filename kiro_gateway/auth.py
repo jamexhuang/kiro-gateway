@@ -132,6 +132,7 @@ class KiroAuthManager:
         self._client_id: Optional[str] = client_id
         self._client_secret: Optional[str] = client_secret
         self._scopes: Optional[list] = None  # OAuth scopes for AWS SSO OIDC
+        self._sso_region: Optional[str] = None  # SSO region for OIDC token refresh (may differ from API region)
         
         self._access_token: Optional[str] = None
         self._expires_at: Optional[datetime] = None
@@ -208,11 +209,12 @@ class KiroAuthManager:
                     if 'refresh_token' in token_data:
                         self._refresh_token = token_data['refresh_token']
                     if 'region' in token_data:
-                        self._region = token_data['region']
-                        # Update URLs for new region
-                        self._refresh_url = get_kiro_refresh_url(self._region)
-                        self._api_host = get_kiro_api_host(self._region)
-                        self._q_host = get_kiro_q_host(self._region)
+                        # Store SSO region for OIDC token refresh only
+                        # IMPORTANT: CodeWhisperer API is only available in us-east-1,
+                        # so we don't update _api_host and _q_host here.
+                        # The SSO region (e.g., ap-southeast-1) is only used for OIDC token refresh.
+                        self._sso_region = token_data['region']
+                        logger.debug(f"SSO region from SQLite: {self._sso_region} (API stays at {self._region})")
                     
                     # Load scopes if available
                     if 'scopes' in token_data:
@@ -244,12 +246,10 @@ class KiroAuthManager:
                         self._client_id = registration_data['client_id']
                     if 'client_secret' in registration_data:
                         self._client_secret = registration_data['client_secret']
-                    # Region from registration takes precedence if not set
-                    if 'region' in registration_data and not self._region:
-                        self._region = registration_data['region']
-                        self._refresh_url = get_kiro_refresh_url(self._region)
-                        self._api_host = get_kiro_api_host(self._region)
-                        self._q_host = get_kiro_q_host(self._region)
+                    # SSO region from registration (fallback if not in token data)
+                    if 'region' in registration_data and not self._sso_region:
+                        self._sso_region = registration_data['region']
+                        logger.debug(f"SSO region from device-registration: {self._sso_region}")
             
             conn.close()
             logger.info(f"Credentials loaded from SQLite database: {db_path}")
@@ -474,7 +474,9 @@ class KiroAuthManager:
         logger.info("Refreshing Kiro token via AWS SSO OIDC...")
         
         # AWS SSO OIDC uses form-urlencoded data
-        url = get_aws_sso_oidc_url(self._region)
+        # Use SSO region for OIDC endpoint (may differ from API region)
+        sso_region = self._sso_region or self._region
+        url = get_aws_sso_oidc_url(sso_region)
         data = {
             "grant_type": "refresh_token",
             "client_id": self._client_id,
@@ -489,8 +491,8 @@ class KiroAuthManager:
         }
         
         # Log request details (without secrets) for debugging
-        logger.debug(f"AWS SSO OIDC refresh request: url={url}, region={self._region}, "
-                     f"client_id={self._client_id[:8]}..., scopes={self._scopes}")
+        logger.debug(f"AWS SSO OIDC refresh request: url={url}, sso_region={sso_region}, "
+                     f"api_region={self._region}, client_id={self._client_id[:8]}...")
         
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(url, data=data, headers=headers)
