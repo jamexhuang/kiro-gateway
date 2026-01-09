@@ -245,7 +245,9 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         logger.warning(f"Failed to log Kiro request: {e}")
     
     # Create HTTP client with retry logic
-    http_client = KiroHttpClient(auth_manager)
+    # Use shared HTTP client from app.state for connection pooling
+    shared_client = request.app.state.http_client
+    http_client = KiroHttpClient(auth_manager, shared_client=shared_client)
     url = f"{auth_manager.api_host}/generateAssistantResponse"
     try:
         # Make request to Kiro API (for both streaming and non-streaming modes)

@@ -25,6 +25,9 @@ Handles:
 - 429: exponential backoff
 - 5xx: exponential backoff
 - Timeouts: exponential backoff
+
+Supports both per-request clients and shared application-level client
+with connection pooling for better resource management.
 """
 
 import asyncio
@@ -48,33 +51,54 @@ class KiroHttpClient:
     - 429: waits with exponential backoff
     - 5xx: waits with exponential backoff
     - Timeouts: waits with exponential backoff
+    
+    Supports two modes of operation:
+    1. Per-request client: Creates and owns its own httpx.AsyncClient
+    2. Shared client: Uses an application-level shared client (recommended)
+    
+    Using a shared client reduces memory usage and enables connection pooling,
+    which is especially important for handling concurrent requests.
+    
     Attributes:
         auth_manager: Authentication manager for obtaining tokens
-        client: httpx HTTP client
+        client: httpx HTTP client (owned or shared)
     
     Example:
+        >>> # Per-request client (legacy mode)
         >>> client = KiroHttpClient(auth_manager)
-        >>> response = await client.request_with_retry(
-        ...     "POST",
-        ...     "https://api.example.com/endpoint",
-        ...     {"data": "value"},
-        ...     stream=True
-        ... )
+        >>> response = await client.request_with_retry(...)
+        
+        >>> # Shared client (recommended)
+        >>> shared = httpx.AsyncClient(limits=httpx.Limits(...))
+        >>> client = KiroHttpClient(auth_manager, shared_client=shared)
+        >>> response = await client.request_with_retry(...)
     """
     
-    def __init__(self, auth_manager: KiroAuthManager):
+    def __init__(
+        self,
+        auth_manager: KiroAuthManager,
+        shared_client: Optional[httpx.AsyncClient] = None
+    ):
         """
         Initializes the HTTP client.
         
         Args:
             auth_manager: Authentication manager
+            shared_client: Optional shared httpx.AsyncClient for connection pooling.
+                          If provided, this client will be used instead of creating
+                          a new one. The shared client will NOT be closed by close().
         """
         self.auth_manager = auth_manager
-        self.client: Optional[httpx.AsyncClient] = None
+        self._shared_client = shared_client
+        self._owns_client = shared_client is None
+        self.client: Optional[httpx.AsyncClient] = shared_client
     
     async def _get_client(self, stream: bool = False) -> httpx.AsyncClient:
         """
         Returns or creates an HTTP client with proper timeouts.
+        
+        If a shared client was provided at initialization, it is returned as-is.
+        Otherwise, creates a new client with appropriate timeout configuration.
         
         httpx timeouts:
         - connect: TCP handshake (DNS + TCP SYN/ACK)
@@ -87,11 +111,17 @@ class KiroHttpClient:
         the wait time for the first token from the model (retry business logic).
         
         Args:
-            stream: If True, uses STREAMING_READ_TIMEOUT for read
+            stream: If True, uses STREAMING_READ_TIMEOUT for read (only for new clients)
         
         Returns:
             Active HTTP client
         """
+        # If using shared client, return it directly
+        # Shared client should be pre-configured with appropriate timeouts
+        if self._shared_client is not None:
+            return self._shared_client
+        
+        # Create new client if needed (per-request mode)
         if self.client is None or self.client.is_closed:
             if stream:
                 # For streaming:
@@ -114,9 +144,26 @@ class KiroHttpClient:
         return self.client
     
     async def close(self) -> None:
-        """Closes the HTTP client."""
+        """
+        Closes the HTTP client if this instance owns it.
+        
+        If using a shared client, this method does nothing - the shared client
+        should be closed by the application lifecycle manager.
+        
+        Uses graceful exception handling to prevent errors during cleanup
+        from masking the original exception in finally blocks.
+        """
+        # Don't close shared clients - they're managed by the application
+        if not self._owns_client:
+            return
+        
         if self.client and not self.client.is_closed:
-            await self.client.aclose()
+            try:
+                await self.client.aclose()
+            except Exception as e:
+                # Log but don't propagate - we're in cleanup code
+                # Propagating here could mask the original exception
+                logger.warning(f"Error closing HTTP client: {e}")
     
     async def request_with_retry(
         self,

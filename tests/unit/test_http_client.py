@@ -858,3 +858,167 @@ class TestKiroHttpClientStreamingTimeout:
         
         print("Verification: HTTPException with code 502...")
         assert exc_info.value.status_code == 502
+
+
+class TestKiroHttpClientSharedClient:
+    """Tests for shared client functionality (connection pooling support)."""
+    
+    def test_initialization_with_shared_client(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies shared_client is stored during initialization.
+        Purpose: Ensure shared client is available for connection pooling.
+        """
+        print("Setup: Creating mock shared client...")
+        mock_shared = AsyncMock()
+        mock_shared.is_closed = False
+        
+        print("Action: Creating KiroHttpClient with shared client...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http, shared_client=mock_shared)
+        
+        print("Verification: shared_client is stored...")
+        print(f"Comparing _shared_client: Expected mock_shared, Got {http_client._shared_client}")
+        assert http_client._shared_client is mock_shared
+        print(f"Comparing client: Expected mock_shared, Got {http_client.client}")
+        assert http_client.client is mock_shared
+    
+    def test_initialization_without_shared_client_owns_client(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies _owns_client is True when no shared client provided.
+        Purpose: Ensure client ownership is tracked correctly for cleanup.
+        """
+        print("Setup: Creating KiroHttpClient without shared client...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http)
+        
+        print("Verification: _owns_client is True...")
+        print(f"Comparing _owns_client: Expected True, Got {http_client._owns_client}")
+        assert http_client._owns_client is True
+        print(f"Comparing _shared_client: Expected None, Got {http_client._shared_client}")
+        assert http_client._shared_client is None
+    
+    def test_initialization_with_shared_client_does_not_own(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies _owns_client is False when shared client provided.
+        Purpose: Ensure shared client is not closed by this instance.
+        """
+        print("Setup: Creating mock shared client...")
+        mock_shared = AsyncMock()
+        mock_shared.is_closed = False
+        
+        print("Action: Creating KiroHttpClient with shared client...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http, shared_client=mock_shared)
+        
+        print("Verification: _owns_client is False...")
+        print(f"Comparing _owns_client: Expected False, Got {http_client._owns_client}")
+        assert http_client._owns_client is False
+    
+    @pytest.mark.asyncio
+    async def test_get_client_returns_shared_client(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies _get_client returns shared client directly.
+        Purpose: Ensure shared client is used without creating new one.
+        """
+        print("Setup: Creating mock shared client...")
+        mock_shared = AsyncMock()
+        mock_shared.is_closed = False
+        
+        print("Action: Creating KiroHttpClient with shared client...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http, shared_client=mock_shared)
+        
+        print("Action: Getting client...")
+        with patch('kiro.http_client.httpx.AsyncClient') as mock_async_client:
+            client = await http_client._get_client(stream=True)
+            
+            print("Verification: Shared client returned, no new client created...")
+            print(f"Comparing client: Expected mock_shared, Got {client}")
+            assert client is mock_shared
+            mock_async_client.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_close_does_not_close_shared_client(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies close() does NOT close shared client.
+        Purpose: Ensure shared client lifecycle is managed by application.
+        """
+        print("Setup: Creating mock shared client...")
+        mock_shared = AsyncMock()
+        mock_shared.is_closed = False
+        mock_shared.aclose = AsyncMock()
+        
+        print("Action: Creating KiroHttpClient with shared client...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http, shared_client=mock_shared)
+        
+        print("Action: Closing client...")
+        await http_client.close()
+        
+        print("Verification: aclose() NOT called on shared client...")
+        mock_shared.aclose.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_close_closes_owned_client(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies close() DOES close owned client.
+        Purpose: Ensure owned client is properly cleaned up.
+        """
+        print("Setup: Creating KiroHttpClient without shared client...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http)
+        
+        mock_owned = AsyncMock()
+        mock_owned.is_closed = False
+        mock_owned.aclose = AsyncMock()
+        http_client.client = mock_owned
+        
+        print("Action: Closing client...")
+        await http_client.close()
+        
+        print("Verification: aclose() called on owned client...")
+        mock_owned.aclose.assert_called_once()
+
+
+class TestKiroHttpClientGracefulClose:
+    """Tests for graceful exception handling in close() method."""
+    
+    @pytest.mark.asyncio
+    async def test_close_handles_aclose_exception_gracefully(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies exception in aclose() is caught and doesn't propagate.
+        Purpose: Ensure cleanup errors don't mask original exceptions.
+        """
+        print("Setup: Creating KiroHttpClient with client that raises on close...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http)
+        
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.aclose = AsyncMock(side_effect=Exception("Connection reset"))
+        http_client.client = mock_client
+        
+        print("Action: Closing client (should not raise)...")
+        # Should not raise - exception should be caught
+        await http_client.close()
+        
+        print("Verification: No exception propagated...")
+        # If we get here, the test passed
+        assert True
+    
+    @pytest.mark.asyncio
+    async def test_close_logs_warning_on_exception(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies warning is logged when aclose() fails.
+        Purpose: Ensure errors are visible in logs for debugging.
+        """
+        print("Setup: Creating KiroHttpClient with client that raises on close...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http)
+        
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.aclose = AsyncMock(side_effect=Exception("Connection reset"))
+        http_client.client = mock_client
+        
+        print("Action: Closing client with logger mock...")
+        with patch('kiro.http_client.logger') as mock_logger:
+            await http_client.close()
+            
+            print("Verification: logger.warning called...")
+            mock_logger.warning.assert_called_once()
+            warning_message = str(mock_logger.warning.call_args)
+            print(f"Warning message: {warning_message}")
+            assert "Connection reset" in warning_message or "Error closing" in warning_message

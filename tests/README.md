@@ -1772,6 +1772,46 @@ Tests for streaming timeout logic (httpx timeouts, not FIRST_TOKEN_TIMEOUT).
   - **What it does**: Verifies that non-streaming timeout returns 502
   - **Purpose**: Ensure old logic with 502 is used for non-streaming
 
+#### `TestKiroHttpClientSharedClient`
+
+Tests for shared client functionality (connection pooling support, fix for issue #24).
+
+- **`test_initialization_with_shared_client()`**:
+  - **What it does**: Verifies shared_client is stored during initialization
+  - **Purpose**: Ensure shared client is available for connection pooling
+
+- **`test_initialization_without_shared_client_owns_client()`**:
+  - **What it does**: Verifies _owns_client is True when no shared client provided
+  - **Purpose**: Ensure client ownership is tracked correctly for cleanup
+
+- **`test_initialization_with_shared_client_does_not_own()`**:
+  - **What it does**: Verifies _owns_client is False when shared client provided
+  - **Purpose**: Ensure shared client is not closed by this instance
+
+- **`test_get_client_returns_shared_client()`**:
+  - **What it does**: Verifies _get_client returns shared client directly
+  - **Purpose**: Ensure shared client is used without creating new one
+
+- **`test_close_does_not_close_shared_client()`**:
+  - **What it does**: Verifies close() does NOT close shared client
+  - **Purpose**: Ensure shared client lifecycle is managed by application
+
+- **`test_close_closes_owned_client()`**:
+  - **What it does**: Verifies close() DOES close owned client
+  - **Purpose**: Ensure owned client is properly cleaned up
+
+#### `TestKiroHttpClientGracefulClose`
+
+Tests for graceful exception handling in close() method.
+
+- **`test_close_handles_aclose_exception_gracefully()`**:
+  - **What it does**: Verifies exception in aclose() is caught and doesn't propagate
+  - **Purpose**: Ensure cleanup errors don't mask original exceptions
+
+- **`test_close_logs_warning_on_exception()`**:
+  - **What it does**: Verifies warning is logged when aclose() fails
+  - **Purpose**: Ensure errors are visible in logs for debugging
+
 ---
 
 ### `tests/unit/test_routes.py`

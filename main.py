@@ -45,6 +45,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,6 +66,7 @@ from kiro.config import (
     SERVER_PORT,
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
+    STREAMING_READ_TIMEOUT,
     _warn_deprecated_debug_setting,
     _warn_timeout_configuration,
 )
@@ -244,10 +246,37 @@ async def lifespan(app: FastAPI):
     Manages the application lifecycle.
     
     Creates and initializes:
+    - Shared HTTP client with connection pooling
     - KiroAuthManager for token management
     - ModelInfoCache for model caching
+    
+    The shared HTTP client is used by all requests to reduce memory usage
+    and enable connection reuse. This is especially important for handling
+    concurrent requests efficiently (fixes issue #24).
     """
     logger.info("Starting application... Creating state managers.")
+    
+    # Create shared HTTP client with connection pooling
+    # This reduces memory usage and enables connection reuse across requests
+    # Limits: max 100 total connections, max 20 keep-alive connections
+    limits = httpx.Limits(
+        max_connections=100,
+        max_keepalive_connections=20,
+        keepalive_expiry=30.0  # Close idle connections after 30 seconds
+    )
+    # Timeout configuration for streaming (long read timeout for model "thinking")
+    timeout = httpx.Timeout(
+        connect=30.0,
+        read=STREAMING_READ_TIMEOUT,  # 300 seconds for streaming
+        write=30.0,
+        pool=30.0
+    )
+    app.state.http_client = httpx.AsyncClient(
+        limits=limits,
+        timeout=timeout,
+        follow_redirects=True
+    )
+    logger.info("Shared HTTP client created with connection pooling")
     
     # Create AuthManager
     # Priority: SQLite DB > JSON file > environment variables
@@ -264,7 +293,13 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    logger.info("Shutting down application.")
+    # Graceful shutdown
+    logger.info("Shutting down application...")
+    try:
+        await app.state.http_client.aclose()
+        logger.info("Shared HTTP client closed")
+    except Exception as e:
+        logger.warning(f"Error closing shared HTTP client: {e}")
 
 
 # --- FastAPI Application ---
