@@ -2069,6 +2069,128 @@ class TestBuildKiroHistory:
         assert "assistantResponseMessage" in result[0]
         assistant_msg = result[0]["assistantResponseMessage"]
         assert "toolUses" in assistant_msg
+    
+    def test_adds_empty_placeholder_for_empty_user_content(self):
+        """
+        What it does: Verifies that "(empty)" placeholder is added for user messages with empty content.
+        Purpose: Ensure Kiro API receives non-empty content in history.
+        
+        This is a fallback test for issue #20 - ensures any edge case with empty content
+        is handled even if strip_all_tool_content didn't add a placeholder.
+        """
+        print("Setup: User message with empty content...")
+        messages = [UnifiedMessage(role="user", content="")]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        print(f"Content: '{result[0]['userInputMessage']['content']}'")
+        print("Checking that '(empty)' placeholder is added...")
+        assert result[0]["userInputMessage"]["content"] == "(empty)"
+    
+    def test_adds_empty_placeholder_for_empty_assistant_content(self):
+        """
+        What it does: Verifies that "(empty)" placeholder is added for assistant messages with empty content.
+        Purpose: Ensure Kiro API receives non-empty content in history.
+        
+        This is a fallback test for issue #20 - ensures any edge case with empty content
+        is handled even if strip_all_tool_content didn't add a placeholder.
+        """
+        print("Setup: Assistant message with empty content...")
+        messages = [UnifiedMessage(role="assistant", content="")]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        print(f"Content: '{result[0]['assistantResponseMessage']['content']}'")
+        print("Checking that '(empty)' placeholder is added...")
+        assert result[0]["assistantResponseMessage"]["content"] == "(empty)"
+    
+    def test_adds_empty_placeholder_for_none_user_content(self):
+        """
+        What it does: Verifies that "(empty)" placeholder is added for user messages with None content.
+        Purpose: Ensure Kiro API receives non-empty content when content is None.
+        """
+        print("Setup: User message with None content...")
+        messages = [UnifiedMessage(role="user", content=None)]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        print(f"Content: '{result[0]['userInputMessage']['content']}'")
+        print("Checking that '(empty)' placeholder is added...")
+        assert result[0]["userInputMessage"]["content"] == "(empty)"
+    
+    def test_adds_empty_placeholder_for_none_assistant_content(self):
+        """
+        What it does: Verifies that "(empty)" placeholder is added for assistant messages with None content.
+        Purpose: Ensure Kiro API receives non-empty content when content is None.
+        """
+        print("Setup: Assistant message with None content...")
+        messages = [UnifiedMessage(role="assistant", content=None)]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        print(f"Content: '{result[0]['assistantResponseMessage']['content']}'")
+        print("Checking that '(empty)' placeholder is added...")
+        assert result[0]["assistantResponseMessage"]["content"] == "(empty)"
+    
+    def test_preserves_non_empty_content_in_history(self):
+        """
+        What it does: Verifies that non-empty content is preserved (not replaced with placeholder).
+        Purpose: Ensure placeholder is only added when content is actually empty.
+        """
+        print("Setup: Messages with actual content...")
+        messages = [
+            UnifiedMessage(role="user", content="Hello"),
+            UnifiedMessage(role="assistant", content="Hi there")
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        print("Checking that original content is preserved...")
+        assert result[0]["userInputMessage"]["content"] == "Hello"
+        assert result[1]["assistantResponseMessage"]["content"] == "Hi there"
+    
+    def test_mixed_empty_and_non_empty_content_in_history(self):
+        """
+        What it does: Verifies correct handling of mixed empty and non-empty content.
+        Purpose: Ensure only empty messages get placeholders.
+        
+        This simulates a conversation where some messages have content and some don't.
+        """
+        print("Setup: Mixed conversation with empty and non-empty content...")
+        messages = [
+            UnifiedMessage(role="user", content="Start"),
+            UnifiedMessage(role="assistant", content=""),  # Empty - should get placeholder
+            UnifiedMessage(role="user", content=""),  # Empty - should get placeholder
+            UnifiedMessage(role="assistant", content="Response")
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        print("Checking each message...")
+        
+        print(f"Message 0 content: '{result[0]['userInputMessage']['content']}'")
+        assert result[0]["userInputMessage"]["content"] == "Start"
+        
+        print(f"Message 1 content: '{result[1]['assistantResponseMessage']['content']}'")
+        assert result[1]["assistantResponseMessage"]["content"] == "(empty)"
+        
+        print(f"Message 2 content: '{result[2]['userInputMessage']['content']}'")
+        assert result[2]["userInputMessage"]["content"] == "(empty)"
+        
+        print(f"Message 3 content: '{result[3]['assistantResponseMessage']['content']}'")
+        assert result[3]["assistantResponseMessage"]["content"] == "Response"
 
 
 # ==================================================================================================
@@ -2434,3 +2556,203 @@ class TestStripAllToolContent:
         print(f"had_content: {had_content}")
         # Empty list is falsy, so should not be considered as having tool content
         assert had_content is False
+    
+    def test_adds_tool_use_placeholder_for_empty_content_with_tool_calls(self):
+        """
+        What it does: Verifies that "(tool use)" placeholder is added when content is empty after stripping tool_calls.
+        Purpose: Ensure Kiro API receives non-empty content for messages that only had tool_calls.
+        
+        This is a critical test for issue #20 - OpenCode compaction returns 400 error
+        because messages with only tool_calls become empty after stripping.
+        """
+        print("Setup: Assistant message with only tool_calls (empty content)...")
+        messages = [
+            UnifiedMessage(
+                role="assistant",
+                content="",  # Empty content - only tool_calls
+                tool_calls=[{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path": "test.py"}'}
+                }]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_content = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Content after stripping: '{result[0].content}'")
+        print("Checking that '(tool use)' placeholder is added...")
+        assert result[0].content == "(tool use)"
+        assert result[0].tool_calls is None
+        assert had_content is True
+    
+    def test_adds_tool_result_placeholder_for_empty_content_with_tool_results(self):
+        """
+        What it does: Verifies that "(tool result)" placeholder is added when content is empty after stripping tool_results.
+        Purpose: Ensure Kiro API receives non-empty content for messages that only had tool_results.
+        
+        This is a critical test for issue #20 - OpenCode compaction returns 400 error
+        because messages with only tool_results become empty after stripping.
+        """
+        print("Setup: User message with only tool_results (empty content)...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="",  # Empty content - only tool_results
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_123",
+                    "content": "File contents here"
+                }]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_content = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Content after stripping: '{result[0].content}'")
+        print("Checking that '(tool result)' placeholder is added...")
+        assert result[0].content == "(tool result)"
+        assert result[0].tool_results is None
+        assert had_content is True
+    
+    def test_preserves_existing_content_when_stripping_tool_calls(self):
+        """
+        What it does: Verifies that existing content is preserved (not replaced with placeholder).
+        Purpose: Ensure placeholder is only added when content is actually empty.
+        """
+        print("Setup: Assistant message with both content and tool_calls...")
+        messages = [
+            UnifiedMessage(
+                role="assistant",
+                content="I'll read the file for you",
+                tool_calls=[{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"}
+                }]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_content = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Content after stripping: '{result[0].content}'")
+        print("Checking that original content is preserved...")
+        assert result[0].content == "I'll read the file for you"
+        assert result[0].tool_calls is None
+        assert had_content is True
+    
+    def test_preserves_existing_content_when_stripping_tool_results(self):
+        """
+        What it does: Verifies that existing content is preserved (not replaced with placeholder).
+        Purpose: Ensure placeholder is only added when content is actually empty.
+        """
+        print("Setup: User message with both content and tool_results...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Here are the results you requested",
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_123",
+                    "content": "Result data"
+                }]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_content = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Content after stripping: '{result[0].content}'")
+        print("Checking that original content is preserved...")
+        assert result[0].content == "Here are the results you requested"
+        assert result[0].tool_results is None
+        assert had_content is True
+    
+    def test_tool_use_placeholder_priority_over_tool_result(self):
+        """
+        What it does: Verifies that "(tool use)" placeholder takes priority when both tool_calls and tool_results exist.
+        Purpose: Ensure consistent placeholder selection when message has both types.
+        
+        Note: This is an edge case - normally assistant messages have tool_calls and user messages have tool_results.
+        """
+        print("Setup: Message with both tool_calls and tool_results (edge case)...")
+        messages = [
+            UnifiedMessage(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "tool", "arguments": "{}"}}],
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_0", "content": "Result"}]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_content = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Content after stripping: '{result[0].content}'")
+        print("Checking that '(tool use)' placeholder is used (priority over tool_result)...")
+        assert result[0].content == "(tool use)"
+        assert had_content is True
+    
+    def test_multiple_messages_with_empty_content_get_correct_placeholders(self):
+        """
+        What it does: Verifies correct placeholders for multiple messages in a conversation.
+        Purpose: Ensure each message gets the appropriate placeholder based on its tool content type.
+        
+        This simulates the OpenCode compaction scenario from issue #20 where multiple
+        tool-only messages are sent without text content.
+        """
+        print("Setup: Conversation with multiple tool-only messages...")
+        messages = [
+            UnifiedMessage(role="user", content="Read these files"),
+            UnifiedMessage(
+                role="assistant",
+                content="",  # Only tool_calls
+                tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]
+            ),
+            UnifiedMessage(
+                role="user",
+                content="",  # Only tool_results
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_1", "content": "File content"}]
+            ),
+            UnifiedMessage(
+                role="assistant",
+                content="",  # Only tool_calls
+                tool_calls=[{"id": "call_2", "type": "function", "function": {"name": "write_file", "arguments": "{}"}}]
+            ),
+            UnifiedMessage(
+                role="user",
+                content="",  # Only tool_results
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_2", "content": "Done"}]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_content = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print("Checking placeholders for each message...")
+        
+        print(f"Message 0 content: '{result[0].content}'")
+        assert result[0].content == "Read these files"  # Original content preserved
+        
+        print(f"Message 1 content: '{result[1].content}'")
+        assert result[1].content == "(tool use)"  # Placeholder for tool_calls
+        
+        print(f"Message 2 content: '{result[2].content}'")
+        assert result[2].content == "(tool result)"  # Placeholder for tool_results
+        
+        print(f"Message 3 content: '{result[3].content}'")
+        assert result[3].content == "(tool use)"  # Placeholder for tool_calls
+        
+        print(f"Message 4 content: '{result[4].content}'")
+        assert result[4].content == "(tool result)"  # Placeholder for tool_results
+        
+        assert had_content is True

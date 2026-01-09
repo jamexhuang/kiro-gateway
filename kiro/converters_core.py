@@ -525,10 +525,19 @@ def strip_all_tool_content(messages: List[UnifiedMessage]) -> Tuple[List[Unified
             if has_tool_results:
                 total_tool_results_stripped += len(msg.tool_results)
             
+            # Determine content - add semantic placeholder if empty after stripping tool content
+            # This prevents Kiro API from rejecting messages with empty content
+            content = msg.content
+            if not extract_text_content(content):
+                if has_tool_calls:
+                    content = "(tool use)"
+                elif has_tool_results:
+                    content = "(tool result)"
+            
             # Create a copy of the message without tool content
             cleaned_msg = UnifiedMessage(
                 role=msg.role,
-                content=msg.content,
+                content=content,
                 tool_calls=None,
                 tool_results=None
             )
@@ -718,6 +727,10 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
         if msg.role == "user":
             content = extract_text_content(msg.content)
             
+            # Fallback for empty content - Kiro API requires non-empty content
+            if not content:
+                content = "(empty)"
+            
             user_input = {
                 "content": content,
                 "modelId": model_id,
@@ -740,6 +753,10 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
             
         elif msg.role == "assistant":
             content = extract_text_content(msg.content)
+            
+            # Fallback for empty content - Kiro API requires non-empty content
+            if not content:
+                content = "(empty)"
             
             assistant_response = {"content": content}
             
