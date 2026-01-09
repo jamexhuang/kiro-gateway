@@ -75,15 +75,20 @@ tests/
 │   ├── test_auth_manager.py        # KiroAuthManager tests
 │   ├── test_cache.py               # ModelInfoCache tests
 │   ├── test_config.py              # Configuration tests (SERVER_HOST, SERVER_PORT, LOG_LEVEL, etc.)
-│   ├── test_converters.py          # OpenAI <-> Kiro converter tests
+│   ├── test_converters_anthropic.py # Anthropic Messages API → Kiro converter tests
+│   ├── test_converters_core.py     # Shared conversion logic tests (UnifiedMessage, merging, etc.)
+│   ├── test_converters_openai.py   # OpenAI Chat API → Kiro converter tests
 │   ├── test_debug_logger.py        # DebugLogger tests (off/errors/all modes)
 │   ├── test_main_cli.py            # CLI argument parsing tests (--host, --port)
 │   ├── test_parsers.py             # AwsEventStreamParser tests
-│   ├── test_streaming.py           # Streaming function tests
+│   ├── test_routes_anthropic.py    # Anthropic API endpoint tests (/v1/messages)
+│   ├── test_routes_openai.py       # OpenAI API endpoint tests (/v1/chat/completions)
+│   ├── test_streaming_anthropic.py # Anthropic streaming response tests
+│   ├── test_streaming_core.py      # Shared streaming logic tests
+│   ├── test_streaming_openai.py    # OpenAI streaming response tests
 │   ├── test_thinking_parser.py     # ThinkingParser tests (FSM for thinking blocks)
 │   ├── test_tokenizer.py           # Tokenizer tests (tiktoken)
-│   ├── test_http_client.py         # KiroHttpClient tests
-│   └── test_routes.py              # API endpoint tests
+│   └── test_http_client.py         # KiroHttpClient tests
 ├── integration/                     # Integration tests for full flow
 │   └── test_full_flow.py           # End-to-end tests
 └── README.md                        # This file
@@ -826,57 +831,266 @@ Tests for application log capture (app_logs.txt).
 
 ---
 
-### `tests/unit/test_converters.py`
+### `tests/unit/test_converters_anthropic.py`
 
-Unit tests for **OpenAI <-> Kiro** converters. **86 tests.**
+Unit tests for **Anthropic Messages API → Kiro** converters. **45 tests.**
+
+#### `TestConvertAnthropicContentToText`
+
+- **`test_extracts_from_string()`**:
+  - **What it does**: Verifies text extraction from a string
+  - **Purpose**: Ensure string is returned as-is
+
+- **`test_extracts_from_list_with_text_blocks()`**:
+  - **What it does**: Verifies extraction from list of text content blocks
+  - **Purpose**: Ensure Anthropic multimodal format is handled
+
+- **`test_extracts_from_pydantic_text_blocks()`**:
+  - **What it does**: Verifies extraction from Pydantic TextContentBlock objects
+  - **Purpose**: Ensure Pydantic models are handled correctly
+
+- **`test_ignores_non_text_blocks()`**:
+  - **What it does**: Verifies that non-text blocks are ignored
+  - **Purpose**: Ensure tool_use and tool_result blocks don't contribute to text
+
+- **`test_handles_none()`**:
+  - **What it does**: Verifies None handling
+  - **Purpose**: Ensure None returns empty string
+
+- **`test_handles_empty_list()`**:
+  - **What it does**: Verifies empty list handling
+  - **Purpose**: Ensure empty list returns empty string
+
+- **`test_converts_other_types_to_string()`**:
+  - **What it does**: Verifies conversion of other types to string
+  - **Purpose**: Ensure numbers and other types are converted
+
+#### `TestExtractToolResultsFromAnthropicContent`
+
+- **`test_extracts_tool_result_from_dict()`**:
+  - **What it does**: Verifies extraction of tool result from dict content block
+  - **Purpose**: Ensure tool_result blocks are extracted correctly
+
+- **`test_extracts_tool_result_from_pydantic_model()`**:
+  - **What it does**: Verifies extraction from Pydantic ToolResultContentBlock
+  - **Purpose**: Ensure Pydantic models are handled correctly
+
+- **`test_extracts_multiple_tool_results()`**:
+  - **What it does**: Verifies extraction of multiple tool results
+  - **Purpose**: Ensure all tool_result blocks are extracted
+
+- **`test_returns_empty_for_string_content()`**:
+  - **What it does**: Verifies empty list return for string content
+  - **Purpose**: Ensure string doesn't contain tool results
+
+- **`test_returns_empty_for_list_without_tool_results()`**:
+  - **What it does**: Verifies empty list return without tool_result blocks
+  - **Purpose**: Ensure regular elements are not extracted
+
+- **`test_handles_empty_content_in_tool_result()`**:
+  - **What it does**: Verifies handling of empty content in tool_result
+  - **Purpose**: Ensure empty content is replaced with "(empty result)"
+
+- **`test_handles_none_content_in_tool_result()`**:
+  - **What it does**: Verifies handling of None content in tool_result
+  - **Purpose**: Ensure None content is replaced with "(empty result)"
+
+- **`test_handles_list_content_in_tool_result()`**:
+  - **What it does**: Verifies handling of list content in tool_result
+  - **Purpose**: Ensure list content is converted to text
+
+- **`test_skips_tool_result_without_tool_use_id()`**:
+  - **What it does**: Verifies that tool_result without tool_use_id is skipped
+  - **Purpose**: Ensure invalid tool_result blocks are ignored
+
+#### `TestExtractToolUsesFromAnthropicContent`
+
+- **`test_extracts_tool_use_from_dict()`**:
+  - **What it does**: Verifies extraction of tool use from dict content block
+  - **Purpose**: Ensure tool_use blocks are extracted correctly
+
+- **`test_extracts_tool_use_from_pydantic_model()`**:
+  - **What it does**: Verifies extraction from Pydantic ToolUseContentBlock
+  - **Purpose**: Ensure Pydantic models are handled correctly
+
+- **`test_extracts_multiple_tool_uses()`**:
+  - **What it does**: Verifies extraction of multiple tool uses
+  - **Purpose**: Ensure all tool_use blocks are extracted
+
+- **`test_returns_empty_for_string_content()`**:
+  - **What it does**: Verifies empty list return for string content
+  - **Purpose**: Ensure string doesn't contain tool uses
+
+- **`test_returns_empty_for_list_without_tool_uses()`**:
+  - **What it does**: Verifies empty list return without tool_use blocks
+  - **Purpose**: Ensure regular elements are not extracted
+
+- **`test_skips_tool_use_without_id()`**:
+  - **What it does**: Verifies that tool_use without id is skipped
+  - **Purpose**: Ensure invalid tool_use blocks are ignored
+
+- **`test_skips_tool_use_without_name()`**:
+  - **What it does**: Verifies that tool_use without name is skipped
+  - **Purpose**: Ensure invalid tool_use blocks are ignored
+
+#### `TestConvertAnthropicMessages`
+
+- **`test_converts_simple_user_message()`**:
+  - **What it does**: Verifies conversion of simple user message
+  - **Purpose**: Ensure basic user message is converted to UnifiedMessage
+
+- **`test_converts_simple_assistant_message()`**:
+  - **What it does**: Verifies conversion of simple assistant message
+  - **Purpose**: Ensure basic assistant message is converted to UnifiedMessage
+
+- **`test_converts_user_message_with_content_blocks()`**:
+  - **What it does**: Verifies conversion of user message with content blocks
+  - **Purpose**: Ensure multimodal content is handled
+
+- **`test_converts_assistant_message_with_tool_use()`**:
+  - **What it does**: Verifies conversion of assistant message with tool_use
+  - **Purpose**: Ensure tool_use blocks are extracted as tool_calls
+
+- **`test_converts_user_message_with_tool_result()`**:
+  - **What it does**: Verifies conversion of user message with tool_result
+  - **Purpose**: Ensure tool_result blocks are extracted as tool_results
+
+- **`test_converts_full_conversation()`**:
+  - **What it does**: Verifies conversion of full conversation
+  - **Purpose**: Ensure multi-turn conversation is converted correctly
+
+- **`test_handles_empty_messages_list()`**:
+  - **What it does**: Verifies handling of empty messages list
+  - **Purpose**: Ensure empty list returns empty list
+
+#### `TestConvertAnthropicTools`
+
+- **`test_returns_none_for_none()`**:
+  - **What it does**: Verifies handling of None
+  - **Purpose**: Ensure None returns None
+
+- **`test_returns_none_for_empty_list()`**:
+  - **What it does**: Verifies handling of empty list
+  - **Purpose**: Ensure empty list returns None
+
+- **`test_converts_tool_from_pydantic_model()`**:
+  - **What it does**: Verifies conversion of Pydantic AnthropicTool
+  - **Purpose**: Ensure Pydantic models are converted to UnifiedTool
+
+- **`test_converts_tool_from_dict()`**:
+  - **What it does**: Verifies conversion of dict tool
+  - **Purpose**: Ensure dict tools are converted to UnifiedTool
+
+- **`test_converts_multiple_tools()`**:
+  - **What it does**: Verifies conversion of multiple tools
+  - **Purpose**: Ensure all tools are converted
+
+- **`test_handles_tool_without_description()`**:
+  - **What it does**: Verifies handling of tool without description
+  - **Purpose**: Ensure None description is preserved
+
+#### `TestAnthropicToKiro`
+
+Main entry point tests for anthropic_to_kiro function.
+
+- **`test_builds_simple_payload()`**:
+  - **What it does**: Verifies building of simple Kiro payload
+  - **Purpose**: Ensure basic request is converted correctly
+
+- **`test_includes_system_prompt()`**:
+  - **What it does**: Verifies that system prompt is included
+  - **Purpose**: Ensure Anthropic's separate system field is handled
+
+- **`test_includes_tools()`**:
+  - **What it does**: Verifies that tools are included in payload
+  - **Purpose**: Ensure Anthropic tools are converted to Kiro format
+
+- **`test_builds_history_for_multi_turn()`**:
+  - **What it does**: Verifies building of history for multi-turn conversation
+  - **Purpose**: Ensure conversation history is included in payload
+
+- **`test_handles_tool_use_and_result_flow()`**:
+  - **What it does**: Verifies handling of tool use and result flow
+  - **Purpose**: Ensure full tool flow is converted correctly
+
+- **`test_raises_for_empty_messages()`**:
+  - **What it does**: Verifies that empty messages raise Pydantic ValidationError
+  - **Purpose**: Ensure Pydantic validation works correctly (min_length=1)
+
+- **`test_injects_thinking_tags_when_enabled()`**:
+  - **What it does**: Verifies that thinking tags are injected when enabled
+  - **Purpose**: Ensure fake reasoning feature works with Anthropic API
+
+- **`test_skips_thinking_tags_when_tool_results_present()`**:
+  - **What it does**: Verifies that thinking tags are skipped when tool results are present
+  - **Purpose**: Ensure Kiro API compatibility (rejects thinking tags with tool results)
+
+---
+
+### `tests/unit/test_converters_core.py`
+
+Unit tests for **shared conversion logic** used by both OpenAI and Anthropic adapters. **71 tests.**
 
 #### `TestExtractTextContent`
 
-- **`test_extracts_from_string()`**: Verifies text extraction from string
-- **`test_extracts_from_none()`**: Verifies None handling
-- **`test_extracts_from_list_with_text_type()`**: Verifies extraction from list with type=text
-- **`test_extracts_from_list_with_text_key()`**: Verifies extraction from list with text key
-- **`test_extracts_from_list_with_strings()`**: Verifies extraction from list of strings
-- **`test_extracts_from_mixed_list()`**: Verifies extraction from mixed list
-- **`test_converts_other_types_to_string()`**: Verifies conversion of other types to string
-- **`test_handles_empty_list()`**: Verifies empty list handling
+- **`test_extracts_from_string()`**:
+  - **What it does**: Verifies text extraction from a string
+  - **Purpose**: Ensure string is returned as-is
+
+- **`test_extracts_from_none()`**:
+  - **What it does**: Verifies None handling
+  - **Purpose**: Ensure None returns empty string
+
+- **`test_extracts_from_list_with_text_type()`**:
+  - **What it does**: Verifies extraction from list with type=text
+  - **Purpose**: Ensure multimodal format is handled
+
+- **`test_extracts_from_list_with_text_key()`**:
+  - **What it does**: Verifies extraction from list with text key
+  - **Purpose**: Ensure alternative format is handled
+
+- **`test_extracts_from_list_with_strings()`**:
+  - **What it does**: Verifies extraction from list of strings
+  - **Purpose**: Ensure string list is concatenated
+
+- **`test_extracts_from_mixed_list()`**:
+  - **What it does**: Verifies extraction from mixed list
+  - **Purpose**: Ensure different formats in one list are handled
+
+- **`test_converts_other_types_to_string()`**:
+  - **What it does**: Verifies conversion of other types to string
+  - **Purpose**: Ensure numbers and other types are converted
+
+- **`test_handles_empty_list()`**:
+  - **What it does**: Verifies empty list handling
+  - **Purpose**: Ensure empty list returns empty string
 
 #### `TestMergeAdjacentMessages`
 
-- **`test_merges_adjacent_user_messages()`**: Verifies merging of adjacent user messages
-- **`test_preserves_alternating_messages()`**: Verifies preservation of alternating messages
-- **`test_handles_empty_list()`**: Verifies empty list handling
-- **`test_handles_single_message()`**: Verifies single message handling
-- **`test_merges_multiple_adjacent_groups()`**: Verifies merging of multiple groups
+Tests for merge_adjacent_messages function using UnifiedMessage.
 
-**New tests for tool message handling (role="tool"):**
+- **`test_merges_adjacent_user_messages()`**:
+  - **What it does**: Verifies merging of adjacent user messages
+  - **Purpose**: Ensure messages with the same role are merged
 
-- **`test_converts_tool_message_to_user_with_tool_result()`**:
-  - **What it does**: Verifies conversion of tool message to user message with tool_result
-  - **Purpose**: Ensure role="tool" is converted to user message with tool_results content
+- **`test_preserves_alternating_messages()`**:
+  - **What it does**: Verifies preservation of alternating messages
+  - **Purpose**: Ensure different roles are not merged
 
-- **`test_converts_multiple_tool_messages_to_single_user_message()`**:
-  - **What it does**: Verifies merging of multiple tool messages into single user message
-  - **Purpose**: Ensure multiple tool results are merged into one user message
+- **`test_handles_empty_list()`**:
+  - **What it does**: Verifies empty list handling
+  - **Purpose**: Ensure empty list doesn't cause errors
 
-- **`test_tool_message_followed_by_user_message()`**:
-  - **What it does**: Verifies tool message before user message
-  - **Purpose**: Ensure tool results and user message are merged
+- **`test_handles_single_message()`**:
+  - **What it does**: Verifies single message handling
+  - **Purpose**: Ensure single message is returned as-is
 
-- **`test_assistant_tool_user_sequence()`**:
-  - **What it does**: Verifies assistant -> tool -> user sequence
-  - **Purpose**: Ensure tool message is correctly inserted between assistant and user
-
-- **`test_tool_message_with_empty_content()`**:
-  - **What it does**: Verifies tool message with empty content
-  - **Purpose**: Ensure empty result is replaced with "(empty result)"
-
-- **`test_tool_message_with_none_tool_call_id()`**:
-  - **What it does**: Verifies tool message without tool_call_id
-  - **Purpose**: Ensure missing tool_call_id is replaced with empty string
+- **`test_merges_multiple_adjacent_groups()`**:
+  - **What it does**: Verifies merging of multiple groups
+  - **Purpose**: Ensure multiple groups of adjacent messages are merged
 
 - **`test_merges_list_contents_correctly()`**:
-  - **What it does**: Verifies list contents merging
+  - **What it does**: Verifies merging of list contents
   - **Purpose**: Ensure lists are merged correctly
 
 - **`test_merges_adjacent_assistant_tool_calls()`**:
@@ -891,80 +1105,13 @@ Unit tests for **OpenAI <-> Kiro** converters. **86 tests.**
   - **What it does**: Verifies merging assistant with and without tool_calls
   - **Purpose**: Ensure tool_calls are correctly initialized when merging
 
-#### `TestBuildKiroPayloadToolCallsIntegration`
-
-Integration tests for full tool_calls flow from OpenAI to Kiro format.
-
-- **`test_multiple_assistant_tool_calls_with_results()`**:
-  - **What it does**: Verifies full scenario with multiple assistant tool_calls and their results
-  - **Purpose**: Ensure all toolUses and toolResults are correctly linked in Kiro payload
-
-#### `TestBuildKiroHistory`
-
-- **`test_builds_user_message()`**: Verifies user message building
-- **`test_builds_assistant_message()`**: Verifies assistant message building
-- **`test_ignores_system_messages()`**: Verifies system message ignoring
-- **`test_builds_conversation_history()`**: Verifies full conversation history building
-- **`test_handles_empty_list()`**: Verifies empty list handling
-
-#### `TestExtractToolResults` and `TestExtractToolUses`
-
-- **`test_extracts_tool_results_from_list()`**: Verifies tool results extraction from list
-- **`test_returns_empty_for_string_content()`**: Verifies empty list return for string
-- **`test_extracts_from_tool_calls_field()`**: Verifies extraction from tool_calls field
-- **`test_extracts_from_content_list()`**: Verifies extraction from content list
-
-#### `TestProcessToolsWithLongDescriptions`
-
-Tests for tools processing function with long descriptions (Tool Documentation Reference Pattern).
-
-- **`test_returns_none_and_empty_string_for_none_tools()`**:
-  - **What it does**: Verifies handling of None instead of tools list
-  - **Purpose**: Ensure None returns (None, "")
-
-- **`test_returns_none_and_empty_string_for_empty_list()`**:
-  - **What it does**: Verifies handling of empty tools list
-  - **Purpose**: Ensure empty list returns (None, "")
-
-- **`test_short_description_unchanged()`**:
-  - **What it does**: Verifies that short descriptions are not changed
-  - **Purpose**: Ensure tools with short descriptions remain as-is
-
-- **`test_long_description_moved_to_system_prompt()`**:
-  - **What it does**: Verifies moving long description to system prompt
-  - **Purpose**: Ensure long descriptions are moved correctly with reference in tool
-
-- **`test_mixed_short_and_long_descriptions()`**:
-  - **What it does**: Verifies handling of mixed tools list
-  - **Purpose**: Ensure short ones stay, long ones are moved
-
-- **`test_preserves_tool_parameters()`**:
-  - **What it does**: Verifies parameters preservation when moving description
-  - **Purpose**: Ensure parameters are not lost
-
-- **`test_disabled_when_limit_is_zero()`**:
-  - **What it does**: Verifies feature disabling when limit is 0
-  - **Purpose**: Ensure tools are not changed when TOOL_DESCRIPTION_MAX_LENGTH=0
-
-- **`test_non_function_tools_unchanged()`**:
-  - **What it does**: Verifies that non-function tools are not changed
-  - **Purpose**: Ensure only function tools are processed
-
-- **`test_multiple_long_descriptions_all_moved()`**:
-  - **What it does**: Verifies moving multiple long descriptions
-  - **Purpose**: Ensure all long descriptions are moved
-
-- **`test_empty_description_unchanged()`**:
-  - **What it does**: Verifies handling of empty description
-  - **Purpose**: Ensure empty description doesn't cause errors
-
-- **`test_none_description_unchanged()`**:
-  - **What it does**: Verifies handling of None description
-  - **Purpose**: Ensure None description doesn't cause errors
+- **`test_merges_user_messages_with_tool_results()`**:
+  - **What it does**: Verifies merging of user messages with tool_results
+  - **Purpose**: Ensure tool_results are preserved when merging user messages
 
 #### `TestSanitizeJsonSchema`
 
-Tests for `_sanitize_json_schema` function that cleans JSON Schema from fields not supported by Kiro API.
+Tests for sanitize_json_schema function that cleans JSON Schema from fields not supported by Kiro API.
 
 - **`test_returns_empty_dict_for_none()`**:
   - **What it does**: Verifies None handling
@@ -976,7 +1123,7 @@ Tests for `_sanitize_json_schema` function that cleans JSON Schema from fields n
 
 - **`test_removes_empty_required_array()`**:
   - **What it does**: Verifies removal of empty required array
-  - **Purpose**: Ensure `required: []` is removed from schema (critical test for Cline bug)
+  - **Purpose**: Ensure `required: []` is removed from schema (critical for Cline bug)
 
 - **`test_preserves_non_empty_required_array()`**:
   - **What it does**: Verifies preservation of non-empty required array
@@ -988,62 +1135,133 @@ Tests for `_sanitize_json_schema` function that cleans JSON Schema from fields n
 
 - **`test_removes_both_empty_required_and_additional_properties()`**:
   - **What it does**: Verifies removal of both problematic fields
-  - **Purpose**: Ensure both fields are removed simultaneously (real scenario from Cline)
+  - **Purpose**: Ensure both fields are removed simultaneously
 
 - **`test_recursively_sanitizes_nested_properties()`**:
-  - **What it does**: Verifies recursive cleaning of nested properties
-  - **Purpose**: Ensure nested schemas are also cleaned
-
-- **`test_recursively_sanitizes_dict_values()`**:
-  - **What it does**: Verifies recursive cleaning of dict values
-  - **Purpose**: Ensure any nested dicts are cleaned
+  - **What it does**: Verifies recursive sanitization of nested properties
+  - **Purpose**: Ensure nested schemas are also sanitized
 
 - **`test_sanitizes_items_in_lists()`**:
-  - **What it does**: Verifies cleaning of items in lists (anyOf, oneOf)
-  - **Purpose**: Ensure list items are also cleaned
+  - **What it does**: Verifies sanitization of items in lists (anyOf, oneOf)
+  - **Purpose**: Ensure list elements are also sanitized
 
 - **`test_preserves_non_dict_list_items()`**:
-  - **What it does**: Verifies preservation of non-dict items in lists
+  - **What it does**: Verifies preservation of non-dict list items
   - **Purpose**: Ensure strings and other types in lists are preserved
 
 - **`test_complex_real_world_schema()`**:
-  - **What it does**: Verifies cleaning of real complex schema from Cline
-  - **Purpose**: Ensure real schemas are processed correctly
+  - **What it does**: Verifies sanitization of real complex schema
+  - **Purpose**: Ensure real schemas are handled correctly
 
-#### `TestBuildUserInputContext`
+#### `TestExtractToolResults`
 
-- **`test_builds_tools_context()`**: Verifies context building with tools
-- **`test_returns_empty_for_no_tools()`**: Verifies empty context return without tools
+- **`test_extracts_tool_results_from_list()`**:
+  - **What it does**: Verifies extraction of tool results from list
+  - **Purpose**: Ensure tool_result elements are extracted
 
-**New tests for empty description placeholder (Cline bug fix):**
+- **`test_returns_empty_for_string_content()`**:
+  - **What it does**: Verifies empty list return for string
+  - **Purpose**: Ensure string doesn't contain tool results
 
-- **`test_empty_description_replaced_with_placeholder()`**:
-  - **What it does**: Verifies empty description replacement with placeholder
-  - **Purpose**: Ensure empty description is replaced with "Tool: {name}" (critical test for Cline bug with focus_chain)
+- **`test_returns_empty_for_list_without_tool_results()`**:
+  - **What it does**: Verifies empty list return without tool_result
+  - **Purpose**: Ensure regular elements are not extracted
 
-- **`test_whitespace_only_description_replaced_with_placeholder()`**:
-  - **What it does**: Verifies whitespace-only description replacement with placeholder
-  - **Purpose**: Ensure description with only spaces is replaced
+- **`test_extracts_multiple_tool_results()`**:
+  - **What it does**: Verifies extraction of multiple tool results
+  - **Purpose**: Ensure all tool_result elements are extracted
 
-- **`test_none_description_replaced_with_placeholder()`**:
-  - **What it does**: Verifies None description replacement with placeholder
+#### `TestExtractToolUses`
+
+- **`test_extracts_from_tool_calls_field()`**:
+  - **What it does**: Verifies extraction from tool_calls field
+  - **Purpose**: Ensure OpenAI tool_calls format is handled
+
+- **`test_extracts_from_content_list()`**:
+  - **What it does**: Verifies extraction from content list
+  - **Purpose**: Ensure tool_use in content is handled (Anthropic format)
+
+- **`test_returns_empty_for_no_tool_uses()`**:
+  - **What it does**: Verifies empty list return without tool uses
+  - **Purpose**: Ensure regular message doesn't contain tool uses
+
+- **`test_extracts_from_both_sources()`**:
+  - **What it does**: Verifies extraction from both tool_calls and content
+  - **Purpose**: Ensure both sources are combined
+
+#### `TestProcessToolsWithLongDescriptions`
+
+Tests for process_tools_with_long_descriptions function using UnifiedTool.
+
+- **`test_returns_none_and_empty_string_for_none_tools()`**:
+  - **What it does**: Verifies handling of None instead of tools list
+  - **Purpose**: Ensure None returns (None, "")
+
+- **`test_returns_none_and_empty_string_for_empty_list()`**:
+  - **What it does**: Verifies handling of empty tools list
+  - **Purpose**: Ensure empty list returns (None, "")
+
+- **`test_short_description_unchanged()`**:
+  - **What it does**: Verifies short descriptions are unchanged
+  - **Purpose**: Ensure tools with short descriptions remain as-is
+
+- **`test_long_description_moved_to_system_prompt()`**:
+  - **What it does**: Verifies moving long description to system prompt
+  - **Purpose**: Ensure long descriptions are moved correctly
+
+- **`test_mixed_short_and_long_descriptions()`**:
+  - **What it does**: Verifies handling of mixed tools list
+  - **Purpose**: Ensure short ones stay, long ones are moved
+
+- **`test_disabled_when_limit_is_zero()`**:
+  - **What it does**: Verifies function is disabled when limit is 0
+  - **Purpose**: Ensure tools are unchanged when TOOL_DESCRIPTION_MAX_LENGTH=0
+
+- **`test_multiple_long_descriptions_all_moved()`**:
+  - **What it does**: Verifies moving of multiple long descriptions
+  - **Purpose**: Ensure all long descriptions are moved
+
+- **`test_empty_description_unchanged()`**:
+  - **What it does**: Verifies handling of empty description
+  - **Purpose**: Ensure empty description doesn't cause errors
+
+- **`test_none_description_unchanged()`**:
+  - **What it does**: Verifies handling of None description
+  - **Purpose**: Ensure None description doesn't cause errors
+
+- **`test_preserves_tool_input_schema()`**:
+  - **What it does**: Verifies input_schema preservation when moving description
+  - **Purpose**: Ensure input_schema is not lost
+
+#### `TestConvertToolsToKiroFormat`
+
+- **`test_returns_empty_list_for_none()`**:
+  - **What it does**: Verifies handling of None
+  - **Purpose**: Ensure None returns empty list
+
+- **`test_returns_empty_list_for_empty_list()`**:
+  - **What it does**: Verifies handling of empty list
+  - **Purpose**: Ensure empty list returns empty list
+
+- **`test_converts_tool_to_kiro_format()`**:
+  - **What it does**: Verifies conversion of tool to Kiro format
+  - **Purpose**: Ensure toolSpecification structure is correct
+
+- **`test_replaces_empty_description_with_placeholder()`**:
+  - **What it does**: Verifies replacement of empty description
+  - **Purpose**: Ensure empty description is replaced with "Tool: {name}"
+
+- **`test_replaces_none_description_with_placeholder()`**:
+  - **What it does**: Verifies replacement of None description
   - **Purpose**: Ensure None description is replaced with "Tool: {name}"
 
-- **`test_non_empty_description_preserved()`**:
-  - **What it does**: Verifies non-empty description preservation
-  - **Purpose**: Ensure normal description is not changed
-
-- **`test_sanitizes_tool_parameters()`**:
-  - **What it does**: Verifies parameters cleaning from problematic fields
-  - **Purpose**: Ensure _sanitize_json_schema is applied to parameters
-
-- **`test_mixed_tools_with_empty_and_normal_descriptions()`**:
-  - **What it does**: Verifies handling of mixed tools list
-  - **Purpose**: Ensure empty descriptions are replaced while normal ones are preserved (real scenario from Cline)
+- **`test_sanitizes_input_schema()`**:
+  - **What it does**: Verifies sanitization of input schema
+  - **Purpose**: Ensure problematic fields are removed from schema
 
 #### `TestInjectThinkingTags`
 
-Tests for inject_thinking_tags function with thinking instruction.
+Tests for inject_thinking_tags function.
 
 - **`test_returns_original_content_when_disabled()`**:
   - **What it does**: Verifies that content is returned unchanged when fake reasoning is disabled
@@ -1061,34 +1279,6 @@ Tests for inject_thinking_tags function with thinking instruction.
   - **What it does**: Verifies that thinking instruction includes English language directive
   - **Purpose**: Ensure model is instructed to think in English for better reasoning quality
 
-- **`test_thinking_instruction_contains_systematic_approach()`**:
-  - **What it does**: Verifies that thinking instruction includes systematic approach guidance
-  - **Purpose**: Ensure model is instructed to think systematically
-
-- **`test_thinking_instruction_contains_understanding_step()`**:
-  - **What it does**: Verifies that thinking instruction includes understanding step
-  - **Purpose**: Ensure model is instructed to understand the problem first
-
-- **`test_thinking_instruction_contains_alternatives_consideration()`**:
-  - **What it does**: Verifies that thinking instruction includes alternatives consideration
-  - **Purpose**: Ensure model is instructed to consider multiple approaches
-
-- **`test_thinking_instruction_contains_edge_cases()`**:
-  - **What it does**: Verifies that thinking instruction includes edge cases consideration
-  - **Purpose**: Ensure model is instructed to think about edge cases and potential issues
-
-- **`test_thinking_instruction_contains_verification_step()`**:
-  - **What it does**: Verifies that thinking instruction includes verification step
-  - **Purpose**: Ensure model is instructed to verify reasoning before concluding
-
-- **`test_thinking_instruction_contains_assumptions_challenge()`**:
-  - **What it does**: Verifies that thinking instruction includes assumptions challenge
-  - **Purpose**: Ensure model is instructed to challenge initial assumptions
-
-- **`test_thinking_instruction_contains_quality_over_speed()`**:
-  - **What it does**: Verifies that thinking instruction emphasizes quality over speed
-  - **Purpose**: Ensure model is instructed to prioritize quality of thought
-
 - **`test_uses_configured_max_tokens()`**:
   - **What it does**: Verifies that FAKE_REASONING_MAX_TOKENS config value is used
   - **Purpose**: Ensure the configured max tokens value is injected into the tag
@@ -1105,32 +1295,221 @@ Tests for inject_thinking_tags function with thinking instruction.
   - **What it does**: Verifies that special characters in content are preserved
   - **Purpose**: Ensure XML-like content in user message doesn't break injection
 
+- **`test_thinking_instruction_contains_systematic_approach()`**:
+  - **What it does**: Verifies that thinking instruction includes systematic approach guidance
+  - **Purpose**: Ensure model is instructed to think systematically
+
+- **`test_thinking_instruction_contains_understanding_step()`**:
+  - **What it does**: Verifies that thinking instruction includes understanding step
+  - **Purpose**: Ensure model is instructed to understand the problem first
+
+- **`test_thinking_instruction_contains_verification_step()`**:
+  - **What it does**: Verifies that thinking instruction includes verification step
+  - **Purpose**: Ensure model is instructed to verify reasoning before concluding
+
+- **`test_thinking_instruction_contains_quality_emphasis()`**:
+  - **What it does**: Verifies that thinking instruction emphasizes quality over speed
+  - **Purpose**: Ensure model is instructed to prioritize quality of thought
+
 - **`test_tag_order_is_correct()`**:
   - **What it does**: Verifies that tags are in the correct order
   - **Purpose**: Ensure thinking_mode comes first, then max_thinking_length, then instruction, then content
 
+#### `TestBuildKiroHistory`
+
+Tests for build_kiro_history function using UnifiedMessage.
+
+- **`test_builds_user_message()`**:
+  - **What it does**: Verifies building of user message
+  - **Purpose**: Ensure user message is converted to userInputMessage
+
+- **`test_builds_assistant_message()`**:
+  - **What it does**: Verifies building of assistant message
+  - **Purpose**: Ensure assistant message is converted to assistantResponseMessage
+
+- **`test_ignores_system_messages()`**:
+  - **What it does**: Verifies ignoring of system messages
+  - **Purpose**: Ensure system messages are not added to history
+
+- **`test_builds_conversation_history()`**:
+  - **What it does**: Verifies building of full conversation history
+  - **Purpose**: Ensure user/assistant alternation is preserved
+
+- **`test_handles_empty_list()`**:
+  - **What it does**: Verifies empty list handling
+  - **Purpose**: Ensure empty list returns empty history
+
+- **`test_builds_user_message_with_tool_results()`**:
+  - **What it does**: Verifies building of user message with tool_results
+  - **Purpose**: Ensure tool_results are included in userInputMessageContext
+
+- **`test_builds_assistant_message_with_tool_calls()`**:
+  - **What it does**: Verifies building of assistant message with tool_calls
+  - **Purpose**: Ensure tool_calls are converted to toolUses
+
+---
+
+### `tests/unit/test_converters_openai.py`
+
+Unit tests for **OpenAI Chat API → Kiro** converters. **47 tests.**
+
+#### `TestConvertOpenAIMessagesToUnified`
+
+- **`test_extracts_system_prompt()`**:
+  - **What it does**: Verifies extraction of system prompt from messages
+  - **Purpose**: Ensure system messages are extracted separately
+
+- **`test_combines_multiple_system_messages()`**:
+  - **What it does**: Verifies combining of multiple system messages
+  - **Purpose**: Ensure all system messages are concatenated
+
+- **`test_converts_tool_message_to_user_with_tool_results()`**:
+  - **What it does**: Verifies conversion of tool message to user message with tool_results
+  - **Purpose**: Ensure role="tool" is converted correctly
+
+- **`test_converts_multiple_tool_messages()`**:
+  - **What it does**: Verifies conversion of multiple consecutive tool messages
+  - **Purpose**: Ensure all tool results are collected into one user message
+
+- **`test_extracts_tool_calls_from_assistant()`**:
+  - **What it does**: Verifies extraction of tool_calls from assistant message
+  - **Purpose**: Ensure tool_calls are preserved in unified format
+
+- **`test_handles_empty_tool_call_id()`**:
+  - **What it does**: Verifies handling of None tool_call_id
+  - **Purpose**: Ensure None is replaced with empty string
+
+- **`test_handles_empty_tool_content()`**:
+  - **What it does**: Verifies handling of empty tool content
+  - **Purpose**: Ensure empty content is replaced with "(empty result)"
+
+- **`test_tool_messages_followed_by_user_message()`**:
+  - **What it does**: Verifies tool messages followed by user message
+  - **Purpose**: Ensure tool results are in separate message from user content
+
+#### `TestConvertOpenAIToolsToUnified`
+
+- **`test_returns_none_for_none()`**:
+  - **What it does**: Verifies handling of None
+  - **Purpose**: Ensure None returns None
+
+- **`test_returns_none_for_empty_list()`**:
+  - **What it does**: Verifies handling of empty list
+  - **Purpose**: Ensure empty list returns None
+
+- **`test_converts_function_tool()`**:
+  - **What it does**: Verifies conversion of function tool
+  - **Purpose**: Ensure Tool is converted to UnifiedTool
+
+- **`test_skips_non_function_tools()`**:
+  - **What it does**: Verifies skipping of non-function tools
+  - **Purpose**: Ensure only function tools are converted
+
+- **`test_converts_multiple_tools()`**:
+  - **What it does**: Verifies conversion of multiple tools
+  - **Purpose**: Ensure all function tools are converted
+
 #### `TestBuildKiroPayload`
 
-- **`test_builds_simple_payload()`**: Verifies simple payload building
-- **`test_includes_system_prompt_in_first_message()`**: Verifies system prompt addition
-- **`test_builds_history_for_multi_turn()`**: Verifies history building for multi-turn
-- **`test_handles_assistant_as_last_message()`**: Verifies handling of assistant as last message
-- **`test_raises_for_empty_messages()`**: Verifies exception throwing for empty messages
-- **`test_uses_continue_for_empty_content()`**: Verifies "Continue" usage for empty content
-- **`test_maps_model_id_correctly()`**: Verifies external model ID mapping to internal
-- **`test_long_tool_description_added_to_system_prompt()`**:
-  - **What it does**: Verifies long tool descriptions integration in payload
-  - **Purpose**: Ensure long descriptions are added to system prompt in payload
+- **`test_builds_simple_payload()`**:
+  - **What it does**: Verifies building of simple payload
+  - **Purpose**: Ensure basic request is converted correctly
 
-**New tests for thinking tags + toolResults fix (GitHub issue #20):**
+- **`test_includes_system_prompt_in_first_message()`**:
+  - **What it does**: Verifies adding system prompt to first message
+  - **Purpose**: Ensure system prompt is merged with user message
+
+- **`test_builds_history_for_multi_turn()`**:
+  - **What it does**: Verifies building history for multi-turn
+  - **Purpose**: Ensure previous messages go into history
+
+- **`test_handles_assistant_as_last_message()`**:
+  - **What it does**: Verifies handling of assistant as last message
+  - **Purpose**: Ensure "Continue" message is created
+
+- **`test_raises_for_empty_messages()`**:
+  - **What it does**: Verifies exception raising for empty messages
+  - **Purpose**: Ensure empty request raises ValueError
+
+- **`test_uses_continue_for_empty_content()`**:
+  - **What it does**: Verifies using "Continue" for empty content
+  - **Purpose**: Ensure empty message is replaced with "Continue"
+
+- **`test_maps_model_id_correctly()`**:
+  - **What it does**: Verifies mapping of external model ID to internal
+  - **Purpose**: Ensure MODEL_MAPPING is applied
+
+- **`test_includes_tools_in_context()`**:
+  - **What it does**: Verifies including tools in userInputMessageContext
+  - **Purpose**: Ensure tools are converted and included
 
 - **`test_skips_thinking_tags_when_tool_results_present()`**:
-  - **What it does**: Verifies thinking tags are NOT injected when toolResults are present in current message
-  - **Purpose**: Fix GitHub issue #20 - OpenCode compaction returns 400 error when thinking tags + toolResults combination is sent to Kiro API
+  - **What it does**: Verifies thinking tags are NOT injected when toolResults are present
+  - **Purpose**: Fix GitHub issue #20 - OpenCode compaction returns 400 error
 
 - **`test_injects_thinking_tags_when_no_tool_results()`**:
-  - **What it does**: Verifies thinking tags ARE injected for normal user messages without tool results
+  - **What it does**: Verifies thinking tags ARE injected for normal user messages
   - **Purpose**: Ensure fix for issue #20 doesn't break normal thinking tag injection
+
+#### `TestToolMessageHandling`
+
+Tests for OpenAI tool message (role="tool") handling.
+
+- **`test_converts_multiple_tool_messages_to_single_user_message()`**:
+  - **What it does**: Verifies merging of multiple tool messages into single user message
+  - **Purpose**: Ensure multiple tool results are merged into one user message
+
+- **`test_assistant_tool_user_sequence()`**:
+  - **What it does**: Verifies assistant -> tool -> user sequence
+  - **Purpose**: Ensure tool message is correctly inserted between assistant and user
+
+- **`test_tool_message_with_empty_content()`**:
+  - **What it does**: Verifies tool message with empty content
+  - **Purpose**: Ensure empty result is replaced with "(empty result)"
+
+- **`test_tool_message_with_none_tool_call_id()`**:
+  - **What it does**: Verifies tool message without tool_call_id
+  - **Purpose**: Ensure missing tool_call_id is replaced with empty string
+
+#### `TestToolDescriptionHandling`
+
+Tests for handling empty/whitespace tool descriptions.
+
+- **`test_empty_description_replaced_with_placeholder()`**:
+  - **What it does**: Verifies replacement of empty description with placeholder
+  - **Purpose**: Ensure empty description is replaced with "Tool: {name}" (critical for Cline bug with focus_chain)
+
+- **`test_whitespace_only_description_replaced_with_placeholder()`**:
+  - **What it does**: Verifies replacement of whitespace-only description with placeholder
+  - **Purpose**: Ensure description with only whitespace is replaced
+
+- **`test_none_description_replaced_with_placeholder()`**:
+  - **What it does**: Verifies replacement of None description with placeholder
+  - **Purpose**: Ensure None description is replaced with "Tool: {name}"
+
+- **`test_non_empty_description_preserved()`**:
+  - **What it does**: Verifies preservation of non-empty description
+  - **Purpose**: Ensure normal description is not changed
+
+- **`test_sanitizes_tool_parameters()`**:
+  - **What it does**: Verifies sanitization of parameters from problematic fields
+  - **Purpose**: Ensure sanitize_json_schema is applied to parameters
+
+- **`test_mixed_tools_with_empty_and_normal_descriptions()`**:
+  - **What it does**: Verifies handling of mixed tools list
+  - **Purpose**: Ensure empty descriptions are replaced while normal ones are preserved (real scenario from Cline)
+
+#### `TestBuildKiroPayloadToolCallsIntegration`
+
+Integration tests for build_kiro_payload with tool_calls.
+
+- **`test_multiple_assistant_tool_calls_with_results()`**:
+  - **What it does**: Verifies full scenario with multiple assistant tool_calls and their results
+  - **Purpose**: Ensure all toolUses and toolResults are correctly linked in Kiro payload
+
+- **`test_long_tool_description_added_to_system_prompt()`**:
+  - **What it does**: Verifies integration of long tool descriptions into payload
+  - **Purpose**: Ensure long descriptions are added to system prompt in payload
 
 ---
 
@@ -1580,117 +1959,545 @@ Integration tests for tokenizer.
 
 ---
 
-### `tests/unit/test_streaming.py`
+### `tests/unit/test_streaming_anthropic.py`
 
-Unit tests for **streaming module** (Kiro to OpenAI format stream conversion). **23 tests.**
+Unit tests for **Anthropic streaming module** (Kiro → Anthropic SSE format conversion). **38 tests.**
 
-#### `TestStreamingToolCallsIndex`
+#### `TestGenerateMessageId`
 
-Tests for adding index to tool_calls in streaming responses.
+- **`test_generates_message_id_with_prefix()`**:
+  - **What it does**: Verifies message ID has 'msg_' prefix
+  - **Purpose**: Ensure Anthropic message ID format
 
-- **`test_tool_calls_have_index_field()`**:
-  - **What it does**: Verifies that tool_calls in streaming response contain index field
-  - **Purpose**: Ensure OpenAI API spec is followed for streaming tool calls
+- **`test_generates_unique_ids()`**:
+  - **What it does**: Verifies 100 generated IDs are unique
+  - **Purpose**: Ensure ID uniqueness
 
-- **`test_multiple_tool_calls_have_sequential_indices()`**:
-  - **What it does**: Verifies that multiple tool_calls have sequential indices
-  - **Purpose**: Ensure indices start from 0 and go sequentially
+- **`test_message_id_has_correct_length()`**:
+  - **What it does**: Verifies message ID length (msg_ + 24 chars)
+  - **Purpose**: Ensure ID format matches Anthropic spec
 
-#### `TestStreamingToolCallsNoneProtection`
+#### `TestFormatSseEvent`
 
-Tests for None value protection in tool_calls.
+- **`test_formats_message_start_event()`**:
+  - **What it does**: Formats message_start event
+  - **Purpose**: Verify Anthropic SSE format
 
-- **`test_handles_none_function_name()`**:
-  - **What it does**: Verifies None handling in function.name
-  - **Purpose**: Ensure None is replaced with empty string
+- **`test_formats_content_block_delta_event()`**:
+  - **What it does**: Formats content_block_delta event
+  - **Purpose**: Verify delta event format
 
-- **`test_handles_none_function_arguments()`**:
-  - **What it does**: Verifies None handling in function.arguments
-  - **Purpose**: Ensure None is replaced with "{}"
+- **`test_formats_message_stop_event()`**:
+  - **What it does**: Formats message_stop event
+  - **Purpose**: Verify stop event format
 
-- **`test_handles_none_function_object()`**:
-  - **What it does**: Verifies None handling instead of function object
-  - **Purpose**: Ensure None function is handled without errors
+- **`test_handles_unicode_content()`**:
+  - **What it does**: Handles Unicode content in events
+  - **Purpose**: Verify non-ASCII characters are preserved
 
-#### `TestCollectStreamResponseToolCalls`
+- **`test_json_data_is_valid()`**:
+  - **What it does**: Verifies JSON data is valid and parseable
+  - **Purpose**: Ensure data can be parsed back
 
-Tests for collect_stream_response with tool_calls.
+#### `TestStreamKiroToAnthropic`
 
-- **`test_collected_tool_calls_have_no_index()`**:
-  - **What it does**: Verifies that collected tool_calls don't contain index field
-  - **Purpose**: Ensure index is removed for non-streaming response
+- **`test_yields_message_start_event()`**:
+  - **What it does**: Yields message_start event at beginning
+  - **Purpose**: Verify Anthropic streaming protocol
 
-- **`test_collected_tool_calls_have_required_fields()`**:
-  - **What it does**: Verifies that collected tool_calls contain all required fields
-  - **Purpose**: Ensure id, type, function are present
+- **`test_yields_content_block_start_on_first_content()`**:
+  - **What it does**: Yields content_block_start before first content
+  - **Purpose**: Verify content block lifecycle
 
-- **`test_handles_none_in_collected_tool_calls()`**:
-  - **What it does**: Verifies None value handling in collected tool_calls
-  - **Purpose**: Ensure None values are replaced with defaults
+- **`test_yields_content_block_delta_for_content()`**:
+  - **What it does**: Yields content_block_delta for content events
+  - **Purpose**: Verify content streaming
 
-#### `TestStreamingErrorHandling`
+- **`test_yields_tool_use_block_for_tool_calls()`**:
+  - **What it does**: Yields tool_use block for tool calls
+  - **Purpose**: Verify tool use streaming
 
-Tests for error handling in streaming module (bug #8 fix).
+- **`test_yields_message_delta_with_stop_reason()`**:
+  - **What it does**: Yields message_delta with stop_reason
+  - **Purpose**: Verify message completion
 
-- **`test_generator_exit_handled_gracefully()`**:
-  - **What it does**: Verifies that GeneratorExit is handled without logging as error
-  - **Purpose**: Ensure client disconnect doesn't cause ERROR in logs
+- **`test_yields_message_stop_at_end()`**:
+  - **What it does**: Yields message_stop at end
+  - **Purpose**: Verify stream termination
 
-- **`test_exception_with_empty_message_logged_with_type()`**:
-  - **What it does**: Verifies that exception with empty message is logged with type
-  - **Purpose**: Ensure exception type is visible in logs even if str(e) is empty
+- **`test_stop_reason_is_tool_use_when_tools_present()`**:
+  - **What it does**: Sets stop_reason to tool_use when tools present
+  - **Purpose**: Verify correct stop reason for tool calls
 
-- **`test_exception_propagated_to_caller()`**:
-  - **What it does**: Verifies that exceptions are propagated up
-  - **Purpose**: Ensure errors are not "swallowed" inside generator
+- **`test_handles_bracket_tool_calls()`**:
+  - **What it does**: Handles bracket-style tool calls in content
+  - **Purpose**: Verify bracket tool call detection
 
-- **`test_response_closed_on_error()`**:
-  - **What it does**: Verifies that response is closed even on error
-  - **Purpose**: Ensure resources are released in finally block
+- **`test_closes_response_on_completion()`**:
+  - **What it does**: Closes response on completion
+  - **Purpose**: Verify resource cleanup
 
-- **`test_response_closed_on_success()`**:
-  - **What it does**: Verifies that response is closed on successful completion
-  - **Purpose**: Ensure resources are released in finally block
+- **`test_closes_response_on_error()`**:
+  - **What it does**: Closes response on error
+  - **Purpose**: Verify resource cleanup on error
 
-- **`test_aclose_error_does_not_mask_original_error()`**:
-  - **What it does**: Verifies that aclose() error doesn't mask original error
-  - **Purpose**: Ensure original exception is propagated even if aclose() fails
+#### `TestCollectAnthropicResponse`
+
+- **`test_collects_text_content()`**:
+  - **What it does**: Collects text content into response
+  - **Purpose**: Verify content collection
+
+- **`test_collects_tool_use_content()`**:
+  - **What it does**: Collects tool use into response
+  - **Purpose**: Verify tool use collection
+
+- **`test_sets_stop_reason_end_turn()`**:
+  - **What it does**: Sets stop_reason to end_turn for normal completion
+  - **Purpose**: Verify stop reason
+
+- **`test_sets_stop_reason_tool_use()`**:
+  - **What it does**: Sets stop_reason to tool_use when tools present
+  - **Purpose**: Verify stop reason for tool calls
+
+- **`test_includes_usage_info()`**:
+  - **What it does**: Includes usage information in response
+  - **Purpose**: Verify usage is included
+
+- **`test_generates_message_id()`**:
+  - **What it does**: Generates message ID for response
+  - **Purpose**: Verify message ID is present
+
+- **`test_includes_model_name()`**:
+  - **What it does**: Includes model name in response
+  - **Purpose**: Verify model is included
+
+- **`test_parses_tool_arguments_from_string()`**:
+  - **What it does**: Parses tool arguments from JSON string
+  - **Purpose**: Verify arguments are parsed to dict
+
+- **`test_handles_invalid_json_arguments()`**:
+  - **What it does**: Handles invalid JSON in tool arguments
+  - **Purpose**: Verify graceful handling of invalid JSON
+
+- **`test_handles_empty_content()`**:
+  - **What it does**: Handles empty content in response
+  - **Purpose**: Verify empty content is handled
+
+#### `TestStreamingAnthropicErrorHandling`
+
+- **`test_propagates_first_token_timeout_error()`**:
+  - **What it does**: Propagates FirstTokenTimeoutError
+  - **Purpose**: Verify timeout error is not caught internally
+
+- **`test_propagates_generator_exit()`**:
+  - **What it does**: Propagates GeneratorExit
+  - **Purpose**: Verify client disconnect is handled
+
+- **`test_yields_error_event_on_exception()`**:
+  - **What it does**: Yields error event on exception
+  - **Purpose**: Verify error event is sent to client
+
+- **`test_closes_response_in_finally()`**:
+  - **What it does**: Closes response in finally block
+  - **Purpose**: Verify resource cleanup always happens
+
+#### `TestStreamingAnthropicThinkingContent`
+
+- **`test_includes_thinking_as_text_when_configured()`**:
+  - **What it does**: Includes thinking content as text when configured
+  - **Purpose**: Verify thinking content handling
+
+- **`test_strips_thinking_when_configured()`**:
+  - **What it does**: Strips thinking content when configured
+  - **Purpose**: Verify thinking content is stripped
+
+#### `TestStreamingAnthropicContextUsage`
+
+- **`test_calculates_tokens_from_context_usage()`**:
+  - **What it does**: Calculates tokens from context usage percentage
+  - **Purpose**: Verify token calculation
+
+- **`test_uses_request_messages_for_input_tokens()`**:
+  - **What it does**: Uses request messages for input token count
+  - **Purpose**: Verify input tokens are counted from request
+
+---
+
+### `tests/unit/test_streaming_core.py`
+
+Unit tests for **core streaming module** (KiroEvent, StreamResult, parse_kiro_stream). **46 tests.**
+
+#### `TestKiroEvent`
+
+- **`test_creates_content_event()`**:
+  - **What it does**: Creates a content event with text
+  - **Purpose**: Verify KiroEvent can represent content events
+
+- **`test_creates_thinking_event()`**:
+  - **What it does**: Creates a thinking event with reasoning content
+  - **Purpose**: Verify KiroEvent can represent thinking events
+
+- **`test_creates_tool_use_event()`**:
+  - **What it does**: Creates a tool_use event with tool data
+  - **Purpose**: Verify KiroEvent can represent tool use events
+
+- **`test_creates_usage_event()`**:
+  - **What it does**: Creates a usage event with metering data
+  - **Purpose**: Verify KiroEvent can represent usage events
+
+- **`test_creates_context_usage_event()`**:
+  - **What it does**: Creates a context_usage event with percentage
+  - **Purpose**: Verify KiroEvent can represent context usage events
+
+- **`test_default_values()`**:
+  - **What it does**: Verifies default values for optional fields
+  - **Purpose**: Ensure all optional fields default to None/False
+
+#### `TestStreamResult`
+
+- **`test_creates_empty_result()`**:
+  - **What it does**: Creates an empty StreamResult
+  - **Purpose**: Verify default values are correct
+
+- **`test_creates_result_with_content()`**:
+  - **What it does**: Creates StreamResult with content
+  - **Purpose**: Verify content is stored correctly
+
+- **`test_creates_result_with_tool_calls()`**:
+  - **What it does**: Creates StreamResult with tool calls
+  - **Purpose**: Verify tool calls are stored correctly
+
+- **`test_creates_result_with_usage()`**:
+  - **What it does**: Creates StreamResult with usage data
+  - **Purpose**: Verify usage is stored correctly
+
+- **`test_creates_full_result()`**:
+  - **What it does**: Creates StreamResult with all fields
+  - **Purpose**: Verify all fields work together
 
 #### `TestFirstTokenTimeoutError`
 
-Tests for FirstTokenTimeoutError and first token timeout logging.
+- **`test_creates_exception_with_message()`**:
+  - **What it does**: Creates exception with custom message
+  - **Purpose**: Verify exception message is stored correctly
 
-- **`test_first_token_timeout_not_caught_by_general_handler()`**:
-  - **What it does**: Verifies that FirstTokenTimeoutError is propagated for retry
-  - **Purpose**: Ensure first token timeout is not handled as regular error
+- **`test_exception_is_catchable()`**:
+  - **What it does**: Verifies exception can be caught
+  - **Purpose**: Ensure exception inherits from Exception
 
-- **`test_first_token_timeout_logged_with_correct_format()`**:
-  - **What it does**: Verifies that first token timeout is logged with [FirstTokenTimeout] prefix
-  - **Purpose**: Ensure consistent logging format for first token timeout
+- **`test_exception_inherits_from_exception()`**:
+  - **What it does**: Verifies inheritance chain
+  - **Purpose**: Ensure proper exception hierarchy
 
-- **`test_first_token_timeout_includes_timeout_value()`**:
-  - **What it does**: Verifies that first token timeout log includes the timeout value
-  - **Purpose**: Ensure timeout value is visible in logs for debugging
+#### `TestParseKiroStream`
 
-- **`test_first_token_received_logged_on_success()`**:
-  - **What it does**: Verifies that successful first token receipt is logged
-  - **Purpose**: Ensure debug log shows when first token is received
+- **`test_parses_content_events()`**:
+  - **What it does**: Parses content events from Kiro stream
+  - **Purpose**: Verify content events are yielded correctly
+
+- **`test_parses_usage_events()`**:
+  - **What it does**: Parses usage events from Kiro stream
+  - **Purpose**: Verify usage events are yielded correctly
+
+- **`test_parses_context_usage_events()`**:
+  - **What it does**: Parses context_usage events from Kiro stream
+  - **Purpose**: Verify context usage percentage is yielded correctly
+
+- **`test_yields_tool_calls_at_end()`**:
+  - **What it does**: Yields tool calls collected during parsing
+  - **Purpose**: Verify tool calls are yielded as events
+
+- **`test_raises_timeout_on_first_token()`**:
+  - **What it does**: Raises FirstTokenTimeoutError on timeout
+  - **Purpose**: Verify timeout handling for first token
+
+- **`test_handles_empty_response()`**:
+  - **What it does**: Handles empty response gracefully
+  - **Purpose**: Verify no events yielded for empty response
+
+- **`test_handles_generator_exit()`**:
+  - **What it does**: Handles GeneratorExit gracefully
+  - **Purpose**: Verify client disconnect is handled
+
+#### `TestProcessChunk`
+
+- **`test_processes_content_event()`**:
+  - **What it does**: Processes content event from chunk
+  - **Purpose**: Verify content is converted to KiroEvent
+
+- **`test_processes_usage_event()`**:
+  - **What it does**: Processes usage event from chunk
+  - **Purpose**: Verify usage is converted to KiroEvent
+
+- **`test_processes_context_usage_event()`**:
+  - **What it does**: Processes context_usage event from chunk
+  - **Purpose**: Verify context usage is converted to KiroEvent
+
+- **`test_processes_multiple_events()`**:
+  - **What it does**: Processes multiple events from single chunk
+  - **Purpose**: Verify all events are yielded
+
+- **`test_processes_with_thinking_parser()`**:
+  - **What it does**: Processes content through thinking parser
+  - **Purpose**: Verify thinking parser integration
+
+- **`test_yields_thinking_content()`**:
+  - **What it does**: Yields thinking content from thinking parser
+  - **Purpose**: Verify thinking events are created
+
+#### `TestCollectStreamToResult`
+
+- **`test_collects_content()`**:
+  - **What it does**: Collects content from stream
+  - **Purpose**: Verify content is accumulated correctly
+
+- **`test_collects_tool_calls()`**:
+  - **What it does**: Collects tool calls from stream
+  - **Purpose**: Verify tool calls are accumulated correctly
+
+- **`test_collects_usage()`**:
+  - **What it does**: Collects usage from stream
+  - **Purpose**: Verify usage is stored correctly
+
+- **`test_collects_context_usage_percentage()`**:
+  - **What it does**: Collects context usage percentage from stream
+  - **Purpose**: Verify context usage is stored correctly
+
+- **`test_collects_thinking_content()`**:
+  - **What it does**: Collects thinking content from stream
+  - **Purpose**: Verify thinking content is accumulated correctly
+
+- **`test_deduplicates_bracket_tool_calls()`**:
+  - **What it does**: Deduplicates bracket-style tool calls
+  - **Purpose**: Verify duplicate tool calls are removed
+
+#### `TestCalculateTokensFromContextUsage`
+
+- **`test_calculates_tokens_from_percentage()`**:
+  - **What it does**: Calculates tokens from context usage percentage
+  - **Purpose**: Verify token calculation is correct
+
+- **`test_handles_zero_percentage()`**:
+  - **What it does**: Handles zero context usage percentage
+  - **Purpose**: Verify fallback behavior for zero percentage
+
+- **`test_handles_none_percentage()`**:
+  - **What it does**: Handles None context usage percentage
+  - **Purpose**: Verify fallback behavior for None percentage
+
+- **`test_prevents_negative_prompt_tokens()`**:
+  - **What it does**: Prevents negative prompt tokens
+  - **Purpose**: Verify prompt_tokens is never negative
+
+- **`test_uses_model_specific_max_tokens()`**:
+  - **What it does**: Uses model-specific max input tokens
+  - **Purpose**: Verify model cache is queried correctly
+
+- **`test_small_percentage_calculation()`**:
+  - **What it does**: Calculates tokens for small percentage
+  - **Purpose**: Verify precision for small percentages
+
+- **`test_large_percentage_calculation()`**:
+  - **What it does**: Calculates tokens for large percentage
+  - **Purpose**: Verify calculation for high context usage
+
+#### `TestThinkingParserIntegration`
+
+- **`test_thinking_parser_enabled_when_fake_reasoning_on()`**:
+  - **What it does**: Enables thinking parser when FAKE_REASONING_ENABLED is True
+  - **Purpose**: Verify thinking parser is created
+
+- **`test_thinking_parser_disabled_when_fake_reasoning_off()`**:
+  - **What it does**: Disables thinking parser when FAKE_REASONING_ENABLED is False
+  - **Purpose**: Verify thinking parser is not created
+
+- **`test_thinking_parser_can_be_disabled_via_parameter()`**:
+  - **What it does**: Disables thinking parser via enable_thinking_parser parameter
+  - **Purpose**: Verify parameter overrides config
+
+#### `TestStreamingCoreErrorHandling`
+
+- **`test_propagates_first_token_timeout_error()`**:
+  - **What it does**: Propagates FirstTokenTimeoutError
+  - **Purpose**: Verify timeout error is not caught internally
+
+- **`test_propagates_generator_exit()`**:
+  - **What it does**: Propagates GeneratorExit
+  - **Purpose**: Verify client disconnect is handled
+
+- **`test_propagates_other_exceptions()`**:
+  - **What it does**: Propagates other exceptions
+  - **Purpose**: Verify errors are not swallowed
+
+---
+
+### `tests/unit/test_streaming_openai.py`
+
+Unit tests for **OpenAI streaming module** (Kiro → OpenAI SSE format conversion). **36 tests.**
+
+#### `TestStreamKiroToOpenai`
+
+- **`test_yields_content_chunks()`**:
+  - **What it does**: Yields content chunks in OpenAI format
+  - **Purpose**: Verify content streaming
+
+- **`test_first_chunk_has_role()`**:
+  - **What it does**: First chunk includes role: assistant
+  - **Purpose**: Verify OpenAI streaming protocol
+
+- **`test_yields_done_at_end()`**:
+  - **What it does**: Yields [DONE] at end of stream
+  - **Purpose**: Verify stream termination
+
+- **`test_yields_final_chunk_with_usage()`**:
+  - **What it does**: Yields final chunk with usage info
+  - **Purpose**: Verify usage is included
+
+- **`test_yields_tool_calls_chunk()`**:
+  - **What it does**: Yields tool_calls chunk when tools present
+  - **Purpose**: Verify tool call streaming
+
+- **`test_tool_calls_have_index()`**:
+  - **What it does**: Tool calls have index field
+  - **Purpose**: Verify OpenAI streaming spec compliance
+
+- **`test_finish_reason_is_tool_calls_when_tools_present()`**:
+  - **What it does**: Sets finish_reason to tool_calls when tools present
+  - **Purpose**: Verify correct finish reason
+
+- **`test_finish_reason_is_stop_without_tools()`**:
+  - **What it does**: Sets finish_reason to stop without tools
+  - **Purpose**: Verify correct finish reason
+
+- **`test_closes_response_on_completion()`**:
+  - **What it does**: Closes response on completion
+  - **Purpose**: Verify resource cleanup
+
+- **`test_closes_response_on_error()`**:
+  - **What it does**: Closes response on error
+  - **Purpose**: Verify resource cleanup on error
+
+#### `TestStreamingOpenaiThinkingContent`
+
+- **`test_yields_thinking_as_reasoning_content()`**:
+  - **What it does**: Yields thinking as reasoning_content when configured
+  - **Purpose**: Verify thinking content handling
+
+- **`test_yields_thinking_as_content_when_configured()`**:
+  - **What it does**: Yields thinking as content when configured
+  - **Purpose**: Verify thinking content handling
+
+#### `TestStreamingOpenaiNoneProtection`
+
+- **`test_handles_none_function_name()`**:
+  - **What it does**: Handles None in function.name
+  - **Purpose**: Verify None is replaced with empty string
+
+- **`test_handles_none_function_arguments()`**:
+  - **What it does**: Handles None in function.arguments
+  - **Purpose**: Verify None is replaced with "{}"
+
+- **`test_handles_none_function_object()`**:
+  - **What it does**: Handles None function object
+  - **Purpose**: Verify None function is handled
 
 #### `TestStreamWithFirstTokenRetry`
 
-Tests for stream_with_first_token_retry function.
+- **`test_retries_on_first_token_timeout()`**:
+  - **What it does**: Retries on first token timeout
+  - **Purpose**: Verify retry logic
 
-- **`test_retry_on_first_token_timeout()`**:
-  - **What it does**: Verifies that request is retried on first token timeout
-  - **Purpose**: Ensure retry logic works for first token timeout
+- **`test_raises_504_after_all_retries_exhausted()`**:
+  - **What it does**: Raises 504 after all retries exhausted
+  - **Purpose**: Verify error handling
 
-- **`test_all_retries_exhausted_raises_504()`**:
-  - **What it does**: Verifies that 504 is raised after all retries exhausted
-  - **Purpose**: Ensure proper error handling when model never responds
+- **`test_handles_api_error_response()`**:
+  - **What it does**: Handles API error response
+  - **Purpose**: Verify error response handling
 
-- **`test_retry_logs_attempt_number()`**:
-  - **What it does**: Verifies that retry attempts are logged with attempt number
-  - **Purpose**: Ensure logs show which attempt failed (e.g., "1/3", "2/3", "3/3")
+- **`test_propagates_non_timeout_errors()`**:
+  - **What it does**: Propagates non-timeout errors without retry
+  - **Purpose**: Verify only timeout errors trigger retry
+
+- **`test_closes_response_on_retry()`**:
+  - **What it does**: Closes response when retrying
+  - **Purpose**: Verify resource cleanup on retry
+
+#### `TestCollectStreamResponse`
+
+- **`test_collects_content()`**:
+  - **What it does**: Collects content from stream
+  - **Purpose**: Verify content accumulation
+
+- **`test_collects_reasoning_content()`**:
+  - **What it does**: Collects reasoning content from stream
+  - **Purpose**: Verify reasoning content accumulation
+
+- **`test_collects_tool_calls()`**:
+  - **What it does**: Collects tool calls from stream
+  - **Purpose**: Verify tool call accumulation
+
+- **`test_tool_calls_have_no_index()`**:
+  - **What it does**: Collected tool calls don't have index field
+  - **Purpose**: Verify index is removed for non-streaming
+
+- **`test_includes_usage()`**:
+  - **What it does**: Includes usage in response
+  - **Purpose**: Verify usage is included
+
+- **`test_sets_finish_reason_tool_calls()`**:
+  - **What it does**: Sets finish_reason to tool_calls when tools present
+  - **Purpose**: Verify correct finish reason
+
+- **`test_sets_finish_reason_stop()`**:
+  - **What it does**: Sets finish_reason to stop without tools
+  - **Purpose**: Verify correct finish reason
+
+- **`test_generates_completion_id()`**:
+  - **What it does**: Generates completion ID
+  - **Purpose**: Verify ID is present
+
+- **`test_includes_model_name()`**:
+  - **What it does**: Includes model name in response
+  - **Purpose**: Verify model is included
+
+- **`test_object_is_chat_completion()`**:
+  - **What it does**: Sets object to chat.completion
+  - **Purpose**: Verify OpenAI format
+
+#### `TestStreamingOpenaiErrorHandling`
+
+- **`test_propagates_first_token_timeout_error()`**:
+  - **What it does**: Propagates FirstTokenTimeoutError
+  - **Purpose**: Verify timeout error is propagated for retry
+
+- **`test_handles_generator_exit_gracefully()`**:
+  - **What it does**: Handles GeneratorExit gracefully without re-raising
+  - **Purpose**: Verify client disconnect is handled without error
+
+- **`test_propagates_other_exceptions()`**:
+  - **What it does**: Propagates other exceptions
+  - **Purpose**: Verify errors are not swallowed
+
+- **`test_aclose_error_does_not_mask_original()`**:
+  - **What it does**: aclose() error doesn't mask original error
+  - **Purpose**: Verify original exception is propagated
+
+#### `TestStreamingOpenaiBracketToolCalls`
+
+- **`test_detects_bracket_tool_calls()`**:
+  - **What it does**: Detects bracket-style tool calls in content
+  - **Purpose**: Verify bracket tool call detection
+
+- **`test_deduplicates_tool_calls()`**:
+  - **What it does**: Deduplicates tool calls from stream and bracket
+  - **Purpose**: Verify deduplication
+
+#### `TestStreamingOpenaiMeteringData`
+
+- **`test_includes_credits_used_in_usage()`**:
+  - **What it does**: Includes credits_used in usage when metering data present
+  - **Purpose**: Verify metering data is included
 
 ---
 
@@ -1814,55 +2621,421 @@ Tests for graceful exception handling in close() method.
 
 ---
 
-### `tests/unit/test_routes.py`
+### `tests/unit/test_routes_anthropic.py`
 
-Unit tests for **API endpoints** (/v1/models, /v1/chat/completions). **22 tests.**
+Unit tests for **Anthropic API endpoints** (/v1/messages). **44 tests.**
+
+#### `TestVerifyAnthropicApiKey`
+
+- **`test_valid_x_api_key_returns_true()`**:
+  - **What it does**: Verifies that a valid x-api-key header passes authentication
+  - **Purpose**: Ensure Anthropic native authentication works
+
+- **`test_valid_bearer_token_returns_true()`**:
+  - **What it does**: Verifies that a valid Bearer token passes authentication
+  - **Purpose**: Ensure OpenAI-style authentication also works
+
+- **`test_x_api_key_takes_precedence()`**:
+  - **What it does**: Verifies x-api-key is checked before Authorization header
+  - **Purpose**: Ensure Anthropic native auth has priority
+
+- **`test_invalid_x_api_key_raises_401()`**:
+  - **What it does**: Verifies that an invalid x-api-key is rejected
+  - **Purpose**: Ensure unauthorized access is blocked
+
+- **`test_invalid_bearer_token_raises_401()`**:
+  - **What it does**: Verifies that an invalid Bearer token is rejected
+  - **Purpose**: Ensure unauthorized access is blocked
+
+- **`test_missing_both_headers_raises_401()`**:
+  - **What it does**: Verifies that missing both headers is rejected
+  - **Purpose**: Ensure authentication is required
+
+- **`test_empty_x_api_key_raises_401()`**:
+  - **What it does**: Verifies that empty x-api-key is rejected
+  - **Purpose**: Ensure empty credentials are blocked
+
+- **`test_error_response_format_is_anthropic_style()`**:
+  - **What it does**: Verifies error response follows Anthropic format
+  - **Purpose**: Ensure error format matches Anthropic API
+
+#### `TestMessagesAuthentication`
+
+- **`test_messages_requires_authentication()`**:
+  - **What it does**: Verifies messages endpoint requires authentication
+  - **Purpose**: Ensure protected endpoint is secured
+
+- **`test_messages_accepts_x_api_key()`**:
+  - **What it does**: Verifies messages endpoint accepts x-api-key header
+  - **Purpose**: Ensure Anthropic native authentication works
+
+- **`test_messages_accepts_bearer_token()`**:
+  - **What it does**: Verifies messages endpoint accepts Bearer token
+  - **Purpose**: Ensure OpenAI-style authentication also works
+
+- **`test_messages_rejects_invalid_x_api_key()`**:
+  - **What it does**: Verifies messages endpoint rejects invalid x-api-key
+  - **Purpose**: Ensure authentication is enforced
+
+#### `TestMessagesValidation`
+
+- **`test_validates_missing_model()`**:
+  - **What it does**: Verifies missing model field is rejected
+  - **Purpose**: Ensure model is required
+
+- **`test_validates_missing_max_tokens()`**:
+  - **What it does**: Verifies missing max_tokens field is rejected
+  - **Purpose**: Ensure max_tokens is required (Anthropic API requirement)
+
+- **`test_validates_missing_messages()`**:
+  - **What it does**: Verifies missing messages field is rejected
+  - **Purpose**: Ensure messages are required
+
+- **`test_validates_empty_messages_array()`**:
+  - **What it does**: Verifies empty messages array is rejected
+  - **Purpose**: Ensure at least one message is required
+
+- **`test_validates_invalid_json()`**:
+  - **What it does**: Verifies invalid JSON is rejected
+  - **Purpose**: Ensure proper JSON parsing
+
+- **`test_validates_invalid_role()`**:
+  - **What it does**: Verifies invalid message role is rejected
+  - **Purpose**: Anthropic model strictly validates role (only 'user' or 'assistant')
+
+- **`test_accepts_valid_request_format()`**:
+  - **What it does**: Verifies valid request format passes validation
+  - **Purpose**: Ensure Pydantic validation works correctly
+
+#### `TestMessagesSystemPrompt`
+
+- **`test_accepts_system_as_separate_field()`**:
+  - **What it does**: Verifies system prompt as separate field is accepted
+  - **Purpose**: Ensure Anthropic-style system prompt works
+
+- **`test_accepts_empty_system_prompt()`**:
+  - **What it does**: Verifies empty system prompt is accepted
+  - **Purpose**: Ensure system prompt is optional
+
+- **`test_accepts_no_system_prompt()`**:
+  - **What it does**: Verifies request without system prompt is accepted
+  - **Purpose**: Ensure system prompt is optional
+
+#### `TestMessagesContentBlocks`
+
+- **`test_accepts_string_content()`**:
+  - **What it does**: Verifies string content is accepted
+  - **Purpose**: Ensure simple string content works
+
+- **`test_accepts_content_block_array()`**:
+  - **What it does**: Verifies content block array is accepted
+  - **Purpose**: Ensure Anthropic content block format works
+
+- **`test_accepts_multiple_content_blocks()`**:
+  - **What it does**: Verifies multiple content blocks are accepted
+  - **Purpose**: Ensure complex content works
+
+#### `TestMessagesToolUse`
+
+- **`test_accepts_tool_definition()`**:
+  - **What it does**: Verifies tool definition is accepted
+  - **Purpose**: Ensure Anthropic tool format works
+
+- **`test_accepts_multiple_tools()`**:
+  - **What it does**: Verifies multiple tools are accepted
+  - **Purpose**: Ensure multiple tool definitions work
+
+- **`test_accepts_tool_result_message()`**:
+  - **What it does**: Verifies tool result message is accepted
+  - **Purpose**: Ensure tool result handling works
+
+#### `TestMessagesOptionalParams`
+
+- **`test_accepts_temperature_parameter()`**:
+  - **What it does**: Verifies temperature parameter is accepted
+  - **Purpose**: Ensure temperature control works
+
+- **`test_accepts_top_p_parameter()`**:
+  - **What it does**: Verifies top_p parameter is accepted
+  - **Purpose**: Ensure nucleus sampling control works
+
+- **`test_accepts_top_k_parameter()`**:
+  - **What it does**: Verifies top_k parameter is accepted
+  - **Purpose**: Ensure top-k sampling control works
+
+- **`test_accepts_stream_true()`**:
+  - **What it does**: Verifies stream=true is accepted
+  - **Purpose**: Ensure streaming mode is supported
+
+- **`test_accepts_stop_sequences()`**:
+  - **What it does**: Verifies stop_sequences parameter is accepted
+  - **Purpose**: Ensure stop sequence control works
+
+- **`test_accepts_metadata()`**:
+  - **What it does**: Verifies metadata parameter is accepted
+  - **Purpose**: Ensure metadata passing works
+
+#### `TestMessagesAnthropicVersion`
+
+- **`test_accepts_anthropic_version_header()`**:
+  - **What it does**: Verifies anthropic-version header is accepted
+  - **Purpose**: Ensure Anthropic SDK compatibility
+
+- **`test_works_without_anthropic_version_header()`**:
+  - **What it does**: Verifies request works without anthropic-version header
+  - **Purpose**: Ensure header is optional
+
+#### `TestAnthropicRouterIntegration`
+
+- **`test_router_has_messages_endpoint()`**:
+  - **What it does**: Verifies messages endpoint is registered
+  - **Purpose**: Ensure endpoint is available
+
+- **`test_messages_endpoint_uses_post_method()`**:
+  - **What it does**: Verifies messages endpoint uses POST method
+  - **Purpose**: Ensure correct HTTP method
+
+- **`test_router_has_anthropic_tag()`**:
+  - **What it does**: Verifies router has Anthropic API tag
+  - **Purpose**: Ensure proper API documentation grouping
+
+#### `TestMessagesConversationHistory`
+
+- **`test_accepts_multi_turn_conversation()`**:
+  - **What it does**: Verifies multi-turn conversation is accepted
+  - **Purpose**: Ensure conversation history works
+
+- **`test_accepts_long_conversation()`**:
+  - **What it does**: Verifies long conversation is accepted
+  - **Purpose**: Ensure many messages work
+
+#### `TestMessagesErrorFormat`
+
+- **`test_validation_error_format()`**:
+  - **What it does**: Verifies validation error response format
+  - **Purpose**: Ensure errors follow expected format
+
+- **`test_auth_error_format_is_anthropic_style()`**:
+  - **What it does**: Verifies auth error follows Anthropic format
+  - **Purpose**: Ensure error format matches Anthropic API
+
+---
+
+### `tests/unit/test_routes_openai.py`
+
+Unit tests for **OpenAI API endpoints** (/, /health, /v1/models, /v1/chat/completions). **46 tests.**
 
 #### `TestVerifyApiKey`
 
-- **`test_valid_api_key_returns_true()`**: Verifies successful validation of correct key
-- **`test_invalid_api_key_raises_401()`**: Verifies invalid key rejection
-- **`test_missing_api_key_raises_401()`**: Verifies missing key rejection
-- **`test_empty_api_key_raises_401()`**: Verifies empty key rejection
-- **`test_wrong_format_raises_401()`**: Verifies key without Bearer rejection
+- **`test_valid_bearer_token_returns_true()`**:
+  - **What it does**: Verifies that a valid Bearer token passes authentication
+  - **Purpose**: Ensure correct API keys are accepted
+
+- **`test_invalid_api_key_raises_401()`**:
+  - **What it does**: Verifies that an invalid API key is rejected
+  - **Purpose**: Ensure unauthorized access is blocked
+
+- **`test_missing_api_key_raises_401()`**:
+  - **What it does**: Verifies that missing API key is rejected
+  - **Purpose**: Ensure requests without authentication are blocked
+
+- **`test_empty_api_key_raises_401()`**:
+  - **What it does**: Verifies that empty string API key is rejected
+  - **Purpose**: Ensure empty credentials are blocked
+
+- **`test_key_without_bearer_prefix_raises_401()`**:
+  - **What it does**: Verifies that API key without Bearer prefix is rejected
+  - **Purpose**: Ensure proper Authorization header format is required
+
+- **`test_bearer_with_extra_spaces_raises_401()`**:
+  - **What it does**: Verifies that Bearer token with extra spaces is rejected
+  - **Purpose**: Ensure strict format validation
+
+- **`test_lowercase_bearer_raises_401()`**:
+  - **What it does**: Verifies that lowercase 'bearer' is rejected
+  - **Purpose**: Ensure case-sensitive Bearer prefix
 
 #### `TestRootEndpoint`
 
-- **`test_root_returns_status_ok()`**: Verifies root endpoint response
-- **`test_root_returns_version()`**: Verifies version presence in response
+- **`test_root_returns_status_ok()`**:
+  - **What it does**: Verifies root endpoint returns ok status
+  - **Purpose**: Ensure basic health check works
+
+- **`test_root_returns_gateway_message()`**:
+  - **What it does**: Verifies root endpoint returns gateway message
+  - **Purpose**: Ensure service identification is present
+
+- **`test_root_returns_version()`**:
+  - **What it does**: Verifies root endpoint returns application version
+  - **Purpose**: Ensure version information is available
+
+- **`test_root_does_not_require_auth()`**:
+  - **What it does**: Verifies root endpoint is accessible without authentication
+  - **Purpose**: Ensure public health check availability
 
 #### `TestHealthEndpoint`
 
-- **`test_health_returns_healthy()`**: Verifies health endpoint response
-- **`test_health_returns_timestamp()`**: Verifies timestamp presence in response
-- **`test_health_returns_version()`**: Verifies version presence in response
+- **`test_health_returns_healthy_status()`**:
+  - **What it does**: Verifies health endpoint returns healthy status
+  - **Purpose**: Ensure health check indicates service is running
+
+- **`test_health_returns_timestamp()`**:
+  - **What it does**: Verifies health endpoint returns timestamp
+  - **Purpose**: Ensure timestamp is present for monitoring
+
+- **`test_health_returns_version()`**:
+  - **What it does**: Verifies health endpoint returns version
+  - **Purpose**: Ensure version is available for monitoring
+
+- **`test_health_does_not_require_auth()`**:
+  - **What it does**: Verifies health endpoint is accessible without authentication
+  - **Purpose**: Ensure health checks work for load balancers
 
 #### `TestModelsEndpoint`
 
-- **`test_models_requires_auth()`**: Verifies authorization requirement
-- **`test_models_returns_list()`**: Verifies model list return
-- **`test_models_returns_available_models()`**: Verifies available models presence
-- **`test_models_format_is_openai_compatible()`**: Verifies response format OpenAI compatibility
+- **`test_models_requires_authentication()`**:
+  - **What it does**: Verifies models endpoint requires authentication
+  - **Purpose**: Ensure protected endpoints are secured
 
-#### `TestChatCompletionsEndpoint`
+- **`test_models_rejects_invalid_key()`**:
+  - **What it does**: Verifies models endpoint rejects invalid API key
+  - **Purpose**: Ensure authentication is enforced
 
-- **`test_chat_completions_requires_auth()`**: Verifies authorization requirement
-- **`test_chat_completions_validates_messages()`**: Verifies empty messages validation
-- **`test_chat_completions_validates_model()`**: Verifies missing model validation
+- **`test_models_returns_list_object()`**:
+  - **What it does**: Verifies models endpoint returns list object type
+  - **Purpose**: Ensure OpenAI API compatibility
 
-#### `TestChatCompletionsWithMockedKiro`
+- **`test_models_returns_data_array()`**:
+  - **What it does**: Verifies models endpoint returns data array
+  - **Purpose**: Ensure response structure matches OpenAI format
 
-- **`test_chat_completions_accepts_valid_request_format()`**: Verifies valid request format acceptance
+- **`test_models_contains_available_models()`**:
+  - **What it does**: Verifies all configured models are returned
+  - **Purpose**: Ensure model list is complete
 
-#### `TestChatCompletionsErrorHandling`
+- **`test_models_format_is_openai_compatible()`**:
+  - **What it does**: Verifies model objects have OpenAI-compatible format
+  - **Purpose**: Ensure compatibility with OpenAI clients
 
-- **`test_invalid_json_returns_422()`**: Verifies invalid JSON handling
-- **`test_missing_content_in_message_returns_200()`**: Verifies message without content handling
+- **`test_models_owned_by_anthropic()`**:
+  - **What it does**: Verifies models are owned by Anthropic
+  - **Purpose**: Ensure correct model attribution
+
+#### `TestChatCompletionsAuthentication`
+
+- **`test_chat_completions_requires_authentication()`**:
+  - **What it does**: Verifies chat completions requires authentication
+  - **Purpose**: Ensure protected endpoint is secured
+
+- **`test_chat_completions_rejects_invalid_key()`**:
+  - **What it does**: Verifies chat completions rejects invalid API key
+  - **Purpose**: Ensure authentication is enforced
+
+#### `TestChatCompletionsValidation`
+
+- **`test_validates_empty_messages_array()`**:
+  - **What it does**: Verifies empty messages array is rejected
+  - **Purpose**: Ensure at least one message is required
+
+- **`test_validates_missing_model()`**:
+  - **What it does**: Verifies missing model field is rejected
+  - **Purpose**: Ensure model is required
+
+- **`test_validates_missing_messages()`**:
+  - **What it does**: Verifies missing messages field is rejected
+  - **Purpose**: Ensure messages are required
+
+- **`test_validates_invalid_json()`**:
+  - **What it does**: Verifies invalid JSON is rejected
+  - **Purpose**: Ensure proper JSON parsing
+
+- **`test_validates_invalid_role()`**:
+  - **What it does**: Verifies invalid message role passes Pydantic validation
+  - **Purpose**: Pydantic model accepts any string as role (validation happens later)
+
+- **`test_accepts_valid_request_format()`**:
+  - **What it does**: Verifies valid request format passes validation
+  - **Purpose**: Ensure Pydantic validation works correctly
+
+- **`test_accepts_message_without_content()`**:
+  - **What it does**: Verifies message without content is accepted
+  - **Purpose**: Ensure content is optional (for tool results)
+
+#### `TestChatCompletionsWithTools`
+
+- **`test_accepts_valid_tool_definition()`**:
+  - **What it does**: Verifies valid tool definition is accepted
+  - **Purpose**: Ensure tool calling format is supported
+
+- **`test_accepts_multiple_tools()`**:
+  - **What it does**: Verifies multiple tools are accepted
+  - **Purpose**: Ensure multiple tool definitions work
+
+#### `TestChatCompletionsOptionalParams`
+
+- **`test_accepts_temperature_parameter()`**:
+  - **What it does**: Verifies temperature parameter is accepted
+  - **Purpose**: Ensure temperature control works
+
+- **`test_accepts_max_tokens_parameter()`**:
+  - **What it does**: Verifies max_tokens parameter is accepted
+  - **Purpose**: Ensure output length control works
+
+- **`test_accepts_stream_true()`**:
+  - **What it does**: Verifies stream=true is accepted
+  - **Purpose**: Ensure streaming mode is supported
+
+- **`test_accepts_top_p_parameter()`**:
+  - **What it does**: Verifies top_p parameter is accepted
+  - **Purpose**: Ensure nucleus sampling control works
+
+#### `TestChatCompletionsMessageTypes`
+
+- **`test_accepts_system_message()`**:
+  - **What it does**: Verifies system message is accepted
+  - **Purpose**: Ensure system prompts work
+
+- **`test_accepts_assistant_message()`**:
+  - **What it does**: Verifies assistant message is accepted
+  - **Purpose**: Ensure conversation history works
+
+- **`test_accepts_multipart_content()`**:
+  - **What it does**: Verifies multipart content array is accepted
+  - **Purpose**: Ensure complex content format works
 
 #### `TestRouterIntegration`
 
-- **`test_router_has_all_endpoints()`**: Verifies all endpoints presence in router
-- **`test_router_methods()`**: Verifies endpoint HTTP methods
+- **`test_router_has_root_endpoint()`**:
+  - **What it does**: Verifies root endpoint is registered
+  - **Purpose**: Ensure endpoint is available
+
+- **`test_router_has_health_endpoint()`**:
+  - **What it does**: Verifies health endpoint is registered
+  - **Purpose**: Ensure endpoint is available
+
+- **`test_router_has_models_endpoint()`**:
+  - **What it does**: Verifies models endpoint is registered
+  - **Purpose**: Ensure endpoint is available
+
+- **`test_router_has_chat_completions_endpoint()`**:
+  - **What it does**: Verifies chat completions endpoint is registered
+  - **Purpose**: Ensure endpoint is available
+
+- **`test_root_endpoint_uses_get_method()`**:
+  - **What it does**: Verifies root endpoint uses GET method
+  - **Purpose**: Ensure correct HTTP method
+
+- **`test_health_endpoint_uses_get_method()`**:
+  - **What it does**: Verifies health endpoint uses GET method
+  - **Purpose**: Ensure correct HTTP method
+
+- **`test_models_endpoint_uses_get_method()`**:
+  - **What it does**: Verifies models endpoint uses GET method
+  - **Purpose**: Ensure correct HTTP method
+
+- **`test_chat_completions_endpoint_uses_post_method()`**:
+  - **What it does**: Verifies chat completions endpoint uses POST method
+  - **Purpose**: Ensure correct HTTP method
 
 ---
 

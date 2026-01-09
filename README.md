@@ -2,13 +2,13 @@
 
 # 👻 Kiro Gateway
 
-**OpenAI-compatible proxy gateway for Kiro IDE API (AWS CodeWhisperer)**
+**Proxy gateway for Kiro API (AWS CodeWhisperer)**
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 
-*Use Claude models through any tools that support the OpenAI API*
+*Use Claude models through any OpenAI or Anthropic compatible tool*
 
 [Features](#-features) • [Quick Start](#-quick-start) • [Configuration](#%EF%B8%8F-configuration) • [API Reference](#-api-reference) • [License](#-license)
 
@@ -20,10 +20,11 @@
 
 | Feature | Description |
 |---------|-------------|
-| 🔌 **OpenAI-compatible API** | Works with any OpenAI client out of the box |
+| 🔌 **OpenAI-compatible API** | Works with any OpenAI-compatible tool |
+| 🔌 **Anthropic-compatible API** | Native `/v1/messages` endpoint |
 | 🧠 **Extended Thinking** | See how the model reasons before answering |
 | 💬 **Full message history** | Passes complete conversation context |
-| 🛠️ **Tool Calling** | Supports function calling in OpenAI format |
+| 🛠️ **Tool Calling** | Supports function calling |
 | 📡 **Streaming** | Full SSE streaming support |
 | 🔄 **Retry Logic** | Automatic retries on errors (403, 429, 5xx) |
 | 📋 **Extended model list** | Including versioned models |
@@ -218,7 +219,8 @@ If you need to manually extract the refresh token (e.g., for debugging), you can
 | `/` | GET | Health check |
 | `/health` | GET | Detailed health check |
 | `/v1/models` | GET | List available models |
-| `/v1/chat/completions` | POST | Chat completions |
+| `/v1/chat/completions` | POST | OpenAI Chat Completions API |
+| `/v1/messages` | POST | Anthropic Messages API |
 
 ### Available Models
 
@@ -236,6 +238,8 @@ If you need to manually extract the refresh token (e.g., for debugging), you can
 ---
 
 ## 💡 Usage Examples
+
+### OpenAI API
 
 <details>
 <summary>🔹 Simple cURL Request</summary>
@@ -275,7 +279,7 @@ curl http://localhost:8000/v1/chat/completions \
 </details>
 
 <details>
-<summary>🔹 With Tool Calling</summary>
+<summary>🛠️ With Tool Calling</summary>
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
@@ -344,6 +348,96 @@ llm = ChatOpenAI(
 
 response = llm.invoke("Hello, how are you?")
 print(response.content)
+```
+
+</details>
+
+### Anthropic API
+
+<details>
+<summary>🔹 Simple cURL Request</summary>
+
+```bash
+curl http://localhost:8000/v1/messages \
+  -H "x-api-key: my-super-secret-password-123" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+> **Note:** Anthropic API uses `x-api-key` header instead of `Authorization: Bearer`. Both are supported.
+
+</details>
+
+<details>
+<summary>🔹 With System Prompt</summary>
+
+```bash
+curl http://localhost:8000/v1/messages \
+  -H "x-api-key: my-super-secret-password-123" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "system": "You are a helpful assistant.",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+> **Note:** In Anthropic API, `system` is a separate field, not a message.
+
+</details>
+
+<details>
+<summary>📡 Streaming</summary>
+
+```bash
+curl http://localhost:8000/v1/messages \
+  -H "x-api-key: my-super-secret-password-123" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 1024,
+    "stream": true,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+</details>
+
+<details>
+<summary>🐍 Python Anthropic SDK</summary>
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    api_key="my-super-secret-password-123",  # Your PROXY_API_KEY from .env
+    base_url="http://localhost:8000"
+)
+
+# Non-streaming
+response = client.messages.create(
+    model="claude-sonnet-4-5",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+print(response.content[0].text)
+
+# Streaming
+with client.messages.stream(
+    model="claude-sonnet-4-5",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}]
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
 ```
 
 </details>

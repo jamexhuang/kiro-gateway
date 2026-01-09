@@ -72,7 +72,8 @@ from kiro.config import (
 )
 from kiro.auth import KiroAuthManager
 from kiro.cache import ModelInfoCache
-from kiro.routes_openai import router
+from kiro.routes_openai import router as openai_router
+from kiro.routes_anthropic import router as anthropic_router
 from kiro.exceptions import validation_exception_handler
 
 
@@ -328,7 +329,11 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
 
 # --- Route Registration ---
-app.include_router(router)
+# OpenAI-compatible API: /v1/models, /v1/chat/completions
+app.include_router(openai_router)
+
+# Anthropic-compatible API: /v1/messages
+app.include_router(anthropic_router)
 
 
 # --- Uvicorn log config ---

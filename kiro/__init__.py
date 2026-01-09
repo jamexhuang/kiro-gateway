@@ -67,8 +67,8 @@ from kiro.models_openai import (
 )
 
 # Converters
-from kiro.converters_openai import (
-    build_kiro_payload,
+from kiro.converters_openai import build_kiro_payload
+from kiro.converters_core import (
     extract_text_content,
     merge_adjacent_messages,
 )

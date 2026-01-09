@@ -1,0 +1,488 @@
+# -*- coding: utf-8 -*-
+
+# Kiro Gateway
+# https://github.com/jwadow/kiro-gateway
+# Copyright (C) 2025 Jwadow
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+"""
+Streaming logic for converting Kiro stream to Anthropic Messages API format.
+
+This module formats Kiro events into Anthropic SSE format:
+- event: message_start
+- event: content_block_start
+- event: content_block_delta
+- event: content_block_stop
+- event: message_delta
+- event: message_stop
+
+Reference: https://docs.anthropic.com/en/api/messages-streaming
+"""
+
+import json
+import time
+import uuid
+from typing import TYPE_CHECKING, AsyncGenerator, Dict, List, Optional, Any
+
+import httpx
+from loguru import logger
+
+from kiro.streaming_core import (
+    parse_kiro_stream,
+    collect_stream_to_result,
+    FirstTokenTimeoutError,
+    KiroEvent,
+    calculate_tokens_from_context_usage,
+)
+from kiro.tokenizer import count_tokens, count_message_tokens
+from kiro.parsers import parse_bracket_tool_calls, deduplicate_tool_calls
+from kiro.config import FIRST_TOKEN_TIMEOUT, FAKE_REASONING_HANDLING
+
+if TYPE_CHECKING:
+    from kiro.auth import KiroAuthManager
+    from kiro.cache import ModelInfoCache
+
+# Import debug_logger for logging
+try:
+    from kiro.debug_logger import debug_logger
+except ImportError:
+    debug_logger = None
+
+
+def generate_message_id() -> str:
+    """Generate unique message ID in Anthropic format."""
+    return f"msg_{uuid.uuid4().hex[:24]}"
+
+
+def format_sse_event(event_type: str, data: Dict[str, Any]) -> str:
+    """
+    Format data as Anthropic SSE event.
+    
+    Anthropic SSE format:
+    event: {event_type}
+    data: {json_data}
+    
+    Args:
+        event_type: Event type (message_start, content_block_delta, etc.)
+        data: Event data dictionary
+    
+    Returns:
+        Formatted SSE string
+    """
+    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+async def stream_kiro_to_anthropic(
+    response: httpx.Response,
+    model: str,
+    model_cache: "ModelInfoCache",
+    auth_manager: "KiroAuthManager",
+    first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
+    request_messages: Optional[list] = None
+) -> AsyncGenerator[str, None]:
+    """
+    Generator for converting Kiro stream to Anthropic SSE format.
+    
+    Parses Kiro AWS SSE stream and converts events to Anthropic format.
+    
+    Args:
+        response: HTTP response with data stream
+        model: Model name to include in response
+        model_cache: Model cache for getting token limits
+        auth_manager: Authentication manager
+        first_token_timeout: First token wait timeout (seconds)
+        request_messages: Original request messages (for token counting)
+    
+    Yields:
+        Strings in Anthropic SSE format
+    
+    Raises:
+        FirstTokenTimeoutError: If first token not received within timeout
+    """
+    message_id = generate_message_id()
+    input_tokens = 0
+    output_tokens = 0
+    full_content = ""
+    full_thinking_content = ""
+    
+    # Count input tokens from request messages
+    if request_messages:
+        input_tokens = count_message_tokens(request_messages, apply_claude_correction=False)
+    
+    # Track content blocks
+    current_block_index = 0
+    text_block_started = False
+    tool_blocks: List[Dict[str, Any]] = []
+    tool_input_buffers: Dict[int, str] = {}  # index -> accumulated JSON
+    
+    # Track context usage for token calculation
+    context_usage_percentage: Optional[float] = None
+    
+    try:
+        # Send message_start event
+        yield format_sse_event("message_start", {
+            "type": "message_start",
+            "message": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "content": [],
+                "model": model,
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": 0
+                }
+            }
+        })
+        
+        async for event in parse_kiro_stream(response, first_token_timeout):
+            if event.type == "content":
+                content = event.content or ""
+                full_content += content
+                
+                # Start text block if not started
+                if not text_block_started:
+                    yield format_sse_event("content_block_start", {
+                        "type": "content_block_start",
+                        "index": current_block_index,
+                        "content_block": {
+                            "type": "text",
+                            "text": ""
+                        }
+                    })
+                    text_block_started = True
+                
+                # Send content delta
+                if content:
+                    yield format_sse_event("content_block_delta", {
+                        "type": "content_block_delta",
+                        "index": current_block_index,
+                        "delta": {
+                            "type": "text_delta",
+                            "text": content
+                        }
+                    })
+            
+            elif event.type == "thinking":
+                thinking_content = event.thinking_content or ""
+                full_thinking_content += thinking_content
+                
+                # Handle thinking content based on mode
+                # For Anthropic, we can include it as regular text or skip it
+                if FAKE_REASONING_HANDLING == "include_as_text":
+                    # Start text block if not started
+                    if not text_block_started:
+                        yield format_sse_event("content_block_start", {
+                            "type": "content_block_start",
+                            "index": current_block_index,
+                            "content_block": {
+                                "type": "text",
+                                "text": ""
+                            }
+                        })
+                        text_block_started = True
+                    
+                    if thinking_content:
+                        yield format_sse_event("content_block_delta", {
+                            "type": "content_block_delta",
+                            "index": current_block_index,
+                            "delta": {
+                                "type": "text_delta",
+                                "text": thinking_content
+                            }
+                        })
+                # For "strip" mode, we just skip the thinking content
+            
+            elif event.type == "tool_use" and event.tool_use:
+                # Close text block if open
+                if text_block_started:
+                    yield format_sse_event("content_block_stop", {
+                        "type": "content_block_stop",
+                        "index": current_block_index
+                    })
+                    current_block_index += 1
+                    text_block_started = False
+                
+                tool = event.tool_use
+                tool_id = tool.get("id") or f"toolu_{uuid.uuid4().hex[:24]}"
+                tool_name = tool.get("function", {}).get("name", "") or tool.get("name", "")
+                tool_input = tool.get("function", {}).get("arguments", {}) or tool.get("input", {})
+                
+                # Parse arguments if string
+                if isinstance(tool_input, str):
+                    try:
+                        tool_input = json.loads(tool_input)
+                    except json.JSONDecodeError:
+                        tool_input = {}
+                
+                # Send tool_use block start
+                yield format_sse_event("content_block_start", {
+                    "type": "content_block_start",
+                    "index": current_block_index,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": tool_name,
+                        "input": {}
+                    }
+                })
+                
+                # Send tool input as delta
+                input_json = json.dumps(tool_input, ensure_ascii=False)
+                yield format_sse_event("content_block_delta", {
+                    "type": "content_block_delta",
+                    "index": current_block_index,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": input_json
+                    }
+                })
+                
+                # Close tool block
+                yield format_sse_event("content_block_stop", {
+                    "type": "content_block_stop",
+                    "index": current_block_index
+                })
+                
+                tool_blocks.append({
+                    "id": tool_id,
+                    "name": tool_name,
+                    "input": tool_input
+                })
+                current_block_index += 1
+            
+            elif event.type == "context_usage" and event.context_usage_percentage is not None:
+                context_usage_percentage = event.context_usage_percentage
+        
+        # Check for bracket-style tool calls in full content
+        bracket_tool_calls = parse_bracket_tool_calls(full_content)
+        if bracket_tool_calls:
+            # Close text block if open
+            if text_block_started:
+                yield format_sse_event("content_block_stop", {
+                    "type": "content_block_stop",
+                    "index": current_block_index
+                })
+                current_block_index += 1
+                text_block_started = False
+            
+            for tc in bracket_tool_calls:
+                tool_id = tc.get("id") or f"toolu_{uuid.uuid4().hex[:24]}"
+                tool_name = tc.get("function", {}).get("name", "")
+                tool_input = tc.get("function", {}).get("arguments", {})
+                
+                if isinstance(tool_input, str):
+                    try:
+                        tool_input = json.loads(tool_input)
+                    except json.JSONDecodeError:
+                        tool_input = {}
+                
+                yield format_sse_event("content_block_start", {
+                    "type": "content_block_start",
+                    "index": current_block_index,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": tool_name,
+                        "input": {}
+                    }
+                })
+                
+                input_json = json.dumps(tool_input, ensure_ascii=False)
+                yield format_sse_event("content_block_delta", {
+                    "type": "content_block_delta",
+                    "index": current_block_index,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": input_json
+                    }
+                })
+                
+                yield format_sse_event("content_block_stop", {
+                    "type": "content_block_stop",
+                    "index": current_block_index
+                })
+                
+                tool_blocks.append({
+                    "id": tool_id,
+                    "name": tool_name,
+                    "input": tool_input
+                })
+                current_block_index += 1
+        
+        # Close text block if still open
+        if text_block_started:
+            yield format_sse_event("content_block_stop", {
+                "type": "content_block_stop",
+                "index": current_block_index
+            })
+        
+        # Calculate output tokens
+        output_tokens = count_tokens(full_content + full_thinking_content)
+        
+        # Calculate total tokens from context usage if available
+        if context_usage_percentage is not None:
+            prompt_tokens, total_tokens, _, _ = calculate_tokens_from_context_usage(
+                context_usage_percentage, output_tokens, model_cache, model
+            )
+            input_tokens = prompt_tokens
+        
+        # Determine stop reason
+        stop_reason = "tool_use" if tool_blocks else "end_turn"
+        
+        # Send message_delta with stop_reason and usage
+        yield format_sse_event("message_delta", {
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": stop_reason,
+                "stop_sequence": None
+            },
+            "usage": {
+                "output_tokens": output_tokens
+            }
+        })
+        
+        # Send message_stop
+        yield format_sse_event("message_stop", {
+            "type": "message_stop"
+        })
+        
+        logger.debug(
+            f"[Anthropic Streaming] Completed: "
+            f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
+            f"tool_blocks={len(tool_blocks)}, stop_reason={stop_reason}"
+        )
+        
+    except FirstTokenTimeoutError:
+        raise
+    except GeneratorExit:
+        logger.debug("Client disconnected (GeneratorExit)")
+        raise
+    except Exception as e:
+        error_type = type(e).__name__
+        error_msg = str(e) if str(e) else "(empty message)"
+        logger.error(f"Error during Anthropic streaming: [{error_type}] {error_msg}", exc_info=True)
+        
+        # Send error event
+        yield format_sse_event("error", {
+            "type": "error",
+            "error": {
+                "type": "api_error",
+                "message": f"Internal error: {error_msg}"
+            }
+        })
+        raise
+    finally:
+        try:
+            await response.aclose()
+        except Exception as close_error:
+            logger.debug(f"Error closing response: {close_error}")
+
+
+async def collect_anthropic_response(
+    response: httpx.Response,
+    model: str,
+    model_cache: "ModelInfoCache",
+    auth_manager: "KiroAuthManager",
+    request_messages: Optional[list] = None
+) -> dict:
+    """
+    Collect full response from Kiro stream in Anthropic format.
+    
+    Used for non-streaming mode.
+    
+    Args:
+        response: HTTP response with stream
+        model: Model name
+        model_cache: Model cache
+        auth_manager: Authentication manager
+        request_messages: Original request messages (for token counting)
+    
+    Returns:
+        Dictionary with full response in Anthropic Messages format
+    """
+    message_id = generate_message_id()
+    
+    # Count input tokens
+    input_tokens = 0
+    if request_messages:
+        input_tokens = count_message_tokens(request_messages, apply_claude_correction=False)
+    
+    # Collect stream result
+    result = await collect_stream_to_result(response)
+    
+    # Build content blocks
+    content_blocks = []
+    
+    # Add text block if there's content
+    if result.content:
+        content_blocks.append({
+            "type": "text",
+            "text": result.content
+        })
+    
+    # Add tool use blocks
+    for tc in result.tool_calls:
+        tool_id = tc.get("id") or f"toolu_{uuid.uuid4().hex[:24]}"
+        tool_name = tc.get("function", {}).get("name", "") or tc.get("name", "")
+        tool_input = tc.get("function", {}).get("arguments", {}) or tc.get("input", {})
+        
+        if isinstance(tool_input, str):
+            try:
+                tool_input = json.loads(tool_input)
+            except json.JSONDecodeError:
+                tool_input = {}
+        
+        content_blocks.append({
+            "type": "tool_use",
+            "id": tool_id,
+            "name": tool_name,
+            "input": tool_input
+        })
+    
+    # Calculate output tokens
+    output_tokens = count_tokens(result.content + result.thinking_content)
+    
+    # Calculate from context usage if available
+    if result.context_usage_percentage is not None:
+        prompt_tokens, _, _, _ = calculate_tokens_from_context_usage(
+            result.context_usage_percentage, output_tokens, model_cache, model
+        )
+        input_tokens = prompt_tokens
+    
+    # Determine stop reason
+    stop_reason = "tool_use" if result.tool_calls else "end_turn"
+    
+    logger.debug(
+        f"[Anthropic Non-Streaming] Completed: "
+        f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
+        f"tool_calls={len(result.tool_calls)}, stop_reason={stop_reason}"
+    )
+    
+    return {
+        "id": message_id,
+        "type": "message",
+        "role": "assistant",
+        "content": content_blocks,
+        "model": model,
+        "stop_reason": stop_reason,
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
+        }
+    }

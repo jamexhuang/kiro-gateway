@@ -1,0 +1,972 @@
+# -*- coding: utf-8 -*-
+
+"""
+Unit tests for converters_anthropic module.
+
+Tests for Anthropic Messages API to Kiro format conversion:
+- Content extraction from Anthropic format
+- Tool results extraction
+- Tool uses extraction
+- Message conversion to unified format
+- Tool conversion to unified format
+- Full Anthropic → Kiro payload conversion
+"""
+
+import pytest
+from unittest.mock import patch, MagicMock
+
+from kiro.converters_anthropic import (
+    convert_anthropic_content_to_text,
+    extract_tool_results_from_anthropic_content,
+    extract_tool_uses_from_anthropic_content,
+    convert_anthropic_messages,
+    convert_anthropic_tools,
+    anthropic_to_kiro,
+)
+from kiro.converters_core import UnifiedMessage, UnifiedTool
+from kiro.models_anthropic import (
+    AnthropicMessagesRequest,
+    AnthropicMessage,
+    AnthropicTool,
+    TextContentBlock,
+    ToolUseContentBlock,
+    ToolResultContentBlock,
+)
+
+
+# ==================================================================================================
+# Tests for convert_anthropic_content_to_text
+# ==================================================================================================
+
+class TestConvertAnthropicContentToText:
+    """Tests for convert_anthropic_content_to_text function."""
+    
+    def test_extracts_from_string(self):
+        """
+        What it does: Verifies text extraction from a string.
+        Purpose: Ensure string is returned as-is.
+        """
+        print("Setup: Simple string content...")
+        content = "Hello, World!"
+        
+        print("Action: Extracting text...")
+        result = convert_anthropic_content_to_text(content)
+        
+        print(f"Comparing result: Expected 'Hello, World!', Got '{result}'")
+        assert result == "Hello, World!"
+    
+    def test_extracts_from_list_with_text_blocks(self):
+        """
+        What it does: Verifies extraction from list of text content blocks.
+        Purpose: Ensure Anthropic multimodal format is handled.
+        """
+        print("Setup: List with text content blocks...")
+        content = [
+            {"type": "text", "text": "Hello"},
+            {"type": "text", "text": " World"}
+        ]
+        
+        print("Action: Extracting text...")
+        result = convert_anthropic_content_to_text(content)
+        
+        print(f"Comparing result: Expected 'Hello World', Got '{result}'")
+        assert result == "Hello World"
+    
+    def test_extracts_from_pydantic_text_blocks(self):
+        """
+        What it does: Verifies extraction from Pydantic TextContentBlock objects.
+        Purpose: Ensure Pydantic models are handled correctly.
+        """
+        print("Setup: List with Pydantic TextContentBlock objects...")
+        content = [
+            TextContentBlock(type="text", text="Part 1"),
+            TextContentBlock(type="text", text=" Part 2")
+        ]
+        
+        print("Action: Extracting text...")
+        result = convert_anthropic_content_to_text(content)
+        
+        print(f"Comparing result: Expected 'Part 1 Part 2', Got '{result}'")
+        assert result == "Part 1 Part 2"
+    
+    def test_ignores_non_text_blocks(self):
+        """
+        What it does: Verifies that non-text blocks are ignored.
+        Purpose: Ensure tool_use and tool_result blocks don't contribute to text.
+        """
+        print("Setup: List with mixed content blocks...")
+        content = [
+            {"type": "text", "text": "Hello"},
+            {"type": "tool_use", "id": "call_123", "name": "test", "input": {}},
+            {"type": "text", "text": " World"}
+        ]
+        
+        print("Action: Extracting text...")
+        result = convert_anthropic_content_to_text(content)
+        
+        print(f"Comparing result: Expected 'Hello World', Got '{result}'")
+        assert result == "Hello World"
+    
+    def test_handles_none(self):
+        """
+        What it does: Verifies None handling.
+        Purpose: Ensure None returns empty string.
+        """
+        print("Setup: None content...")
+        
+        print("Action: Extracting text...")
+        result = convert_anthropic_content_to_text(None)
+        
+        print(f"Comparing result: Expected '', Got '{result}'")
+        assert result == ""
+    
+    def test_handles_empty_list(self):
+        """
+        What it does: Verifies empty list handling.
+        Purpose: Ensure empty list returns empty string.
+        """
+        print("Setup: Empty list...")
+        content = []
+        
+        print("Action: Extracting text...")
+        result = convert_anthropic_content_to_text(content)
+        
+        print(f"Comparing result: Expected '', Got '{result}'")
+        assert result == ""
+    
+    def test_converts_other_types_to_string(self):
+        """
+        What it does: Verifies conversion of other types to string.
+        Purpose: Ensure numbers and other types are converted.
+        """
+        print("Setup: Number content...")
+        content = 42
+        
+        print("Action: Extracting text...")
+        result = convert_anthropic_content_to_text(content)
+        
+        print(f"Comparing result: Expected '42', Got '{result}'")
+        assert result == "42"
+
+
+# ==================================================================================================
+# Tests for extract_tool_results_from_anthropic_content
+# ==================================================================================================
+
+class TestExtractToolResultsFromAnthropicContent:
+    """Tests for extract_tool_results_from_anthropic_content function."""
+    
+    def test_extracts_tool_result_from_dict(self):
+        """
+        What it does: Verifies extraction of tool result from dict content block.
+        Purpose: Ensure tool_result blocks are extracted correctly.
+        """
+        print("Setup: Content with tool_result block...")
+        content = [
+            {"type": "tool_result", "tool_use_id": "call_123", "content": "Result text"}
+        ]
+        
+        print("Action: Extracting tool results...")
+        result = extract_tool_results_from_anthropic_content(content)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["type"] == "tool_result"
+        assert result[0]["tool_use_id"] == "call_123"
+        assert result[0]["content"] == "Result text"
+    
+    def test_extracts_tool_result_from_pydantic_model(self):
+        """
+        What it does: Verifies extraction from Pydantic ToolResultContentBlock.
+        Purpose: Ensure Pydantic models are handled correctly.
+        """
+        print("Setup: Content with Pydantic ToolResultContentBlock...")
+        content = [
+            ToolResultContentBlock(
+                type="tool_result",
+                tool_use_id="call_456",
+                content="Pydantic result"
+            )
+        ]
+        
+        print("Action: Extracting tool results...")
+        result = extract_tool_results_from_anthropic_content(content)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["tool_use_id"] == "call_456"
+        assert result[0]["content"] == "Pydantic result"
+    
+    def test_extracts_multiple_tool_results(self):
+        """
+        What it does: Verifies extraction of multiple tool results.
+        Purpose: Ensure all tool_result blocks are extracted.
+        """
+        print("Setup: Content with multiple tool_results...")
+        content = [
+            {"type": "tool_result", "tool_use_id": "call_1", "content": "Result 1"},
+            {"type": "text", "text": "Some text"},
+            {"type": "tool_result", "tool_use_id": "call_2", "content": "Result 2"}
+        ]
+        
+        print("Action: Extracting tool results...")
+        result = extract_tool_results_from_anthropic_content(content)
+        
+        print(f"Result: {result}")
+        assert len(result) == 2
+        assert result[0]["tool_use_id"] == "call_1"
+        assert result[1]["tool_use_id"] == "call_2"
+    
+    def test_returns_empty_for_string_content(self):
+        """
+        What it does: Verifies empty list return for string content.
+        Purpose: Ensure string doesn't contain tool results.
+        """
+        print("Setup: String content...")
+        content = "Just a string"
+        
+        print("Action: Extracting tool results...")
+        result = extract_tool_results_from_anthropic_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_returns_empty_for_list_without_tool_results(self):
+        """
+        What it does: Verifies empty list return without tool_result blocks.
+        Purpose: Ensure regular elements are not extracted.
+        """
+        print("Setup: List without tool_result...")
+        content = [{"type": "text", "text": "Hello"}]
+        
+        print("Action: Extracting tool results...")
+        result = extract_tool_results_from_anthropic_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_handles_empty_content_in_tool_result(self):
+        """
+        What it does: Verifies handling of empty content in tool_result.
+        Purpose: Ensure empty content is replaced with "(empty result)".
+        """
+        print("Setup: Tool result with empty content...")
+        content = [
+            {"type": "tool_result", "tool_use_id": "call_123", "content": ""}
+        ]
+        
+        print("Action: Extracting tool results...")
+        result = extract_tool_results_from_anthropic_content(content)
+        
+        print(f"Result: {result}")
+        assert result[0]["content"] == "(empty result)"
+    
+    def test_handles_none_content_in_tool_result(self):
+        """
+        What it does: Verifies handling of None content in tool_result.
+        Purpose: Ensure None content is replaced with "(empty result)".
+        """
+        print("Setup: Tool result with None content...")
+        content = [
+            {"type": "tool_result", "tool_use_id": "call_123", "content": None}
+        ]
+        
+        print("Action: Extracting tool results...")
+        result = extract_tool_results_from_anthropic_content(content)
+        
+        print(f"Result: {result}")
+        assert result[0]["content"] == "(empty result)"
+    
+    def test_handles_list_content_in_tool_result(self):
+        """
+        What it does: Verifies handling of list content in tool_result.
+        Purpose: Ensure list content is converted to text.
+        """
+        print("Setup: Tool result with list content...")
+        content = [
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_123",
+                "content": [{"type": "text", "text": "List result"}]
+            }
+        ]
+        
+        print("Action: Extracting tool results...")
+        result = extract_tool_results_from_anthropic_content(content)
+        
+        print(f"Result: {result}")
+        assert result[0]["content"] == "List result"
+    
+    def test_skips_tool_result_without_tool_use_id(self):
+        """
+        What it does: Verifies that tool_result without tool_use_id is skipped.
+        Purpose: Ensure invalid tool_result blocks are ignored.
+        """
+        print("Setup: Tool result without tool_use_id...")
+        content = [
+            {"type": "tool_result", "content": "Result without ID"}
+        ]
+        
+        print("Action: Extracting tool results...")
+        result = extract_tool_results_from_anthropic_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+
+
+# ==================================================================================================
+# Tests for extract_tool_uses_from_anthropic_content
+# ==================================================================================================
+
+class TestExtractToolUsesFromAnthropicContent:
+    """Tests for extract_tool_uses_from_anthropic_content function."""
+    
+    def test_extracts_tool_use_from_dict(self):
+        """
+        What it does: Verifies extraction of tool use from dict content block.
+        Purpose: Ensure tool_use blocks are extracted correctly.
+        """
+        print("Setup: Content with tool_use block...")
+        content = [
+            {"type": "tool_use", "id": "call_123", "name": "get_weather", "input": {"location": "Moscow"}}
+        ]
+        
+        print("Action: Extracting tool uses...")
+        result = extract_tool_uses_from_anthropic_content(content)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["id"] == "call_123"
+        assert result[0]["type"] == "function"
+        assert result[0]["function"]["name"] == "get_weather"
+        assert result[0]["function"]["arguments"] == {"location": "Moscow"}
+    
+    def test_extracts_tool_use_from_pydantic_model(self):
+        """
+        What it does: Verifies extraction from Pydantic ToolUseContentBlock.
+        Purpose: Ensure Pydantic models are handled correctly.
+        """
+        print("Setup: Content with Pydantic ToolUseContentBlock...")
+        content = [
+            ToolUseContentBlock(
+                type="tool_use",
+                id="call_456",
+                name="search",
+                input={"query": "test"}
+            )
+        ]
+        
+        print("Action: Extracting tool uses...")
+        result = extract_tool_uses_from_anthropic_content(content)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["id"] == "call_456"
+        assert result[0]["function"]["name"] == "search"
+    
+    def test_extracts_multiple_tool_uses(self):
+        """
+        What it does: Verifies extraction of multiple tool uses.
+        Purpose: Ensure all tool_use blocks are extracted.
+        """
+        print("Setup: Content with multiple tool_uses...")
+        content = [
+            {"type": "tool_use", "id": "call_1", "name": "tool1", "input": {}},
+            {"type": "text", "text": "Some text"},
+            {"type": "tool_use", "id": "call_2", "name": "tool2", "input": {}}
+        ]
+        
+        print("Action: Extracting tool uses...")
+        result = extract_tool_uses_from_anthropic_content(content)
+        
+        print(f"Result: {result}")
+        assert len(result) == 2
+        assert result[0]["id"] == "call_1"
+        assert result[1]["id"] == "call_2"
+    
+    def test_returns_empty_for_string_content(self):
+        """
+        What it does: Verifies empty list return for string content.
+        Purpose: Ensure string doesn't contain tool uses.
+        """
+        print("Setup: String content...")
+        content = "Just a string"
+        
+        print("Action: Extracting tool uses...")
+        result = extract_tool_uses_from_anthropic_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_returns_empty_for_list_without_tool_uses(self):
+        """
+        What it does: Verifies empty list return without tool_use blocks.
+        Purpose: Ensure regular elements are not extracted.
+        """
+        print("Setup: List without tool_use...")
+        content = [{"type": "text", "text": "Hello"}]
+        
+        print("Action: Extracting tool uses...")
+        result = extract_tool_uses_from_anthropic_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_skips_tool_use_without_id(self):
+        """
+        What it does: Verifies that tool_use without id is skipped.
+        Purpose: Ensure invalid tool_use blocks are ignored.
+        """
+        print("Setup: Tool use without id...")
+        content = [
+            {"type": "tool_use", "name": "test", "input": {}}
+        ]
+        
+        print("Action: Extracting tool uses...")
+        result = extract_tool_uses_from_anthropic_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_skips_tool_use_without_name(self):
+        """
+        What it does: Verifies that tool_use without name is skipped.
+        Purpose: Ensure invalid tool_use blocks are ignored.
+        """
+        print("Setup: Tool use without name...")
+        content = [
+            {"type": "tool_use", "id": "call_123", "input": {}}
+        ]
+        
+        print("Action: Extracting tool uses...")
+        result = extract_tool_uses_from_anthropic_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+
+
+# ==================================================================================================
+# Tests for convert_anthropic_messages
+# ==================================================================================================
+
+class TestConvertAnthropicMessages:
+    """Tests for convert_anthropic_messages function."""
+    
+    def test_converts_simple_user_message(self):
+        """
+        What it does: Verifies conversion of simple user message.
+        Purpose: Ensure basic user message is converted to UnifiedMessage.
+        """
+        print("Setup: Simple user message...")
+        messages = [
+            AnthropicMessage(role="user", content="Hello!")
+        ]
+        
+        print("Action: Converting messages...")
+        result = convert_anthropic_messages(messages)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0].role == "user"
+        assert result[0].content == "Hello!"
+        assert result[0].tool_calls is None
+        assert result[0].tool_results is None
+    
+    def test_converts_simple_assistant_message(self):
+        """
+        What it does: Verifies conversion of simple assistant message.
+        Purpose: Ensure basic assistant message is converted to UnifiedMessage.
+        """
+        print("Setup: Simple assistant message...")
+        messages = [
+            AnthropicMessage(role="assistant", content="Hi there!")
+        ]
+        
+        print("Action: Converting messages...")
+        result = convert_anthropic_messages(messages)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0].role == "assistant"
+        assert result[0].content == "Hi there!"
+    
+    def test_converts_user_message_with_content_blocks(self):
+        """
+        What it does: Verifies conversion of user message with content blocks.
+        Purpose: Ensure multimodal content is handled.
+        """
+        print("Setup: User message with content blocks...")
+        messages = [
+            AnthropicMessage(
+                role="user",
+                content=[
+                    {"type": "text", "text": "Part 1"},
+                    {"type": "text", "text": " Part 2"}
+                ]
+            )
+        ]
+        
+        print("Action: Converting messages...")
+        result = convert_anthropic_messages(messages)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0].content == "Part 1 Part 2"
+    
+    def test_converts_assistant_message_with_tool_use(self):
+        """
+        What it does: Verifies conversion of assistant message with tool_use.
+        Purpose: Ensure tool_use blocks are extracted as tool_calls.
+        """
+        print("Setup: Assistant message with tool_use...")
+        messages = [
+            AnthropicMessage(
+                role="assistant",
+                content=[
+                    {"type": "text", "text": "I'll check the weather"},
+                    {"type": "tool_use", "id": "call_123", "name": "get_weather", "input": {"location": "Moscow"}}
+                ]
+            )
+        ]
+        
+        print("Action: Converting messages...")
+        result = convert_anthropic_messages(messages)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0].role == "assistant"
+        assert result[0].content == "I'll check the weather"
+        assert result[0].tool_calls is not None
+        assert len(result[0].tool_calls) == 1
+        assert result[0].tool_calls[0]["function"]["name"] == "get_weather"
+    
+    def test_converts_user_message_with_tool_result(self):
+        """
+        What it does: Verifies conversion of user message with tool_result.
+        Purpose: Ensure tool_result blocks are extracted as tool_results.
+        """
+        print("Setup: User message with tool_result...")
+        messages = [
+            AnthropicMessage(
+                role="user",
+                content=[
+                    {"type": "tool_result", "tool_use_id": "call_123", "content": "Weather: Sunny, 25°C"}
+                ]
+            )
+        ]
+        
+        print("Action: Converting messages...")
+        result = convert_anthropic_messages(messages)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0].role == "user"
+        assert result[0].tool_results is not None
+        assert len(result[0].tool_results) == 1
+        assert result[0].tool_results[0]["tool_use_id"] == "call_123"
+    
+    def test_converts_full_conversation(self):
+        """
+        What it does: Verifies conversion of full conversation.
+        Purpose: Ensure multi-turn conversation is converted correctly.
+        """
+        print("Setup: Full conversation...")
+        messages = [
+            AnthropicMessage(role="user", content="Hello"),
+            AnthropicMessage(role="assistant", content="Hi! How can I help?"),
+            AnthropicMessage(role="user", content="What's the weather?")
+        ]
+        
+        print("Action: Converting messages...")
+        result = convert_anthropic_messages(messages)
+        
+        print(f"Result: {result}")
+        assert len(result) == 3
+        assert result[0].role == "user"
+        assert result[1].role == "assistant"
+        assert result[2].role == "user"
+    
+    def test_handles_empty_messages_list(self):
+        """
+        What it does: Verifies handling of empty messages list.
+        Purpose: Ensure empty list returns empty list.
+        """
+        print("Setup: Empty messages list...")
+        messages = []
+        
+        print("Action: Converting messages...")
+        result = convert_anthropic_messages(messages)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+
+
+# ==================================================================================================
+# Tests for convert_anthropic_tools
+# ==================================================================================================
+
+class TestConvertAnthropicTools:
+    """Tests for convert_anthropic_tools function."""
+    
+    def test_returns_none_for_none(self):
+        """
+        What it does: Verifies handling of None.
+        Purpose: Ensure None returns None.
+        """
+        print("Setup: None tools...")
+        
+        print("Action: Converting tools...")
+        result = convert_anthropic_tools(None)
+        
+        print(f"Comparing result: Expected None, Got {result}")
+        assert result is None
+    
+    def test_returns_none_for_empty_list(self):
+        """
+        What it does: Verifies handling of empty list.
+        Purpose: Ensure empty list returns None.
+        """
+        print("Setup: Empty tools list...")
+        
+        print("Action: Converting tools...")
+        result = convert_anthropic_tools([])
+        
+        print(f"Comparing result: Expected None, Got {result}")
+        assert result is None
+    
+    def test_converts_tool_from_pydantic_model(self):
+        """
+        What it does: Verifies conversion of Pydantic AnthropicTool.
+        Purpose: Ensure Pydantic models are converted to UnifiedTool.
+        """
+        print("Setup: Pydantic AnthropicTool...")
+        tools = [
+            AnthropicTool(
+                name="get_weather",
+                description="Get weather for a location",
+                input_schema={"type": "object", "properties": {"location": {"type": "string"}}}
+            )
+        ]
+        
+        print("Action: Converting tools...")
+        result = convert_anthropic_tools(tools)
+        
+        print(f"Result: {result}")
+        assert result is not None
+        assert len(result) == 1
+        assert isinstance(result[0], UnifiedTool)
+        assert result[0].name == "get_weather"
+        assert result[0].description == "Get weather for a location"
+        assert result[0].input_schema == {"type": "object", "properties": {"location": {"type": "string"}}}
+    
+    def test_converts_tool_from_dict(self):
+        """
+        What it does: Verifies conversion of dict tool.
+        Purpose: Ensure dict tools are converted to UnifiedTool.
+        """
+        print("Setup: Dict tool...")
+        tools = [
+            {
+                "name": "search",
+                "description": "Search the web",
+                "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}}
+            }
+        ]
+        
+        print("Action: Converting tools...")
+        result = convert_anthropic_tools(tools)
+        
+        print(f"Result: {result}")
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].name == "search"
+        assert result[0].description == "Search the web"
+    
+    def test_converts_multiple_tools(self):
+        """
+        What it does: Verifies conversion of multiple tools.
+        Purpose: Ensure all tools are converted.
+        """
+        print("Setup: Multiple tools...")
+        tools = [
+            AnthropicTool(name="tool1", description="Tool 1", input_schema={}),
+            AnthropicTool(name="tool2", description="Tool 2", input_schema={})
+        ]
+        
+        print("Action: Converting tools...")
+        result = convert_anthropic_tools(tools)
+        
+        print(f"Result: {result}")
+        assert result is not None
+        assert len(result) == 2
+        assert result[0].name == "tool1"
+        assert result[1].name == "tool2"
+    
+    def test_handles_tool_without_description(self):
+        """
+        What it does: Verifies handling of tool without description.
+        Purpose: Ensure None description is preserved.
+        """
+        print("Setup: Tool without description...")
+        tools = [
+            AnthropicTool(name="test_tool", input_schema={})
+        ]
+        
+        print("Action: Converting tools...")
+        result = convert_anthropic_tools(tools)
+        
+        print(f"Result: {result}")
+        assert result is not None
+        assert result[0].description is None
+
+
+# ==================================================================================================
+# Tests for anthropic_to_kiro
+# ==================================================================================================
+
+class TestAnthropicToKiro:
+    """Tests for anthropic_to_kiro function - main entry point."""
+    
+    def test_builds_simple_payload(self):
+        """
+        What it does: Verifies building of simple Kiro payload.
+        Purpose: Ensure basic request is converted correctly.
+        """
+        print("Setup: Simple Anthropic request...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4-5",
+            messages=[AnthropicMessage(role="user", content="Hello!")],
+            max_tokens=1024
+        )
+        
+        print("Action: Converting to Kiro payload...")
+        with patch('kiro.converters_anthropic.get_internal_model_id', return_value='CLAUDE_SONNET_4_5_20250929_V1_0'):
+            with patch('kiro.converters_core.FAKE_REASONING_ENABLED', False):
+                result = anthropic_to_kiro(request, "conv-123", "arn:aws:test")
+        
+        print(f"Result: {result}")
+        assert "conversationState" in result
+        assert result["conversationState"]["conversationId"] == "conv-123"
+        assert "currentMessage" in result["conversationState"]
+        assert "userInputMessage" in result["conversationState"]["currentMessage"]
+        assert result["profileArn"] == "arn:aws:test"
+    
+    def test_includes_system_prompt(self):
+        """
+        What it does: Verifies that system prompt is included.
+        Purpose: Ensure Anthropic's separate system field is handled.
+        """
+        print("Setup: Request with system prompt...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4-5",
+            messages=[AnthropicMessage(role="user", content="Hello!")],
+            max_tokens=1024,
+            system="You are a helpful assistant."
+        )
+        
+        print("Action: Converting to Kiro payload...")
+        with patch('kiro.converters_anthropic.get_internal_model_id', return_value='CLAUDE_SONNET_4_5_20250929_V1_0'):
+            with patch('kiro.converters_core.FAKE_REASONING_ENABLED', False):
+                result = anthropic_to_kiro(request, "conv-123", "arn:aws:test")
+        
+        print(f"Result: {result}")
+        current_content = result["conversationState"]["currentMessage"]["userInputMessage"]["content"]
+        print(f"Current content: {current_content}")
+        assert "You are a helpful assistant." in current_content
+    
+    def test_includes_tools(self):
+        """
+        What it does: Verifies that tools are included in payload.
+        Purpose: Ensure Anthropic tools are converted to Kiro format.
+        """
+        print("Setup: Request with tools...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4-5",
+            messages=[AnthropicMessage(role="user", content="What's the weather?")],
+            max_tokens=1024,
+            tools=[
+                AnthropicTool(
+                    name="get_weather",
+                    description="Get weather for a location",
+                    input_schema={"type": "object", "properties": {"location": {"type": "string"}}}
+                )
+            ]
+        )
+        
+        print("Action: Converting to Kiro payload...")
+        with patch('kiro.converters_anthropic.get_internal_model_id', return_value='CLAUDE_SONNET_4_5_20250929_V1_0'):
+            with patch('kiro.converters_core.FAKE_REASONING_ENABLED', False):
+                result = anthropic_to_kiro(request, "conv-123", "arn:aws:test")
+        
+        print(f"Result: {result}")
+        context = result["conversationState"]["currentMessage"]["userInputMessage"].get("userInputMessageContext", {})
+        tools = context.get("tools", [])
+        print(f"Tools in payload: {tools}")
+        assert len(tools) == 1
+        assert tools[0]["toolSpecification"]["name"] == "get_weather"
+    
+    def test_builds_history_for_multi_turn(self):
+        """
+        What it does: Verifies building of history for multi-turn conversation.
+        Purpose: Ensure conversation history is included in payload.
+        """
+        print("Setup: Multi-turn conversation...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4-5",
+            messages=[
+                AnthropicMessage(role="user", content="Hello"),
+                AnthropicMessage(role="assistant", content="Hi! How can I help?"),
+                AnthropicMessage(role="user", content="What's the weather?")
+            ],
+            max_tokens=1024
+        )
+        
+        print("Action: Converting to Kiro payload...")
+        with patch('kiro.converters_anthropic.get_internal_model_id', return_value='CLAUDE_SONNET_4_5_20250929_V1_0'):
+            with patch('kiro.converters_core.FAKE_REASONING_ENABLED', False):
+                result = anthropic_to_kiro(request, "conv-123", "arn:aws:test")
+        
+        print(f"Result: {result}")
+        history = result["conversationState"].get("history", [])
+        print(f"History length: {len(history)}")
+        assert len(history) == 2  # First user + assistant
+        assert "userInputMessage" in history[0]
+        assert "assistantResponseMessage" in history[1]
+    
+    def test_handles_tool_use_and_result_flow(self):
+        """
+        What it does: Verifies handling of tool use and result flow.
+        Purpose: Ensure full tool flow is converted correctly.
+        """
+        print("Setup: Tool use and result flow...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4-5",
+            messages=[
+                AnthropicMessage(role="user", content="What's the weather in Moscow?"),
+                AnthropicMessage(
+                    role="assistant",
+                    content=[
+                        {"type": "text", "text": "I'll check the weather"},
+                        {"type": "tool_use", "id": "call_123", "name": "get_weather", "input": {"location": "Moscow"}}
+                    ]
+                ),
+                AnthropicMessage(
+                    role="user",
+                    content=[
+                        {"type": "tool_result", "tool_use_id": "call_123", "content": "Weather: Sunny, 25°C"}
+                    ]
+                )
+            ],
+            max_tokens=1024
+        )
+        
+        print("Action: Converting to Kiro payload...")
+        with patch('kiro.converters_anthropic.get_internal_model_id', return_value='CLAUDE_SONNET_4_5_20250929_V1_0'):
+            with patch('kiro.converters_core.FAKE_REASONING_ENABLED', False):
+                result = anthropic_to_kiro(request, "conv-123", "arn:aws:test")
+        
+        print(f"Result: {result}")
+        
+        # Check history contains tool use
+        history = result["conversationState"].get("history", [])
+        print(f"History: {history}")
+        
+        # Check current message contains tool result
+        current_msg = result["conversationState"]["currentMessage"]["userInputMessage"]
+        context = current_msg.get("userInputMessageContext", {})
+        tool_results = context.get("toolResults", [])
+        print(f"Tool results: {tool_results}")
+        assert len(tool_results) == 1
+    
+    def test_raises_for_empty_messages(self):
+        """
+        What it does: Verifies that empty messages raise Pydantic ValidationError.
+        Purpose: Ensure Pydantic validation works correctly (min_length=1).
+        
+        Note: AnthropicMessagesRequest has min_length=1 validation on messages field,
+        so empty messages are rejected at the Pydantic level, not at anthropic_to_kiro.
+        """
+        from pydantic import ValidationError
+        
+        print("Setup: Attempting to create request with empty messages...")
+        
+        print("Action: Creating AnthropicMessagesRequest (should raise ValidationError)...")
+        with pytest.raises(ValidationError):
+            AnthropicMessagesRequest(
+                model="claude-sonnet-4-5",
+                messages=[],
+                max_tokens=1024
+            )
+        
+        print("ValidationError raised as expected - Pydantic rejects empty messages")
+    
+    def test_injects_thinking_tags_when_enabled(self):
+        """
+        What it does: Verifies that thinking tags are injected when enabled.
+        Purpose: Ensure fake reasoning feature works with Anthropic API.
+        """
+        print("Setup: Request with fake reasoning enabled...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4-5",
+            messages=[AnthropicMessage(role="user", content="What is 2+2?")],
+            max_tokens=1024
+        )
+        
+        print("Action: Converting to Kiro payload with fake reasoning...")
+        with patch('kiro.converters_anthropic.get_internal_model_id', return_value='CLAUDE_SONNET_4_5_20250929_V1_0'):
+            with patch('kiro.converters_core.FAKE_REASONING_ENABLED', True):
+                with patch('kiro.converters_core.FAKE_REASONING_MAX_TOKENS', 4000):
+                    result = anthropic_to_kiro(request, "conv-123", "arn:aws:test")
+        
+        print(f"Result: {result}")
+        current_content = result["conversationState"]["currentMessage"]["userInputMessage"]["content"]
+        print(f"Current content (first 200 chars): {current_content[:200]}...")
+        
+        print("Checking that thinking tags are present...")
+        assert "<thinking_mode>enabled</thinking_mode>" in current_content
+        assert "What is 2+2?" in current_content
+    
+    def test_skips_thinking_tags_when_tool_results_present(self):
+        """
+        What it does: Verifies that thinking tags are skipped when tool results are present.
+        Purpose: Ensure Kiro API compatibility (rejects thinking tags with tool results).
+        
+        Note: The system prompt addition contains `<thinking_mode>` as documentation text
+        (in backticks), but the actual thinking tags injection is skipped. We check that
+        the content doesn't START with the thinking tags prefix.
+        """
+        print("Setup: Request with tool results and fake reasoning enabled...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4-5",
+            messages=[
+                AnthropicMessage(
+                    role="user",
+                    content=[
+                        {"type": "tool_result", "tool_use_id": "call_123", "content": "Result"}
+                    ]
+                )
+            ],
+            max_tokens=1024
+        )
+        
+        print("Action: Converting to Kiro payload...")
+        with patch('kiro.converters_anthropic.get_internal_model_id', return_value='CLAUDE_SONNET_4_5_20250929_V1_0'):
+            with patch('kiro.converters_core.FAKE_REASONING_ENABLED', True):
+                with patch('kiro.converters_core.FAKE_REASONING_MAX_TOKENS', 4000):
+                    result = anthropic_to_kiro(request, "conv-123", "arn:aws:test")
+        
+        print(f"Result: {result}")
+        current_content = result["conversationState"]["currentMessage"]["userInputMessage"]["content"]
+        print(f"Current content (first 100 chars): {current_content[:100]}...")
+        
+        print("Checking that content does NOT start with thinking tags prefix...")
+        # The actual thinking tags prefix starts with "<thinking_mode>enabled"
+        # The system prompt addition contains this text in backticks as documentation
+        # We check that the content doesn't start with the actual tag (not in backticks)
+        assert not current_content.startswith("<thinking_mode>enabled</thinking_mode>"), \
+            "Content should not start with thinking tags when tool results are present"
+        
+        print("Checking that <max_thinking_length> tag is NOT present...")
+        # This tag is only present in the actual injection, not in documentation
+        assert "<max_thinking_length>4000</max_thinking_length>" not in current_content, \
+            "max_thinking_length tag should not be present when tool results are present"
