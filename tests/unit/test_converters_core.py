@@ -20,6 +20,7 @@ from kiro.converters_core import (
     ensure_assistant_before_tool_results,
     strip_all_tool_content,
     build_kiro_history,
+    build_kiro_payload,
     process_tools_with_long_descriptions,
     inject_thinking_tags,
     extract_tool_results_from_content,
@@ -27,6 +28,8 @@ from kiro.converters_core import (
     sanitize_json_schema,
     convert_tools_to_kiro_format,
     convert_tool_results_to_kiro_format,
+    tool_calls_to_text,
+    tool_results_to_text,
     UnifiedMessage,
     UnifiedTool,
 )
@@ -2247,8 +2250,8 @@ class TestStripAllToolContent:
     
     def test_strips_tool_calls_from_assistant(self):
         """
-        What it does: Verifies tool_calls are stripped from assistant messages.
-        Purpose: Ensure tool_calls are removed when no tools are defined.
+        What it does: Verifies tool_calls are stripped and converted to text.
+        Purpose: Ensure tool_calls are converted to text representation when no tools are defined.
         """
         print("Setup: Assistant message with tool_calls...")
         messages = [
@@ -2267,16 +2270,18 @@ class TestStripAllToolContent:
         result, had_content = strip_all_tool_content(messages)
         
         print(f"Result: {result}")
-        print("Checking that tool_calls are stripped...")
+        print("Checking that tool_calls are stripped and converted to text...")
         assert len(result) == 1
         assert result[0].tool_calls is None
-        assert result[0].content == "I'll call a tool"  # Content preserved
+        # Original content is preserved AND tool text is appended
+        assert "I'll call a tool" in result[0].content
+        assert "[Tool: get_weather" in result[0].content
         assert had_content is True
     
     def test_strips_tool_results_from_user(self):
         """
-        What it does: Verifies tool_results are stripped from user messages.
-        Purpose: Ensure tool_results are removed when no tools are defined.
+        What it does: Verifies tool_results are stripped and converted to text.
+        Purpose: Ensure tool_results are converted to text representation when no tools are defined.
         """
         print("Setup: User message with tool_results...")
         messages = [
@@ -2295,10 +2300,13 @@ class TestStripAllToolContent:
         result, had_content = strip_all_tool_content(messages)
         
         print(f"Result: {result}")
-        print("Checking that tool_results are stripped...")
+        print("Checking that tool_results are stripped and converted to text...")
         assert len(result) == 1
         assert result[0].tool_results is None
-        assert result[0].content == "Here are the results"  # Content preserved
+        # Original content is preserved AND tool result text is appended
+        assert "Here are the results" in result[0].content
+        assert "[Tool Result" in result[0].content
+        assert "Weather is sunny" in result[0].content
         assert had_content is True
     
     def test_strips_both_tool_calls_and_tool_results(self):
@@ -2397,8 +2405,8 @@ class TestStripAllToolContent:
     
     def test_preserves_message_content_when_stripping(self):
         """
-        What it does: Verifies message content is preserved when tool content is stripped.
-        Purpose: Ensure only tool content is removed, not the entire message.
+        What it does: Verifies message content is preserved and tool content is appended as text.
+        Purpose: Ensure original content is kept and tool content is converted to text.
         """
         print("Setup: Messages with both content and tool content...")
         messages = [
@@ -2426,9 +2434,11 @@ class TestStripAllToolContent:
         result, had_content = strip_all_tool_content(messages)
         
         print(f"Result: {result}")
-        print("Checking that content is preserved...")
-        assert result[0].content == "Let me help you with that"
-        assert result[1].content == "Thanks for the result"
+        print("Checking that original content is preserved and tool text is appended...")
+        assert "Let me help you with that" in result[0].content
+        assert "[Tool: helper" in result[0].content
+        assert "Thanks for the result" in result[1].content
+        assert "[Tool Result" in result[1].content
         assert had_content is True
     
     def test_preserves_message_role_when_stripping(self):
@@ -2557,13 +2567,14 @@ class TestStripAllToolContent:
         # Empty list is falsy, so should not be considered as having tool content
         assert had_content is False
     
-    def test_adds_tool_use_placeholder_for_empty_content_with_tool_calls(self):
+    def test_adds_tool_text_for_empty_content_with_tool_calls(self):
         """
-        What it does: Verifies that "(tool use)" placeholder is added when content is empty after stripping tool_calls.
+        What it does: Verifies that tool_calls are converted to text when content is empty.
         Purpose: Ensure Kiro API receives non-empty content for messages that only had tool_calls.
         
         This is a critical test for issue #20 - OpenCode compaction returns 400 error
         because messages with only tool_calls become empty after stripping.
+        Now we convert tool_calls to text representation instead of simple placeholder.
         """
         print("Setup: Assistant message with only tool_calls (empty content)...")
         messages = [
@@ -2583,18 +2594,21 @@ class TestStripAllToolContent:
         
         print(f"Result: {result}")
         print(f"Content after stripping: '{result[0].content}'")
-        print("Checking that '(tool use)' placeholder is added...")
-        assert result[0].content == "(tool use)"
+        print("Checking that tool_calls are converted to text representation...")
+        assert "[Tool: read_file" in result[0].content
+        assert "call_123" in result[0].content
+        assert '{"path": "test.py"}' in result[0].content
         assert result[0].tool_calls is None
         assert had_content is True
     
-    def test_adds_tool_result_placeholder_for_empty_content_with_tool_results(self):
+    def test_adds_tool_text_for_empty_content_with_tool_results(self):
         """
-        What it does: Verifies that "(tool result)" placeholder is added when content is empty after stripping tool_results.
+        What it does: Verifies that tool_results are converted to text when content is empty.
         Purpose: Ensure Kiro API receives non-empty content for messages that only had tool_results.
         
         This is a critical test for issue #20 - OpenCode compaction returns 400 error
         because messages with only tool_results become empty after stripping.
+        Now we convert tool_results to text representation instead of simple placeholder.
         """
         print("Setup: User message with only tool_results (empty content)...")
         messages = [
@@ -2614,15 +2628,17 @@ class TestStripAllToolContent:
         
         print(f"Result: {result}")
         print(f"Content after stripping: '{result[0].content}'")
-        print("Checking that '(tool result)' placeholder is added...")
-        assert result[0].content == "(tool result)"
+        print("Checking that tool_results are converted to text representation...")
+        assert "[Tool Result" in result[0].content
+        assert "call_123" in result[0].content
+        assert "File contents here" in result[0].content
         assert result[0].tool_results is None
         assert had_content is True
     
     def test_preserves_existing_content_when_stripping_tool_calls(self):
         """
-        What it does: Verifies that existing content is preserved (not replaced with placeholder).
-        Purpose: Ensure placeholder is only added when content is actually empty.
+        What it does: Verifies that existing content is preserved and tool text is appended.
+        Purpose: Ensure original content is kept and tool_calls are converted to text.
         """
         print("Setup: Assistant message with both content and tool_calls...")
         messages = [
@@ -2642,15 +2658,16 @@ class TestStripAllToolContent:
         
         print(f"Result: {result}")
         print(f"Content after stripping: '{result[0].content}'")
-        print("Checking that original content is preserved...")
-        assert result[0].content == "I'll read the file for you"
+        print("Checking that original content is preserved and tool text is appended...")
+        assert "I'll read the file for you" in result[0].content
+        assert "[Tool: read_file" in result[0].content
         assert result[0].tool_calls is None
         assert had_content is True
     
     def test_preserves_existing_content_when_stripping_tool_results(self):
         """
-        What it does: Verifies that existing content is preserved (not replaced with placeholder).
-        Purpose: Ensure placeholder is only added when content is actually empty.
+        What it does: Verifies that existing content is preserved and tool result text is appended.
+        Purpose: Ensure original content is kept and tool_results are converted to text.
         """
         print("Setup: User message with both content and tool_results...")
         messages = [
@@ -2670,15 +2687,17 @@ class TestStripAllToolContent:
         
         print(f"Result: {result}")
         print(f"Content after stripping: '{result[0].content}'")
-        print("Checking that original content is preserved...")
-        assert result[0].content == "Here are the results you requested"
+        print("Checking that original content is preserved and tool result text is appended...")
+        assert "Here are the results you requested" in result[0].content
+        assert "[Tool Result" in result[0].content
+        assert "Result data" in result[0].content
         assert result[0].tool_results is None
         assert had_content is True
     
-    def test_tool_use_placeholder_priority_over_tool_result(self):
+    def test_both_tool_calls_and_results_converted_to_text(self):
         """
-        What it does: Verifies that "(tool use)" placeholder takes priority when both tool_calls and tool_results exist.
-        Purpose: Ensure consistent placeholder selection when message has both types.
+        What it does: Verifies that both tool_calls and tool_results are converted to text.
+        Purpose: Ensure all tool content is preserved when message has both types.
         
         Note: This is an edge case - normally assistant messages have tool_calls and user messages have tool_results.
         """
@@ -2687,8 +2706,8 @@ class TestStripAllToolContent:
             UnifiedMessage(
                 role="assistant",
                 content="",
-                tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "tool", "arguments": "{}"}}],
-                tool_results=[{"type": "tool_result", "tool_use_id": "call_0", "content": "Result"}]
+                tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "my_tool", "arguments": '{"x": 1}'}}],
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_0", "content": "Previous result"}]
             )
         ]
         
@@ -2697,14 +2716,16 @@ class TestStripAllToolContent:
         
         print(f"Result: {result}")
         print(f"Content after stripping: '{result[0].content}'")
-        print("Checking that '(tool use)' placeholder is used (priority over tool_result)...")
-        assert result[0].content == "(tool use)"
+        print("Checking that both tool_calls and tool_results are converted to text...")
+        assert "[Tool: my_tool" in result[0].content
+        assert "[Tool Result" in result[0].content
+        assert "Previous result" in result[0].content
         assert had_content is True
     
-    def test_multiple_messages_with_empty_content_get_correct_placeholders(self):
+    def test_multiple_messages_with_empty_content_get_text_representation(self):
         """
-        What it does: Verifies correct placeholders for multiple messages in a conversation.
-        Purpose: Ensure each message gets the appropriate placeholder based on its tool content type.
+        What it does: Verifies correct text representation for multiple messages in a conversation.
+        Purpose: Ensure each message gets the appropriate text representation based on its tool content type.
         
         This simulates the OpenCode compaction scenario from issue #20 where multiple
         tool-only messages are sent without text content.
@@ -2715,22 +2736,22 @@ class TestStripAllToolContent:
             UnifiedMessage(
                 role="assistant",
                 content="",  # Only tool_calls
-                tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}]
+                tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": '{"path": "a.txt"}'}}]
             ),
             UnifiedMessage(
                 role="user",
                 content="",  # Only tool_results
-                tool_results=[{"type": "tool_result", "tool_use_id": "call_1", "content": "File content"}]
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_1", "content": "File content ABC"}]
             ),
             UnifiedMessage(
                 role="assistant",
                 content="",  # Only tool_calls
-                tool_calls=[{"id": "call_2", "type": "function", "function": {"name": "write_file", "arguments": "{}"}}]
+                tool_calls=[{"id": "call_2", "type": "function", "function": {"name": "write_file", "arguments": '{"path": "b.txt"}'}}]
             ),
             UnifiedMessage(
                 role="user",
                 content="",  # Only tool_results
-                tool_results=[{"type": "tool_result", "tool_use_id": "call_2", "content": "Done"}]
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_2", "content": "Write completed"}]
             )
         ]
         
@@ -2738,21 +2759,649 @@ class TestStripAllToolContent:
         result, had_content = strip_all_tool_content(messages)
         
         print(f"Result: {result}")
-        print("Checking placeholders for each message...")
+        print("Checking text representation for each message...")
         
         print(f"Message 0 content: '{result[0].content}'")
         assert result[0].content == "Read these files"  # Original content preserved
         
         print(f"Message 1 content: '{result[1].content}'")
-        assert result[1].content == "(tool use)"  # Placeholder for tool_calls
+        assert "[Tool: read_file" in result[1].content  # Text representation for tool_calls
+        assert "call_1" in result[1].content
         
         print(f"Message 2 content: '{result[2].content}'")
-        assert result[2].content == "(tool result)"  # Placeholder for tool_results
+        assert "[Tool Result" in result[2].content  # Text representation for tool_results
+        assert "File content ABC" in result[2].content
         
         print(f"Message 3 content: '{result[3].content}'")
-        assert result[3].content == "(tool use)"  # Placeholder for tool_calls
+        assert "[Tool: write_file" in result[3].content  # Text representation for tool_calls
+        assert "call_2" in result[3].content
         
         print(f"Message 4 content: '{result[4].content}'")
-        assert result[4].content == "(tool result)"  # Placeholder for tool_results
+        assert "[Tool Result" in result[4].content  # Text representation for tool_results
+        assert "Write completed" in result[4].content
         
         assert had_content is True
+    
+    def test_converts_tool_calls_to_text_representation(self):
+        """
+        What it does: Verifies that tool_calls are converted to text representation.
+        Purpose: Ensure tool context is preserved as readable text when stripping.
+        
+        This is a critical test for issue #20 - instead of losing tool context,
+        we convert it to human-readable text.
+        """
+        print("Setup: Assistant message with tool_calls...")
+        messages = [
+            UnifiedMessage(
+                role="assistant",
+                content="",
+                tool_calls=[{
+                    "id": "call_abc123",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path": "test.py"}'}
+                }]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_content = strip_all_tool_content(messages)
+        
+        print(f"Result content: '{result[0].content}'")
+        print("Checking that tool name is in text representation...")
+        assert "[Tool: read_file" in result[0].content
+        print("Checking that tool_id is in text representation...")
+        assert "call_abc123" in result[0].content
+        print("Checking that arguments are in text representation...")
+        assert '{"path": "test.py"}' in result[0].content
+        assert had_content is True
+    
+    def test_converts_tool_results_to_text_representation(self):
+        """
+        What it does: Verifies that tool_results are converted to text representation.
+        Purpose: Ensure tool result context is preserved as readable text when stripping.
+        
+        This is a critical test for issue #20 - instead of losing tool context,
+        we convert it to human-readable text.
+        """
+        print("Setup: User message with tool_results...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="",
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_xyz789",
+                    "content": "File contents:\ndef hello():\n    print('world')"
+                }]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_content = strip_all_tool_content(messages)
+        
+        print(f"Result content: '{result[0].content}'")
+        print("Checking that [Tool Result] marker is present...")
+        assert "[Tool Result" in result[0].content
+        print("Checking that tool_use_id is in text representation...")
+        assert "call_xyz789" in result[0].content
+        print("Checking that result content is preserved...")
+        assert "def hello():" in result[0].content
+        assert had_content is True
+
+
+# ==================================================================================================
+# Tests for tool_calls_to_text
+# ==================================================================================================
+
+class TestToolCallsToText:
+    """
+    Tests for tool_calls_to_text function.
+    
+    This function converts tool_calls to human-readable text representation.
+    Used when stripping tool content from messages (when no tools are defined).
+    """
+    
+    def test_converts_single_tool_call_to_text(self):
+        """
+        What it does: Verifies conversion of a single tool call to text.
+        Purpose: Ensure basic conversion works correctly.
+        """
+        print("Setup: Single tool call...")
+        tool_calls = [{
+            "id": "call_123",
+            "type": "function",
+            "function": {"name": "bash", "arguments": '{"command": "ls -la"}'}
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_calls_to_text(tool_calls)
+        
+        print(f"Result: '{result}'")
+        print("Checking that tool name is present...")
+        assert "[Tool: bash" in result
+        print("Checking that arguments are present...")
+        assert '{"command": "ls -la"}' in result
+    
+    def test_converts_multiple_tool_calls_to_text(self):
+        """
+        What it does: Verifies conversion of multiple tool calls to text.
+        Purpose: Ensure all tool calls are converted and separated.
+        """
+        print("Setup: Multiple tool calls...")
+        tool_calls = [
+            {"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": '{"path": "a.txt"}'}},
+            {"id": "call_2", "type": "function", "function": {"name": "write_file", "arguments": '{"path": "b.txt"}'}}
+        ]
+        
+        print("Action: Converting to text...")
+        result = tool_calls_to_text(tool_calls)
+        
+        print(f"Result: '{result}'")
+        print("Checking that both tools are present...")
+        assert "[Tool: read_file" in result
+        assert "[Tool: write_file" in result
+        assert '{"path": "a.txt"}' in result
+        assert '{"path": "b.txt"}' in result
+    
+    def test_includes_tool_id_in_output(self):
+        """
+        What it does: Verifies that tool_id is included in output.
+        Purpose: Ensure traceability between tool calls and results.
+        """
+        print("Setup: Tool call with id...")
+        tool_calls = [{
+            "id": "tooluse_abc123xyz",
+            "type": "function",
+            "function": {"name": "search", "arguments": "{}"}
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_calls_to_text(tool_calls)
+        
+        print(f"Result: '{result}'")
+        print("Checking that tool_id is present...")
+        assert "tooluse_abc123xyz" in result
+    
+    def test_handles_missing_tool_id(self):
+        """
+        What it does: Verifies handling of tool call without id.
+        Purpose: Ensure function doesn't crash when id is missing.
+        """
+        print("Setup: Tool call without id...")
+        tool_calls = [{
+            "type": "function",
+            "function": {"name": "test_tool", "arguments": "{}"}
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_calls_to_text(tool_calls)
+        
+        print(f"Result: '{result}'")
+        print("Checking that tool name is still present...")
+        assert "[Tool: test_tool]" in result
+    
+    def test_returns_empty_string_for_empty_list(self):
+        """
+        What it does: Verifies empty list handling.
+        Purpose: Ensure empty input returns empty output.
+        """
+        print("Setup: Empty list...")
+        
+        print("Action: Converting to text...")
+        result = tool_calls_to_text([])
+        
+        print(f"Comparing result: Expected '', Got '{result}'")
+        assert result == ""
+    
+    def test_handles_missing_function_key(self):
+        """
+        What it does: Verifies handling of malformed tool call without function key.
+        Purpose: Ensure function doesn't crash on malformed input.
+        """
+        print("Setup: Tool call without function key...")
+        tool_calls = [{"id": "call_123", "type": "function"}]
+        
+        print("Action: Converting to text...")
+        result = tool_calls_to_text(tool_calls)
+        
+        print(f"Result: '{result}'")
+        print("Checking that 'unknown' is used as fallback...")
+        assert "[Tool: unknown" in result
+    
+    def test_handles_complex_json_arguments(self):
+        """
+        What it does: Verifies handling of complex JSON arguments.
+        Purpose: Ensure nested JSON is preserved correctly.
+        """
+        print("Setup: Tool call with complex arguments...")
+        complex_args = '{"files": ["a.py", "b.py"], "options": {"recursive": true}}'
+        tool_calls = [{
+            "id": "call_123",
+            "type": "function",
+            "function": {"name": "process", "arguments": complex_args}
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_calls_to_text(tool_calls)
+        
+        print(f"Result: '{result}'")
+        print("Checking that complex arguments are preserved...")
+        assert complex_args in result
+
+
+# ==================================================================================================
+# Tests for tool_results_to_text
+# ==================================================================================================
+
+class TestToolResultsToText:
+    """
+    Tests for tool_results_to_text function.
+    
+    This function converts tool_results to human-readable text representation.
+    Used when stripping tool content from messages (when no tools are defined).
+    """
+    
+    def test_converts_single_tool_result_to_text(self):
+        """
+        What it does: Verifies conversion of a single tool result to text.
+        Purpose: Ensure basic conversion works correctly.
+        """
+        print("Setup: Single tool result...")
+        tool_results = [{
+            "type": "tool_result",
+            "tool_use_id": "call_123",
+            "content": "Operation completed successfully"
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_results_to_text(tool_results)
+        
+        print(f"Result: '{result}'")
+        print("Checking that [Tool Result] marker is present...")
+        assert "[Tool Result" in result
+        print("Checking that content is present...")
+        assert "Operation completed successfully" in result
+    
+    def test_converts_multiple_tool_results_to_text(self):
+        """
+        What it does: Verifies conversion of multiple tool results to text.
+        Purpose: Ensure all tool results are converted and separated.
+        """
+        print("Setup: Multiple tool results...")
+        tool_results = [
+            {"type": "tool_result", "tool_use_id": "call_1", "content": "Result 1"},
+            {"type": "tool_result", "tool_use_id": "call_2", "content": "Result 2"}
+        ]
+        
+        print("Action: Converting to text...")
+        result = tool_results_to_text(tool_results)
+        
+        print(f"Result: '{result}'")
+        print("Checking that both results are present...")
+        assert "Result 1" in result
+        assert "Result 2" in result
+        assert "call_1" in result
+        assert "call_2" in result
+    
+    def test_includes_tool_use_id_in_output(self):
+        """
+        What it does: Verifies that tool_use_id is included in output.
+        Purpose: Ensure traceability between tool calls and results.
+        """
+        print("Setup: Tool result with tool_use_id...")
+        tool_results = [{
+            "type": "tool_result",
+            "tool_use_id": "tooluse_xyz789abc",
+            "content": "Done"
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_results_to_text(tool_results)
+        
+        print(f"Result: '{result}'")
+        print("Checking that tool_use_id is present...")
+        assert "tooluse_xyz789abc" in result
+    
+    def test_handles_missing_tool_use_id(self):
+        """
+        What it does: Verifies handling of tool result without tool_use_id.
+        Purpose: Ensure function doesn't crash when tool_use_id is missing.
+        """
+        print("Setup: Tool result without tool_use_id...")
+        tool_results = [{
+            "type": "tool_result",
+            "content": "Some result"
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_results_to_text(tool_results)
+        
+        print(f"Result: '{result}'")
+        print("Checking that content is still present...")
+        assert "Some result" in result
+        assert "[Tool Result]" in result
+    
+    def test_handles_empty_content(self):
+        """
+        What it does: Verifies handling of empty content.
+        Purpose: Ensure empty content is replaced with placeholder.
+        """
+        print("Setup: Tool result with empty content...")
+        tool_results = [{
+            "type": "tool_result",
+            "tool_use_id": "call_123",
+            "content": ""
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_results_to_text(tool_results)
+        
+        print(f"Result: '{result}'")
+        print("Checking that placeholder is used...")
+        assert "(empty result)" in result
+    
+    def test_returns_empty_string_for_empty_list(self):
+        """
+        What it does: Verifies empty list handling.
+        Purpose: Ensure empty input returns empty output.
+        """
+        print("Setup: Empty list...")
+        
+        print("Action: Converting to text...")
+        result = tool_results_to_text([])
+        
+        print(f"Comparing result: Expected '', Got '{result}'")
+        assert result == ""
+    
+    def test_handles_multiline_content(self):
+        """
+        What it does: Verifies handling of multiline content.
+        Purpose: Ensure newlines in content are preserved.
+        """
+        print("Setup: Tool result with multiline content...")
+        multiline_content = "Line 1\nLine 2\nLine 3"
+        tool_results = [{
+            "type": "tool_result",
+            "tool_use_id": "call_123",
+            "content": multiline_content
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_results_to_text(tool_results)
+        
+        print(f"Result: '{result}'")
+        print("Checking that multiline content is preserved...")
+        assert "Line 1\nLine 2\nLine 3" in result
+    
+    def test_handles_list_content(self):
+        """
+        What it does: Verifies handling of list content (multimodal format).
+        Purpose: Ensure list content is extracted correctly.
+        """
+        print("Setup: Tool result with list content...")
+        tool_results = [{
+            "type": "tool_result",
+            "tool_use_id": "call_123",
+            "content": [{"type": "text", "text": "Extracted text"}]
+        }]
+        
+        print("Action: Converting to text...")
+        result = tool_results_to_text(tool_results)
+        
+        print(f"Result: '{result}'")
+        print("Checking that text is extracted from list...")
+        assert "Extracted text" in result
+
+
+# ==================================================================================================
+# Tests for build_kiro_payload with Issue #20 Scenario
+# ==================================================================================================
+
+class TestBuildKiroPayloadIssue20:
+    """
+    Tests for build_kiro_payload function specifically for Issue #20 scenario.
+    
+    Issue #20: OpenCode compaction returns 400 "Improperly formed request"
+    because it sends tool_calls/tool_results in history but WITHOUT tools definitions.
+    
+    Kiro API requires tools definitions if toolUses/toolResults are present.
+    The fix converts tool content to text representation when no tools are defined.
+    """
+    
+    def test_compaction_without_tools_converts_tool_content_to_text(self):
+        """
+        What it does: Simulates OpenCode compaction scenario - messages with tool content but no tools.
+        Purpose: Ensure build_kiro_payload doesn't crash and converts tool content to text.
+        
+        This is THE critical test for issue #20. If this test passes but the fix is removed,
+        the actual API call would fail with 400 error.
+        """
+        print("Setup: Simulating OpenCode compaction scenario...")
+        messages = [
+            UnifiedMessage(role="user", content="Read the file test.py"),
+            UnifiedMessage(
+                role="assistant",
+                content="",
+                tool_calls=[{
+                    "id": "tooluse_abc123",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": '{"path": "test.py"}'}
+                }]
+            ),
+            UnifiedMessage(
+                role="user",
+                content="",
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "tooluse_abc123",
+                    "content": "def hello():\n    print('world')"
+                }]
+            ),
+            UnifiedMessage(role="assistant", content="I see the file contains a hello function."),
+            UnifiedMessage(role="user", content="Summarize what we did")
+        ]
+        
+        print("Action: Building Kiro payload WITHOUT tools (compaction scenario)...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="You are a helpful assistant.",
+            model_id="claude-sonnet-4",
+            tools=None,  # NO TOOLS - this is the compaction scenario
+            conversation_id="test-conv-123",
+            profile_arn="arn:aws:codewhisperer:us-east-1:123456789:profile/test",
+            inject_thinking=False
+        )
+        
+        print(f"Result payload keys: {result.payload.keys()}")
+        print("Checking that payload was built successfully...")
+        assert "conversationState" in result.payload
+        assert "currentMessage" in result.payload["conversationState"]
+        
+        print("Checking that history exists...")
+        history = result.payload["conversationState"].get("history", [])
+        print(f"History length: {len(history)}")
+        assert len(history) > 0
+        
+        print("Checking that NO toolUses in history (they should be converted to text)...")
+        for i, msg in enumerate(history):
+            if "assistantResponseMessage" in msg:
+                assistant_msg = msg["assistantResponseMessage"]
+                print(f"History[{i}] assistant content: '{assistant_msg.get('content', '')[:100]}...'")
+                assert "toolUses" not in assistant_msg, f"toolUses should not be in history[{i}]"
+        
+        print("Checking that NO toolResults in history (they should be converted to text)...")
+        for i, msg in enumerate(history):
+            if "userInputMessage" in msg:
+                user_msg = msg["userInputMessage"]
+                context = user_msg.get("userInputMessageContext", {})
+                print(f"History[{i}] user content: '{user_msg.get('content', '')[:100]}...'")
+                assert "toolResults" not in context, f"toolResults should not be in history[{i}]"
+        
+        print("Checking that tool content was converted to text (preserved context)...")
+        # Find the assistant message that had tool_calls
+        found_tool_text = False
+        for msg in history:
+            if "assistantResponseMessage" in msg:
+                content = msg["assistantResponseMessage"].get("content", "")
+                if "[Tool: read_file" in content:
+                    found_tool_text = True
+                    print(f"Found tool text representation: '{content[:200]}...'")
+                    break
+        assert found_tool_text, "Tool calls should be converted to text representation"
+    
+    def test_compaction_preserves_tool_result_content_as_text(self):
+        """
+        What it does: Verifies that tool result content is preserved as text.
+        Purpose: Ensure the actual tool output is not lost during compaction.
+        """
+        print("Setup: Message with tool result containing important data...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="",
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_123",
+                    "content": "IMPORTANT_DATA_12345"
+                }]
+            ),
+            UnifiedMessage(role="user", content="What was in that result?")
+        ]
+        
+        print("Action: Building Kiro payload without tools...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4",
+            tools=None,
+            conversation_id="test-conv",
+            profile_arn="arn:test",
+            inject_thinking=False
+        )
+        
+        print("Checking that important data is preserved...")
+        # The data could be in history OR in current message (after merging adjacent user messages)
+        payload = result.payload
+        
+        found_data = False
+        
+        # Check history
+        history = payload["conversationState"].get("history", [])
+        for msg in history:
+            if "userInputMessage" in msg:
+                content = msg["userInputMessage"].get("content", "")
+                if "IMPORTANT_DATA_12345" in content:
+                    found_data = True
+                    print(f"Found preserved data in history: '{content[:100]}...'")
+                    break
+        
+        # Check current message (adjacent user messages are merged)
+        if not found_data:
+            current_content = payload["conversationState"]["currentMessage"]["userInputMessage"].get("content", "")
+            if "IMPORTANT_DATA_12345" in current_content:
+                found_data = True
+                print(f"Found preserved data in current message: '{current_content[:100]}...'")
+        
+        assert found_data, "Tool result content should be preserved as text"
+    
+    def test_with_tools_defined_keeps_tool_structure(self):
+        """
+        What it does: Verifies that when tools ARE defined, tool structure is preserved.
+        Purpose: Ensure the fix doesn't break normal tool usage.
+        """
+        print("Setup: Messages with tool content AND tools defined...")
+        messages = [
+            UnifiedMessage(role="user", content="Call a tool"),
+            UnifiedMessage(
+                role="assistant",
+                content="",
+                tool_calls=[{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "test_tool", "arguments": "{}"}
+                }]
+            ),
+            UnifiedMessage(
+                role="user",
+                content="",
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_123",
+                    "content": "Tool executed"
+                }]
+            ),
+            UnifiedMessage(role="user", content="Continue")
+        ]
+        
+        tools = [UnifiedTool(
+            name="test_tool",
+            description="A test tool",
+            input_schema={"type": "object", "properties": {}}
+        )]
+        
+        print("Action: Building Kiro payload WITH tools...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4",
+            tools=tools,  # TOOLS DEFINED
+            conversation_id="test-conv",
+            profile_arn="arn:test",
+            inject_thinking=False
+        )
+        
+        print("Checking that tools are in payload...")
+        current_msg = result.payload["conversationState"]["currentMessage"]["userInputMessage"]
+        context = current_msg.get("userInputMessageContext", {})
+        assert "tools" in context, "Tools should be in payload when defined"
+        
+        print("Checking that toolUses are preserved in history...")
+        history = result.payload["conversationState"].get("history", [])
+        found_tool_uses = False
+        for msg in history:
+            if "assistantResponseMessage" in msg:
+                if "toolUses" in msg["assistantResponseMessage"]:
+                    found_tool_uses = True
+                    break
+        assert found_tool_uses, "toolUses should be preserved when tools are defined"
+    
+    def test_empty_tools_list_triggers_stripping(self):
+        """
+        What it does: Verifies that empty tools list (tools=[]) triggers tool content stripping.
+        Purpose: Ensure edge case of empty tools list is handled correctly.
+        """
+        print("Setup: Messages with tool content and empty tools list...")
+        messages = [
+            UnifiedMessage(
+                role="assistant",
+                content="",
+                tool_calls=[{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "some_tool", "arguments": "{}"}
+                }]
+            ),
+            UnifiedMessage(role="user", content="Continue")
+        ]
+        
+        print("Action: Building Kiro payload with empty tools list...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4",
+            tools=[],  # EMPTY TOOLS LIST
+            conversation_id="test-conv",
+            profile_arn="arn:test",
+            inject_thinking=False
+        )
+        
+        print("Checking that NO tools in payload...")
+        current_msg = result.payload["conversationState"]["currentMessage"]["userInputMessage"]
+        context = current_msg.get("userInputMessageContext", {})
+        assert "tools" not in context, "Empty tools list should result in no tools in payload"
+        
+        print("Checking that tool content was converted to text...")
+        history = result.payload["conversationState"].get("history", [])
+        for msg in history:
+            if "assistantResponseMessage" in msg:
+                assert "toolUses" not in msg["assistantResponseMessage"]

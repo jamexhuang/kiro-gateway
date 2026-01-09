@@ -489,23 +489,112 @@ def extract_tool_uses_from_message(
 
 
 # ==================================================================================================
+# Tool Content to Text Conversion (for stripping when no tools defined)
+# ==================================================================================================
+
+def tool_calls_to_text(tool_calls: List[Dict[str, Any]]) -> str:
+    """
+    Converts tool_calls to human-readable text representation.
+    
+    This is used when stripping tool content from messages (when no tools are defined).
+    Instead of losing the context, we convert tool calls to text so the model
+    can still understand what happened in the conversation.
+    
+    Args:
+        tool_calls: List of tool calls in unified format
+    
+    Returns:
+        Text representation of tool calls
+    
+    Example:
+        >>> tool_calls_to_text([{"id": "call_123", "function": {"name": "bash", "arguments": '{"command": "ls"}'}}])
+        '[Tool: bash] (call_123)\\n{"command": "ls"}'
+    """
+    if not tool_calls:
+        return ""
+    
+    parts = []
+    for tc in tool_calls:
+        func = tc.get("function", {})
+        name = func.get("name", "unknown")
+        arguments = func.get("arguments", "{}")
+        tool_id = tc.get("id", "")
+        
+        # Format: [Tool: name] (id)\narguments
+        if tool_id:
+            parts.append(f"[Tool: {name} ({tool_id})]\n{arguments}")
+        else:
+            parts.append(f"[Tool: {name}]\n{arguments}")
+    
+    return "\n\n".join(parts)
+
+
+def tool_results_to_text(tool_results: List[Dict[str, Any]]) -> str:
+    """
+    Converts tool_results to human-readable text representation.
+    
+    This is used when stripping tool content from messages (when no tools are defined).
+    Instead of losing the context, we convert tool results to text so the model
+    can still understand what happened in the conversation.
+    
+    Args:
+        tool_results: List of tool results in unified format
+    
+    Returns:
+        Text representation of tool results
+    
+    Example:
+        >>> tool_results_to_text([{"tool_use_id": "call_123", "content": "file1.txt\\nfile2.txt"}])
+        '[Tool Result] (call_123)\\nfile1.txt\\nfile2.txt'
+    """
+    if not tool_results:
+        return ""
+    
+    parts = []
+    for tr in tool_results:
+        content = tr.get("content", "")
+        tool_use_id = tr.get("tool_use_id", "")
+        
+        if isinstance(content, str):
+            content_text = content
+        else:
+            content_text = extract_text_content(content)
+        
+        # Use placeholder if content is empty
+        if not content_text:
+            content_text = "(empty result)"
+        
+        # Format: [Tool Result] (id)\ncontent
+        if tool_use_id:
+            parts.append(f"[Tool Result ({tool_use_id})]\n{content_text}")
+        else:
+            parts.append(f"[Tool Result]\n{content_text}")
+    
+    return "\n\n".join(parts)
+
+
+# ==================================================================================================
 # Message Merging
 # ==================================================================================================
 
 def strip_all_tool_content(messages: List[UnifiedMessage]) -> Tuple[List[UnifiedMessage], bool]:
     """
-    Strips ALL tool-related content from messages.
+    Strips ALL tool-related content from messages, converting it to text representation.
     
     This is used when no tools are defined in the request. Kiro API rejects
     requests that have toolResults but no tools defined.
+    
+    Instead of simply removing tool content, this function converts tool_calls
+    and tool_results to human-readable text, preserving the context for
+    summarization and other use cases.
     
     Args:
         messages: List of messages in unified format
     
     Returns:
         Tuple of:
-        - List of messages with all tool content stripped
-        - Boolean indicating whether any tool content was stripped
+        - List of messages with tool content converted to text
+        - Boolean indicating whether any tool content was converted
     """
     if not messages:
         return [], False
@@ -525,16 +614,29 @@ def strip_all_tool_content(messages: List[UnifiedMessage]) -> Tuple[List[Unified
             if has_tool_results:
                 total_tool_results_stripped += len(msg.tool_results)
             
-            # Determine content - add semantic placeholder if empty after stripping tool content
-            # This prevents Kiro API from rejecting messages with empty content
-            content = msg.content
-            if not extract_text_content(content):
-                if has_tool_calls:
-                    content = "(tool use)"
-                elif has_tool_results:
-                    content = "(tool result)"
+            # Start with existing text content
+            existing_content = extract_text_content(msg.content)
+            content_parts = []
             
-            # Create a copy of the message without tool content
+            if existing_content:
+                content_parts.append(existing_content)
+            
+            # Convert tool_calls to text (for assistant messages)
+            if has_tool_calls:
+                tool_text = tool_calls_to_text(msg.tool_calls)
+                if tool_text:
+                    content_parts.append(tool_text)
+            
+            # Convert tool_results to text (for user messages)
+            if has_tool_results:
+                result_text = tool_results_to_text(msg.tool_results)
+                if result_text:
+                    content_parts.append(result_text)
+            
+            # Join all parts with double newline
+            content = "\n\n".join(content_parts) if content_parts else "(empty)"
+            
+            # Create a copy of the message without tool content but with text representation
             cleaned_msg = UnifiedMessage(
                 role=msg.role,
                 content=content,
@@ -550,7 +652,7 @@ def strip_all_tool_content(messages: List[UnifiedMessage]) -> Tuple[List[Unified
     # Log summary once (DEBUG level - this is normal for clients like Cline/Roo)
     if had_tool_content:
         logger.debug(
-            f"Stripped tool content (no tools defined): "
+            f"Converted tool content to text (no tools defined): "
             f"{total_tool_calls_stripped} tool_calls, {total_tool_results_stripped} tool_results"
         )
     
