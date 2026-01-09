@@ -1077,7 +1077,7 @@ Main entry point tests for anthropic_to_kiro function.
 
 ### `tests/unit/test_converters_core.py`
 
-Unit tests for **shared conversion logic** used by both OpenAI and Anthropic adapters. **71 tests.**
+Unit tests for **shared conversion logic** used by both OpenAI and Anthropic adapters. **86 tests.**
 
 #### `TestExtractTextContent`
 
@@ -1442,6 +1442,66 @@ Tests for build_kiro_history function using UnifiedMessage.
 - **`test_builds_assistant_message_with_tool_calls()`**:
   - **What it does**: Verifies building of assistant message with tool_calls
   - **Purpose**: Ensure tool_calls are converted to toolUses
+
+#### `TestStripAllToolContent`
+
+Tests for strip_all_tool_content function that removes ALL tool-related content (tool_calls and tool_results) from messages. This is used when no tools are defined in the request, because Kiro API rejects requests that have toolResults but no tools defined.
+
+- **`test_returns_empty_list_for_empty_input()`**:
+  - **What it does**: Verifies empty list handling
+  - **Purpose**: Ensure empty input returns empty output
+
+- **`test_preserves_messages_without_tool_content()`**:
+  - **What it does**: Verifies messages without tool content are unchanged
+  - **Purpose**: Ensure regular messages pass through unmodified
+
+- **`test_strips_tool_calls_from_assistant()`**:
+  - **What it does**: Verifies tool_calls are stripped from assistant messages
+  - **Purpose**: Ensure tool_calls are removed when no tools are defined
+
+- **`test_strips_tool_results_from_user()`**:
+  - **What it does**: Verifies tool_results are stripped from user messages
+  - **Purpose**: Ensure tool_results are removed when no tools are defined
+
+- **`test_strips_both_tool_calls_and_tool_results()`**:
+  - **What it does**: Verifies both tool_calls and tool_results are stripped
+  - **Purpose**: Ensure all tool content is removed in a conversation
+
+- **`test_strips_multiple_tool_calls()`**:
+  - **What it does**: Verifies multiple tool_calls are all stripped
+  - **Purpose**: Ensure all tool_calls in a message are removed
+
+- **`test_strips_multiple_tool_results()`**:
+  - **What it does**: Verifies multiple tool_results are all stripped
+  - **Purpose**: Ensure all tool_results in a message are removed
+
+- **`test_preserves_message_content_when_stripping()`**:
+  - **What it does**: Verifies message content is preserved when tool content is stripped
+  - **Purpose**: Ensure only tool content is removed, not the entire message
+
+- **`test_preserves_message_role_when_stripping()`**:
+  - **What it does**: Verifies message role is preserved when tool content is stripped
+  - **Purpose**: Ensure role is not modified during stripping
+
+- **`test_mixed_messages_with_and_without_tool_content()`**:
+  - **What it does**: Verifies correct handling of mixed messages
+  - **Purpose**: Ensure only messages with tool content are modified
+
+- **`test_returns_false_when_no_tool_content_stripped()`**:
+  - **What it does**: Verifies had_content flag is False when no tool content exists
+  - **Purpose**: Ensure correct flag value for messages without tool content
+
+- **`test_returns_true_when_tool_content_stripped()`**:
+  - **What it does**: Verifies had_content flag is True when tool content is stripped
+  - **Purpose**: Ensure correct flag value for messages with tool content
+
+- **`test_handles_empty_tool_calls_list()`**:
+  - **What it does**: Verifies handling of empty tool_calls list
+  - **Purpose**: Ensure empty list is treated as no tool content
+
+- **`test_handles_empty_tool_results_list()`**:
+  - **What it does**: Verifies handling of empty tool_results list
+  - **Purpose**: Ensure empty list is treated as no tool content
 
 ---
 
@@ -2057,7 +2117,7 @@ Integration tests for tokenizer.
 
 ### `tests/unit/test_streaming_anthropic.py`
 
-Unit tests for **Anthropic streaming module** (Kiro → Anthropic SSE format conversion). **38 tests.**
+Unit tests for **Anthropic streaming module** (Kiro → Anthropic SSE format conversion). **48 tests.**
 
 #### `TestGenerateMessageId`
 
@@ -2217,11 +2277,59 @@ Unit tests for **Anthropic streaming module** (Kiro → Anthropic SSE format con
   - **What it does**: Uses request messages for input token count
   - **Purpose**: Verify input tokens are counted from request
 
+#### `TestGenerateThinkingSignature`
+
+Tests for generate_thinking_signature() function that generates placeholder signatures for thinking content blocks.
+
+- **`test_generates_signature_with_prefix()`**:
+  - **What it does**: Generates signature with 'sig_' prefix
+  - **Purpose**: Verify signature format matches expected pattern
+
+- **`test_generates_unique_signatures()`**:
+  - **What it does**: Generates unique signatures
+  - **Purpose**: Verify signatures are unique across multiple calls
+
+- **`test_signature_has_correct_length()`**:
+  - **What it does**: Verifies signature length
+  - **Purpose**: Ensure signature format is consistent (sig_ + 32 hex chars)
+
+- **`test_signature_contains_only_valid_characters()`**:
+  - **What it does**: Verifies signature contains only valid hex characters
+  - **Purpose**: Ensure signature is properly formatted
+
+#### `TestStreamWithFirstTokenRetryAnthropic`
+
+Tests for stream_with_first_token_retry_anthropic() function that wraps stream_kiro_to_anthropic with automatic retry on first token timeout.
+
+- **`test_yields_chunks_on_success()`**:
+  - **What it does**: Yields chunks on successful streaming
+  - **Purpose**: Verify normal operation without retries
+
+- **`test_retries_on_first_token_timeout()`**:
+  - **What it does**: Retries on first token timeout
+  - **Purpose**: Verify retry logic is triggered
+
+- **`test_raises_anthropic_error_after_all_retries()`**:
+  - **What it does**: Raises Anthropic-formatted error after all retries exhausted
+  - **Purpose**: Verify error format matches Anthropic API
+
+- **`test_raises_anthropic_error_on_http_error()`**:
+  - **What it does**: Raises Anthropic-formatted error on HTTP error
+  - **Purpose**: Verify HTTP errors are formatted correctly
+
+- **`test_passes_request_messages_to_stream()`**:
+  - **What it does**: Passes request_messages to underlying stream function
+  - **Purpose**: Verify token counting parameters are forwarded
+
+- **`test_uses_configured_max_retries()`**:
+  - **What it does**: Uses configured max_retries value
+  - **Purpose**: Verify max_retries parameter is respected
+
 ---
 
 ### `tests/unit/test_streaming_core.py`
 
-Unit tests for **core streaming module** (KiroEvent, StreamResult, parse_kiro_stream). **46 tests.**
+Unit tests for **core streaming module** (KiroEvent, StreamResult, parse_kiro_stream). **57 tests.**
 
 #### `TestKiroEvent`
 
@@ -2424,6 +2532,54 @@ Unit tests for **core streaming module** (KiroEvent, StreamResult, parse_kiro_st
 - **`test_propagates_other_exceptions()`**:
   - **What it does**: Propagates other exceptions
   - **Purpose**: Verify errors are not swallowed
+
+#### `TestStreamWithFirstTokenRetryCore`
+
+Tests for stream_with_first_token_retry() generic function that provides automatic retry logic on first token timeout. Used by both OpenAI and Anthropic streaming implementations.
+
+- **`test_yields_chunks_on_success()`**:
+  - **What it does**: Yields chunks on successful streaming
+  - **Purpose**: Verify normal operation without retries
+
+- **`test_retries_on_first_token_timeout()`**:
+  - **What it does**: Retries on first token timeout
+  - **Purpose**: Verify retry logic is triggered
+
+- **`test_raises_exception_after_all_retries()`**:
+  - **What it does**: Raises exception after all retries exhausted
+  - **Purpose**: Verify error handling when all retries fail
+
+- **`test_uses_custom_error_callbacks()`**:
+  - **What it does**: Uses custom error callbacks
+  - **Purpose**: Verify on_http_error and on_all_retries_failed callbacks
+
+- **`test_handles_http_error()`**:
+  - **What it does**: Handles HTTP error from API
+  - **Purpose**: Verify HTTP errors are handled correctly
+
+- **`test_uses_custom_http_error_callback()`**:
+  - **What it does**: Uses custom HTTP error callback
+  - **Purpose**: Verify on_http_error callback is used
+
+- **`test_closes_response_on_timeout()`**:
+  - **What it does**: Closes response on timeout
+  - **Purpose**: Verify response is properly closed after timeout
+
+- **`test_propagates_non_timeout_exceptions()`**:
+  - **What it does**: Propagates non-timeout exceptions without retry
+  - **Purpose**: Verify other exceptions are not retried
+
+- **`test_uses_configured_max_retries()`**:
+  - **What it does**: Uses configured max_retries value
+  - **Purpose**: Verify max_retries parameter is respected
+
+- **`test_multiple_retries_then_success()`**:
+  - **What it does**: Succeeds after multiple retries
+  - **Purpose**: Verify recovery after multiple failures
+
+- **`test_closes_response_on_http_error()`**:
+  - **What it does**: Closes response on HTTP error
+  - **Purpose**: Verify response is properly closed after HTTP error
 
 ---
 
