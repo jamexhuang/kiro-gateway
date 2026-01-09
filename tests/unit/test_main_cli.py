@@ -395,7 +395,7 @@ class TestCliVersion:
         """
         print("Setup: Importing parse_cli_args and APP_VERSION...")
         from main import parse_cli_args
-        from kiro_gateway.config import APP_VERSION
+        from kiro.config import APP_VERSION
         
         print("Action: Calling parse_cli_args with --version...")
         with patch.object(sys, 'argv', ['main.py', '--version']):

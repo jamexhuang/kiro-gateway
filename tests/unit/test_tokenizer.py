@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Unit-тесты для модуля токенизатора (kiro_gateway/tokenizer.py).
+Unit-тесты для модуля токенизатора (kiro/tokenizer.py).
 
 Проверяет:
 - Подсчёт токенов в тексте (count_tokens)
@@ -15,7 +15,7 @@ Unit-тесты для модуля токенизатора (kiro_gateway/token
 import pytest
 from unittest.mock import patch, MagicMock
 
-from kiro_gateway.tokenizer import (
+from kiro.tokenizer import (
     count_tokens,
     count_message_tokens,
     count_tools_tokens,
@@ -163,7 +163,7 @@ class TestCountTokensFallback:
         print("Тест: Fallback без tiktoken...")
         
         # Мокируем _get_encoding чтобы вернуть None
-        with patch('kiro_gateway.tokenizer._get_encoding', return_value=None):
+        with patch('kiro.tokenizer._get_encoding', return_value=None):
             result = count_tokens("Hello world test")
             print(f"Результат: {result}")
             
@@ -180,7 +180,7 @@ class TestCountTokensFallback:
         """
         print("Тест: Fallback без коррекции...")
         
-        with patch('kiro_gateway.tokenizer._get_encoding', return_value=None):
+        with patch('kiro.tokenizer._get_encoding', return_value=None):
             result = count_tokens("Test", apply_claude_correction=False)
             print(f"Результат: {result}")
             
@@ -724,7 +724,7 @@ class TestGetEncoding:
         print("Тест: tiktoken доступен...")
         
         # Сбрасываем глобальную переменную для чистого теста
-        import kiro_gateway.tokenizer as tokenizer_module
+        import kiro.tokenizer as tokenizer_module
         original_encoding = tokenizer_module._encoding
         tokenizer_module._encoding = None
         
@@ -762,7 +762,7 @@ class TestGetEncoding:
         """
         print("Тест: ImportError...")
         
-        import kiro_gateway.tokenizer as tokenizer_module
+        import kiro.tokenizer as tokenizer_module
         original_encoding = tokenizer_module._encoding
         tokenizer_module._encoding = None
         

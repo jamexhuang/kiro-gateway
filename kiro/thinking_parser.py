@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 
 from loguru import logger
 
-from kiro_gateway.config import (
+from kiro.config import (
     FAKE_REASONING_HANDLING,
     FAKE_REASONING_OPEN_TAGS,
     FAKE_REASONING_INITIAL_BUFFER_SIZE,

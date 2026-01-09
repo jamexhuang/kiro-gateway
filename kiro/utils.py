@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from kiro_gateway.auth import KiroAuthManager
+    from kiro.auth import KiroAuthManager
 
 
 def get_machine_fingerprint() -> str:

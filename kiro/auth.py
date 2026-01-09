@@ -38,14 +38,14 @@ from typing import Optional
 import httpx
 from loguru import logger
 
-from kiro_gateway.config import (
+from kiro.config import (
     TOKEN_REFRESH_THRESHOLD,
     get_kiro_refresh_url,
     get_kiro_api_host,
     get_kiro_q_host,
     get_aws_sso_oidc_url,
 )
-from kiro_gateway.utils import get_machine_fingerprint
+from kiro.utils import get_machine_fingerprint
 
 
 class AuthType(Enum):

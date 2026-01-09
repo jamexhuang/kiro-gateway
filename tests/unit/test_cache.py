@@ -9,8 +9,8 @@ import asyncio
 import time
 import pytest
 
-from kiro_gateway.cache import ModelInfoCache
-from kiro_gateway.config import DEFAULT_MAX_INPUT_TOKENS
+from kiro.cache import ModelInfoCache
+from kiro.config import DEFAULT_MAX_INPUT_TOKENS
 
 
 class TestModelInfoCacheInitialization:

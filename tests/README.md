@@ -2037,7 +2037,7 @@ To check code coverage:
 pip install pytest-cov
 
 # Run with coverage report
-pytest --cov=kiro_gateway --cov-report=html
+pytest --cov=kiro --cov-report=html
 
 # View report
 open htmlcov/index.html  # macOS/Linux

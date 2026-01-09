@@ -35,26 +35,26 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from loguru import logger
 
-from kiro_gateway.config import (
+from kiro.config import (
     PROXY_API_KEY,
     AVAILABLE_MODELS,
     APP_VERSION,
 )
-from kiro_gateway.models import (
+from kiro.models import (
     OpenAIModel,
     ModelList,
     ChatCompletionRequest,
 )
-from kiro_gateway.auth import KiroAuthManager, AuthType
-from kiro_gateway.cache import ModelInfoCache
-from kiro_gateway.converters import build_kiro_payload
-from kiro_gateway.streaming import stream_kiro_to_openai, collect_stream_response, stream_with_first_token_retry
-from kiro_gateway.http_client import KiroHttpClient
-from kiro_gateway.utils import get_kiro_headers, generate_conversation_id
+from kiro.auth import KiroAuthManager, AuthType
+from kiro.cache import ModelInfoCache
+from kiro.converters import build_kiro_payload
+from kiro.streaming import stream_kiro_to_openai, collect_stream_response, stream_with_first_token_retry
+from kiro.http_client import KiroHttpClient
+from kiro.utils import get_kiro_headers, generate_conversation_id
 
 # Import debug_logger
 try:
-    from kiro_gateway.debug_logger import debug_logger
+    from kiro.debug_logger import debug_logger
 except ImportError:
     debug_logger = None
 

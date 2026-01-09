@@ -50,7 +50,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
-from kiro_gateway.config import (
+from kiro.config import (
     APP_TITLE,
     APP_DESCRIPTION,
     APP_VERSION,
@@ -68,10 +68,10 @@ from kiro_gateway.config import (
     _warn_deprecated_debug_setting,
     _warn_timeout_configuration,
 )
-from kiro_gateway.auth import KiroAuthManager
-from kiro_gateway.cache import ModelInfoCache
-from kiro_gateway.routes import router
-from kiro_gateway.exceptions import validation_exception_handler
+from kiro.auth import KiroAuthManager
+from kiro.cache import ModelInfoCache
+from kiro.routes import router
+from kiro.exceptions import validation_exception_handler
 
 
 # --- Loguru Configuration ---

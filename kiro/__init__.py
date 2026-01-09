@@ -39,18 +39,18 @@ Modules:
 
 # Version is imported from config.py — the single source of truth
 # This allows changing the version in only one place
-from kiro_gateway.config import APP_VERSION as __version__
+from kiro.config import APP_VERSION as __version__
 
 __author__ = "Jwadow"
 
 # Main components for convenient import
-from kiro_gateway.auth import KiroAuthManager
-from kiro_gateway.cache import ModelInfoCache
-from kiro_gateway.http_client import KiroHttpClient
-from kiro_gateway.routes import router
+from kiro.auth import KiroAuthManager
+from kiro.cache import ModelInfoCache
+from kiro.http_client import KiroHttpClient
+from kiro.routes import router
 
 # Configuration
-from kiro_gateway.config import (
+from kiro.config import (
     PROXY_API_KEY,
     REGION,
     MODEL_MAPPING,
@@ -59,7 +59,7 @@ from kiro_gateway.config import (
 )
 
 # Models
-from kiro_gateway.models import (
+from kiro.models import (
     ChatCompletionRequest,
     ChatMessage,
     OpenAIModel,
@@ -67,26 +67,26 @@ from kiro_gateway.models import (
 )
 
 # Converters
-from kiro_gateway.converters import (
+from kiro.converters import (
     build_kiro_payload,
     extract_text_content,
     merge_adjacent_messages,
 )
 
 # Parsers
-from kiro_gateway.parsers import (
+from kiro.parsers import (
     AwsEventStreamParser,
     parse_bracket_tool_calls,
 )
 
 # Streaming
-from kiro_gateway.streaming import (
+from kiro.streaming import (
     stream_kiro_to_openai,
     collect_stream_response,
 )
 
 # Exceptions
-from kiro_gateway.exceptions import (
+from kiro.exceptions import (
     validation_exception_handler,
     sanitize_validation_errors,
 )

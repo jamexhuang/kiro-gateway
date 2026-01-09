@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Optional
 from loguru import logger
 
-from kiro_gateway.config import DEBUG_MODE, DEBUG_DIR
+from kiro.config import DEBUG_MODE, DEBUG_DIR
 
 
 class DebugLogger:

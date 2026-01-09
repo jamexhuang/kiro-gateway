@@ -14,7 +14,7 @@ Tests cover:
 import pytest
 from unittest.mock import patch
 
-from kiro_gateway.thinking_parser import (
+from kiro.thinking_parser import (
     ThinkingParser,
     ThinkingParseResult,
     ParserState,
@@ -900,7 +900,7 @@ class TestThinkingParserConfigIntegration:
         Purpose: Ensure config integration works.
         """
         print("Testing config handling mode...")
-        with patch('kiro_gateway.thinking_parser.FAKE_REASONING_HANDLING', 'remove'):
+        with patch('kiro.thinking_parser.FAKE_REASONING_HANDLING', 'remove'):
             parser = ThinkingParser()
             
             print(f"Handling mode: {parser.handling_mode}")
@@ -913,7 +913,7 @@ class TestThinkingParserConfigIntegration:
         """
         print("Testing config open tags...")
         custom_tags = ["<custom>"]
-        with patch('kiro_gateway.thinking_parser.FAKE_REASONING_OPEN_TAGS', custom_tags):
+        with patch('kiro.thinking_parser.FAKE_REASONING_OPEN_TAGS', custom_tags):
             parser = ThinkingParser()
             
             print(f"Open tags: {parser.open_tags}")
@@ -929,7 +929,7 @@ class TestThinkingParserConfigIntegration:
         TestThinkingParserInitialization.test_custom_initial_buffer_size.
         """
         print("Testing default initial buffer size from config...")
-        from kiro_gateway.config import FAKE_REASONING_INITIAL_BUFFER_SIZE
+        from kiro.config import FAKE_REASONING_INITIAL_BUFFER_SIZE
         
         parser = ThinkingParser()
         
@@ -947,10 +947,10 @@ class TestInjectThinkingTags:
         Purpose: Ensure tags are added to content.
         """
         print("Testing tag injection when enabled...")
-        from kiro_gateway.converters import inject_thinking_tags
+        from kiro.converters import inject_thinking_tags
         
-        with patch('kiro_gateway.converters.FAKE_REASONING_ENABLED', True):
-            with patch('kiro_gateway.converters.FAKE_REASONING_MAX_TOKENS', 4000):
+        with patch('kiro.converters.FAKE_REASONING_ENABLED', True):
+            with patch('kiro.converters.FAKE_REASONING_MAX_TOKENS', 4000):
                 result = inject_thinking_tags("Hello")
         
         print(f"Result: '{result}'")
@@ -964,9 +964,9 @@ class TestInjectThinkingTags:
         Purpose: Ensure tags are not added when disabled.
         """
         print("Testing no tag injection when disabled...")
-        from kiro_gateway.converters import inject_thinking_tags
+        from kiro.converters import inject_thinking_tags
         
-        with patch('kiro_gateway.converters.FAKE_REASONING_ENABLED', False):
+        with patch('kiro.converters.FAKE_REASONING_ENABLED', False):
             result = inject_thinking_tags("Hello")
         
         print(f"Result: '{result}'")
@@ -979,12 +979,12 @@ class TestInjectThinkingTags:
         Purpose: Ensure content is not modified.
         """
         print("Testing content preservation...")
-        from kiro_gateway.converters import inject_thinking_tags
+        from kiro.converters import inject_thinking_tags
         
         original = "This is my original content with special chars: <>&"
         
-        with patch('kiro_gateway.converters.FAKE_REASONING_ENABLED', True):
-            with patch('kiro_gateway.converters.FAKE_REASONING_MAX_TOKENS', 4000):
+        with patch('kiro.converters.FAKE_REASONING_ENABLED', True):
+            with patch('kiro.converters.FAKE_REASONING_MAX_TOKENS', 4000):
                 result = inject_thinking_tags(original)
         
         print(f"Result ends with original: {result.endswith(original)}")

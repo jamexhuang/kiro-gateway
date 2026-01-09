@@ -33,7 +33,7 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from kiro_gateway.utils import generate_tool_call_id
+from kiro.utils import generate_tool_call_id
 
 
 def find_matching_brace(text: str, start_pos: int) -> int:

@@ -36,7 +36,7 @@ class TestLogLevelConfig:
         with patch.object(os, 'getenv', side_effect=mock_getenv):
             # Reload config module with mocked getenv
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"LOG_LEVEL: {config_module.LOG_LEVEL}")
@@ -45,7 +45,7 @@ class TestLogLevelConfig:
         
         # Restore module with real values
         import importlib
-        import kiro_gateway.config as config_module
+        import kiro.config as config_module
         importlib.reload(config_module)
     
     def test_log_level_from_environment(self):
@@ -57,7 +57,7 @@ class TestLogLevelConfig:
         
         with patch.dict(os.environ, {"LOG_LEVEL": "DEBUG"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"LOG_LEVEL: {config_module.LOG_LEVEL}")
@@ -73,7 +73,7 @@ class TestLogLevelConfig:
         
         with patch.dict(os.environ, {"LOG_LEVEL": "warning"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"LOG_LEVEL: {config_module.LOG_LEVEL}")
@@ -89,7 +89,7 @@ class TestLogLevelConfig:
         
         with patch.dict(os.environ, {"LOG_LEVEL": "TRACE"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"LOG_LEVEL: {config_module.LOG_LEVEL}")
@@ -104,7 +104,7 @@ class TestLogLevelConfig:
         
         with patch.dict(os.environ, {"LOG_LEVEL": "ERROR"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"LOG_LEVEL: {config_module.LOG_LEVEL}")
@@ -119,7 +119,7 @@ class TestLogLevelConfig:
         
         with patch.dict(os.environ, {"LOG_LEVEL": "CRITICAL"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"LOG_LEVEL: {config_module.LOG_LEVEL}")
@@ -141,7 +141,7 @@ class TestToolDescriptionMaxLengthConfig:
                 del os.environ["TOOL_DESCRIPTION_MAX_LENGTH"]
             
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"TOOL_DESCRIPTION_MAX_LENGTH: {config_module.TOOL_DESCRIPTION_MAX_LENGTH}")
@@ -156,7 +156,7 @@ class TestToolDescriptionMaxLengthConfig:
         
         with patch.dict(os.environ, {"TOOL_DESCRIPTION_MAX_LENGTH": "5000"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"TOOL_DESCRIPTION_MAX_LENGTH: {config_module.TOOL_DESCRIPTION_MAX_LENGTH}")
@@ -171,7 +171,7 @@ class TestToolDescriptionMaxLengthConfig:
         
         with patch.dict(os.environ, {"TOOL_DESCRIPTION_MAX_LENGTH": "0"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"TOOL_DESCRIPTION_MAX_LENGTH: {config_module.TOOL_DESCRIPTION_MAX_LENGTH}")
@@ -193,7 +193,7 @@ class TestTimeoutConfigurationWarning:
             "STREAMING_READ_TIMEOUT": "300"
         }):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             # Call the warning function
@@ -218,7 +218,7 @@ class TestTimeoutConfigurationWarning:
             "STREAMING_READ_TIMEOUT": "300"
         }):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             # Call the warning function
@@ -242,7 +242,7 @@ class TestTimeoutConfigurationWarning:
             "STREAMING_READ_TIMEOUT": "300"
         }):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             # Call the warning function
@@ -269,7 +269,7 @@ class TestTimeoutConfigurationWarning:
             "STREAMING_READ_TIMEOUT": "300"
         }):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             # Call the warning function
@@ -292,7 +292,7 @@ class TestAwsSsoOidcUrlConfig:
         """
         print("Setup: Importing config module...")
         import importlib
-        import kiro_gateway.config as config_module
+        import kiro.config as config_module
         importlib.reload(config_module)
         
         print("Verification: AWS_SSO_OIDC_URL_TEMPLATE exists...")
@@ -309,7 +309,7 @@ class TestAwsSsoOidcUrlConfig:
         Purpose: Ensure the function formats URL correctly.
         """
         print("Setup: Importing get_aws_sso_oidc_url...")
-        from kiro_gateway.config import get_aws_sso_oidc_url
+        from kiro.config import get_aws_sso_oidc_url
         
         print("Action: Calling get_aws_sso_oidc_url('us-east-1')...")
         url = get_aws_sso_oidc_url("us-east-1")
@@ -325,7 +325,7 @@ class TestAwsSsoOidcUrlConfig:
         Purpose: Ensure the function works with various AWS regions.
         """
         print("Setup: Importing get_aws_sso_oidc_url...")
-        from kiro_gateway.config import get_aws_sso_oidc_url
+        from kiro.config import get_aws_sso_oidc_url
         
         test_cases = [
             ("us-east-1", "https://oidc.us-east-1.amazonaws.com/token"),
@@ -356,7 +356,7 @@ class TestServerHostConfig:
                 del os.environ["SERVER_HOST"]
             
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"SERVER_HOST: {config_module.SERVER_HOST}")
@@ -374,7 +374,7 @@ class TestServerHostConfig:
         
         with patch.dict(os.environ, {"SERVER_HOST": "127.0.0.1"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"SERVER_HOST: {config_module.SERVER_HOST}")
@@ -390,7 +390,7 @@ class TestServerHostConfig:
         
         with patch.dict(os.environ, {"SERVER_HOST": "192.168.1.100"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"SERVER_HOST: {config_module.SERVER_HOST}")
@@ -412,7 +412,7 @@ class TestServerPortConfig:
                 del os.environ["SERVER_PORT"]
             
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"SERVER_PORT: {config_module.SERVER_PORT}")
@@ -430,7 +430,7 @@ class TestServerPortConfig:
         
         with patch.dict(os.environ, {"SERVER_PORT": "9000"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"SERVER_PORT: {config_module.SERVER_PORT}")
@@ -446,7 +446,7 @@ class TestServerPortConfig:
         
         with patch.dict(os.environ, {"SERVER_PORT": "3000"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"SERVER_PORT: {config_module.SERVER_PORT}")
@@ -461,7 +461,7 @@ class TestServerPortConfig:
         
         with patch.dict(os.environ, {"SERVER_PORT": "8080"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"SERVER_PORT: {config_module.SERVER_PORT}")
@@ -480,7 +480,7 @@ class TestKiroCliDbFileConfig:
         """
         print("Setup: Importing config module...")
         import importlib
-        import kiro_gateway.config as config_module
+        import kiro.config as config_module
         importlib.reload(config_module)
         
         print("Verification: KIRO_CLI_DB_FILE exists...")
@@ -499,7 +499,7 @@ class TestKiroCliDbFileConfig:
         
         with patch.dict(os.environ, {"KIRO_CLI_DB_FILE": "~/.local/share/kiro-cli/data.sqlite3"}):
             import importlib
-            import kiro_gateway.config as config_module
+            import kiro.config as config_module
             importlib.reload(config_module)
             
             print(f"KIRO_CLI_DB_FILE: {config_module.KIRO_CLI_DB_FILE}")

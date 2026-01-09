@@ -20,10 +20,10 @@ class TestDebugLoggerModeOff:
         Цель: Убедиться, что в режиме off директория не создаётся.
         """
         print("Настройка: Режим off...")
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'off'):
-            with patch('kiro_gateway.debug_logger.DEBUG_DIR', str(tmp_path / "debug_logs")):
+        with patch('kiro.debug_logger.DEBUG_MODE', 'off'):
+            with patch('kiro.debug_logger.DEBUG_DIR', str(tmp_path / "debug_logs")):
                 # Пересоздаём экземпляр с новыми настройками
-                from kiro_gateway.debug_logger import DebugLogger
+                from kiro.debug_logger import DebugLogger
                 logger = DebugLogger.__new__(DebugLogger)
                 logger._initialized = False
                 logger.__init__()
@@ -41,8 +41,8 @@ class TestDebugLoggerModeOff:
         Цель: Убедиться, что данные не записываются.
         """
         print("Настройка: Режим off...")
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'off'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'off'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -69,8 +69,8 @@ class TestDebugLoggerModeAll:
         old_file = debug_dir / "old_file.txt"
         old_file.write_text("old content")
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -93,8 +93,8 @@ class TestDebugLoggerModeAll:
         debug_dir = tmp_path / "debug_logs"
         debug_dir.mkdir()
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -121,8 +121,8 @@ class TestDebugLoggerModeAll:
         debug_dir = tmp_path / "debug_logs"
         debug_dir.mkdir()
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -145,8 +145,8 @@ class TestDebugLoggerModeAll:
         debug_dir = tmp_path / "debug_logs"
         debug_dir.mkdir()
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -173,8 +173,8 @@ class TestDebugLoggerModeErrors:
         print("Настройка: Режим errors...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'errors'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'errors'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -198,8 +198,8 @@ class TestDebugLoggerModeErrors:
         print("Настройка: Режим errors, заполняем буферы...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'errors'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'errors'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -234,8 +234,8 @@ class TestDebugLoggerModeErrors:
         print("Настройка: Режим errors...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'errors'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'errors'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -260,8 +260,8 @@ class TestDebugLoggerModeErrors:
         print("Настройка: Режим errors, заполняем буферы...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'errors'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'errors'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -288,8 +288,8 @@ class TestDebugLoggerModeErrors:
         print("Настройка: Режим all...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -318,8 +318,8 @@ class TestDebugLoggerLogErrorInfo:
         print("Настройка: Режим all...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -345,8 +345,8 @@ class TestDebugLoggerLogErrorInfo:
         print("Настройка: Режим errors...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'errors'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'errors'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -367,8 +367,8 @@ class TestDebugLoggerLogErrorInfo:
         print("Настройка: Режим off...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'off'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'off'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -390,8 +390,8 @@ class TestDebugLoggerHelperMethods:
         Цель: Убедиться, что режим errors считается включённым.
         """
         print("Настройка: Режим errors...")
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'errors'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'errors'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -405,8 +405,8 @@ class TestDebugLoggerHelperMethods:
         Цель: Убедиться, что режим all считается включённым.
         """
         print("Настройка: Режим all...")
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -420,8 +420,8 @@ class TestDebugLoggerHelperMethods:
         Цель: Убедиться, что режим off считается выключенным.
         """
         print("Настройка: Режим off...")
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'off'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'off'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -435,8 +435,8 @@ class TestDebugLoggerHelperMethods:
         Цель: Убедиться, что режим all пишет сразу.
         """
         print("Настройка: Режим all...")
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -450,8 +450,8 @@ class TestDebugLoggerHelperMethods:
         Цель: Убедиться, что режим errors буферизует.
         """
         print("Настройка: Режим errors...")
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'errors'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'errors'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -472,8 +472,8 @@ class TestDebugLoggerJsonHandling:
         debug_dir = tmp_path / "debug_logs"
         debug_dir.mkdir()
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -496,8 +496,8 @@ class TestDebugLoggerJsonHandling:
         debug_dir = tmp_path / "debug_logs"
         debug_dir.mkdir()
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             logger = DebugLogger.__new__(DebugLogger)
             logger._initialized = False
             logger.__init__()
@@ -523,8 +523,8 @@ class TestDebugLoggerAppLogsCapture:
         print("Настройка: Режим all...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             dbg_logger = DebugLogger.__new__(DebugLogger)
             dbg_logger._initialized = False
             dbg_logger.__init__()
@@ -547,8 +547,8 @@ class TestDebugLoggerAppLogsCapture:
         print("Настройка: Режим errors...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'errors'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'errors'):
+            from kiro.debug_logger import DebugLogger
             from loguru import logger as loguru_logger
             
             dbg_logger = DebugLogger.__new__(DebugLogger)
@@ -585,8 +585,8 @@ class TestDebugLoggerAppLogsCapture:
         debug_dir = tmp_path / "debug_logs"
         debug_dir.mkdir()
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             
             dbg_logger = DebugLogger.__new__(DebugLogger)
             dbg_logger._initialized = False
@@ -618,8 +618,8 @@ class TestDebugLoggerAppLogsCapture:
         print("Настройка: Режим errors...")
         debug_dir = tmp_path / "debug_logs"
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'errors'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'errors'):
+            from kiro.debug_logger import DebugLogger
             
             dbg_logger = DebugLogger.__new__(DebugLogger)
             dbg_logger._initialized = False
@@ -644,8 +644,8 @@ class TestDebugLoggerAppLogsCapture:
         Цель: Убедиться, что sink корректно удаляется.
         """
         print("Настройка: Режим all...")
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             
             dbg_logger = DebugLogger.__new__(DebugLogger)
             dbg_logger._initialized = False
@@ -672,8 +672,8 @@ class TestDebugLoggerAppLogsCapture:
         debug_dir = tmp_path / "debug_logs"
         debug_dir.mkdir()
         
-        with patch('kiro_gateway.debug_logger.DEBUG_MODE', 'all'):
-            from kiro_gateway.debug_logger import DebugLogger
+        with patch('kiro.debug_logger.DEBUG_MODE', 'all'):
+            from kiro.debug_logger import DebugLogger
             
             dbg_logger = DebugLogger.__new__(DebugLogger)
             dbg_logger._initialized = False

@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from kiro_gateway.routes import verify_api_key, router
-from kiro_gateway.config import PROXY_API_KEY, APP_VERSION, AVAILABLE_MODELS
+from kiro.routes import verify_api_key, router
+from kiro.config import PROXY_API_KEY, APP_VERSION, AVAILABLE_MODELS
 
 
 class TestVerifyApiKey:

@@ -7,7 +7,7 @@ Unit-тесты для AwsEventStreamParser и вспомогательных ф
 
 import pytest
 
-from kiro_gateway.parsers import (
+from kiro.parsers import (
     AwsEventStreamParser,
     find_matching_brace,
     parse_bracket_tool_calls,

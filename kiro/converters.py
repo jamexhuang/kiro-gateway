@@ -32,13 +32,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
-from kiro_gateway.config import (
+from kiro.config import (
     get_internal_model_id,
     TOOL_DESCRIPTION_MAX_LENGTH,
     FAKE_REASONING_ENABLED,
     FAKE_REASONING_MAX_TOKENS,
 )
-from kiro_gateway.models import ChatMessage, ChatCompletionRequest, Tool
+from kiro.models import ChatMessage, ChatCompletionRequest, Tool
 
 
 def extract_text_content(content: Any) -> str:
@@ -408,7 +408,7 @@ def process_tools_with_long_descriptions(
             
             # Create copy of tool with reference description
             # Use Tool model to create new copy
-            from kiro_gateway.models import ToolFunction
+            from kiro.models import ToolFunction
             
             reference_description = f"[Full documentation in system prompt under '## Tool: {tool_name}']"
             

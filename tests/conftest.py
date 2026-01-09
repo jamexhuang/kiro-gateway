@@ -355,10 +355,10 @@ def block_all_network_calls():
 
     # Patch AsyncClient in modules where it's used
     patchers = [
-        patch('kiro_gateway.auth.httpx.AsyncClient', return_value=mock_async_client),
-        patch('kiro_gateway.http_client.httpx.AsyncClient', return_value=mock_async_client),
-        patch('kiro_gateway.routes.httpx.AsyncClient', return_value=mock_async_client),
-        patch('kiro_gateway.streaming.httpx.AsyncClient', return_value=mock_async_client),
+        patch('kiro.auth.httpx.AsyncClient', return_value=mock_async_client),
+        patch('kiro.http_client.httpx.AsyncClient', return_value=mock_async_client),
+        patch('kiro.routes.httpx.AsyncClient', return_value=mock_async_client),
+        patch('kiro.streaming.httpx.AsyncClient', return_value=mock_async_client),
     ]
     
     # Start patchers
@@ -428,7 +428,7 @@ def mock_auth_manager():
     """
     Creates a mocked KiroAuthManager for tests.
     """
-    from kiro_gateway.auth import KiroAuthManager
+    from kiro.auth import KiroAuthManager
     
     manager = KiroAuthManager(
         refresh_token="test_refresh_token",
@@ -450,7 +450,7 @@ def expired_auth_manager():
     """
     Creates a KiroAuthManager with an expired token.
     """
-    from kiro_gateway.auth import KiroAuthManager
+    from kiro.auth import KiroAuthManager
     
     manager = KiroAuthManager(
         refresh_token="test_refresh_token",
@@ -509,7 +509,7 @@ def empty_model_cache():
     """
     Creates an empty ModelInfoCache.
     """
-    from kiro_gateway.cache import ModelInfoCache
+    from kiro.cache import ModelInfoCache
     return ModelInfoCache()
 
 
@@ -518,7 +518,7 @@ async def populated_model_cache(mock_kiro_models_response):
     """
     Creates a ModelInfoCache with pre-populated data.
     """
-    from kiro_gateway.cache import ModelInfoCache
+    from kiro.cache import ModelInfoCache
     
     cache = ModelInfoCache()
     await cache.update(mock_kiro_models_response["models"])
@@ -547,7 +547,7 @@ def mock_datetime():
     """
     fixed_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     
-    with patch('kiro_gateway.auth.datetime') as mock_dt:
+    with patch('kiro.auth.datetime') as mock_dt:
         mock_dt.now.return_value = fixed_time
         mock_dt.fromisoformat = datetime.fromisoformat
         mock_dt.fromtimestamp = datetime.fromtimestamp
@@ -750,7 +750,7 @@ def aws_event_parser():
     """
     Creates an AwsEventStreamParser instance for tests.
     """
-    from kiro_gateway.parsers import AwsEventStreamParser
+    from kiro.parsers import AwsEventStreamParser
     return AwsEventStreamParser()
 
 

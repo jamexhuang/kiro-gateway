@@ -34,9 +34,9 @@ import httpx
 from fastapi import HTTPException
 from loguru import logger
 
-from kiro_gateway.config import MAX_RETRIES, BASE_RETRY_DELAY, FIRST_TOKEN_MAX_RETRIES, STREAMING_READ_TIMEOUT
-from kiro_gateway.auth import KiroAuthManager
-from kiro_gateway.utils import get_kiro_headers
+from kiro.config import MAX_RETRIES, BASE_RETRY_DELAY, FIRST_TOKEN_MAX_RETRIES, STREAMING_READ_TIMEOUT
+from kiro.auth import KiroAuthManager
+from kiro.utils import get_kiro_headers
 
 
 class KiroHttpClient:

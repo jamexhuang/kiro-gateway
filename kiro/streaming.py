@@ -35,24 +35,24 @@ import httpx
 from fastapi import HTTPException
 from loguru import logger
 
-from kiro_gateway.parsers import AwsEventStreamParser, parse_bracket_tool_calls, deduplicate_tool_calls
-from kiro_gateway.utils import generate_completion_id
-from kiro_gateway.config import (
+from kiro.parsers import AwsEventStreamParser, parse_bracket_tool_calls, deduplicate_tool_calls
+from kiro.utils import generate_completion_id
+from kiro.config import (
     FIRST_TOKEN_TIMEOUT,
     FIRST_TOKEN_MAX_RETRIES,
     FAKE_REASONING_ENABLED,
     FAKE_REASONING_HANDLING,
 )
-from kiro_gateway.tokenizer import count_tokens, count_message_tokens, count_tools_tokens
-from kiro_gateway.thinking_parser import ThinkingParser
+from kiro.tokenizer import count_tokens, count_message_tokens, count_tools_tokens
+from kiro.thinking_parser import ThinkingParser
 
 if TYPE_CHECKING:
-    from kiro_gateway.auth import KiroAuthManager
-    from kiro_gateway.cache import ModelInfoCache
+    from kiro.auth import KiroAuthManager
+    from kiro.cache import ModelInfoCache
 
 # Import debug_logger for logging
 try:
-    from kiro_gateway.debug_logger import debug_logger
+    from kiro.debug_logger import debug_logger
 except ImportError:
     debug_logger = None
 
