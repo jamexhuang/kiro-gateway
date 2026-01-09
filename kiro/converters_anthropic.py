@@ -72,6 +72,44 @@ def convert_anthropic_content_to_text(content: Any) -> str:
     return str(content) if content else ""
 
 
+def extract_system_prompt(system: Any) -> str:
+    """
+    Extracts system prompt text from Anthropic system field.
+    
+    Anthropic API supports system in two formats:
+    1. String: "You are helpful"
+    2. List of content blocks: [{"type": "text", "text": "...", "cache_control": {...}}]
+    
+    The second format is used for prompt caching with cache_control.
+    We extract only the text, ignoring cache_control (not supported by Kiro).
+    
+    Args:
+        system: System prompt in string or list format
+    
+    Returns:
+        Extracted system prompt as string
+    """
+    if system is None:
+        return ""
+    
+    if isinstance(system, str):
+        return system
+    
+    if isinstance(system, list):
+        text_parts = []
+        for block in system:
+            if isinstance(block, dict):
+                # Handle {"type": "text", "text": "...", "cache_control": {...}}
+                if block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+            elif hasattr(block, "type") and block.type == "text":
+                # Handle Pydantic model
+                text_parts.append(getattr(block, "text", ""))
+        return "\n".join(text_parts)
+    
+    return str(system)
+
+
 def extract_tool_results_from_anthropic_content(content: Any) -> List[Dict[str, Any]]:
     """
     Extracts tool results from Anthropic message content.
@@ -286,7 +324,8 @@ def anthropic_to_kiro(
     unified_tools = convert_anthropic_tools(request.tools)
     
     # System prompt is already separate in Anthropic format!
-    system_prompt = request.system or ""
+    # It can be a string or list of content blocks (for prompt caching)
+    system_prompt = extract_system_prompt(request.system)
     
     # Get internal model ID
     model_id = get_internal_model_id(request.model)

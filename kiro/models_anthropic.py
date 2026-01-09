@@ -132,6 +132,24 @@ ToolChoice = Union[ToolChoiceAuto, ToolChoiceAny, ToolChoiceTool]
 # Request Models
 # ==================================================================================================
 
+class SystemContentBlock(BaseModel):
+    """
+    System content block for prompt caching.
+    
+    Anthropic API supports system as a list of content blocks
+    with optional cache_control for prompt caching.
+    """
+    type: Literal["text"] = "text"
+    text: str
+    cache_control: Optional[Dict[str, Any]] = None
+    
+    model_config = {"extra": "allow"}
+
+
+# System can be a string or list of content blocks (for prompt caching)
+SystemPrompt = Union[str, List[SystemContentBlock], List[Dict[str, Any]]]
+
+
 class AnthropicMessagesRequest(BaseModel):
     """
     Request to Anthropic Messages API (/v1/messages).
@@ -140,7 +158,7 @@ class AnthropicMessagesRequest(BaseModel):
         model: Model ID (e.g., "claude-sonnet-4-5")
         messages: List of conversation messages
         max_tokens: Maximum tokens in response (required)
-        system: System prompt (optional, separate from messages)
+        system: System prompt (optional, string or list of content blocks for caching)
         stream: Whether to stream the response
         tools: List of available tools
         tool_choice: Tool selection strategy
@@ -154,8 +172,8 @@ class AnthropicMessagesRequest(BaseModel):
     messages: List[AnthropicMessage] = Field(min_length=1)
     max_tokens: int
     
-    # Optional parameters
-    system: Optional[str] = None
+    # Optional parameters - system can be string or list of content blocks
+    system: Optional[SystemPrompt] = None
     stream: bool = False
     
     # Tools
