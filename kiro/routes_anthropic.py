@@ -44,9 +44,14 @@ from kiro.models_anthropic import (
 from kiro.auth import KiroAuthManager, AuthType
 from kiro.cache import ModelInfoCache
 from kiro.converters_anthropic import anthropic_to_kiro
-from kiro.streaming_anthropic import stream_kiro_to_anthropic, collect_anthropic_response
+from kiro.streaming_anthropic import (
+    stream_kiro_to_anthropic,
+    collect_anthropic_response,
+    stream_with_first_token_retry_anthropic,
+)
 from kiro.http_client import KiroHttpClient
 from kiro.utils import generate_conversation_id
+from kiro.tokenizer import count_tools_tokens
 
 # Import debug_logger
 try:
@@ -201,72 +206,35 @@ async def messages(
     http_client = KiroHttpClient(auth_manager, shared_client=shared_client)
     url = f"{auth_manager.api_host}/generateAssistantResponse"
     
+    # Prepare data for token counting
+    # Convert Pydantic models to dicts for tokenizer
+    messages_for_tokenizer = [msg.model_dump() for msg in request_data.messages]
+    tools_for_tokenizer = [tool.model_dump() for tool in request_data.tools] if request_data.tools else None
+    
     try:
-        # Make request to Kiro API
-        response = await http_client.request_with_retry(
-            "POST",
-            url,
-            kiro_payload,
-            stream=True
-        )
-        
-        if response.status_code != 200:
-            try:
-                error_content = await response.aread()
-            except Exception:
-                error_content = b"Unknown error"
-            
-            await http_client.close()
-            error_text = error_content.decode('utf-8', errors='replace')
-            logger.error(f"Error from Kiro API: {response.status_code} - {error_text}")
-            
-            # Try to parse JSON response from Kiro
-            error_message = error_text
-            try:
-                error_json = json.loads(error_text)
-                if "message" in error_json:
-                    error_message = error_json["message"]
-                    if "reason" in error_json:
-                        error_message = f"{error_message} (reason: {error_json['reason']})"
-            except (json.JSONDecodeError, KeyError):
-                pass
-            
-            # Log access log for error
-            logger.warning(
-                f"HTTP {response.status_code} - POST /v1/messages - {error_message[:100]}"
-            )
-            
-            # Flush debug logs on error
-            if debug_logger:
-                debug_logger.flush_on_error(response.status_code, error_message)
-            
-            # Return error in Anthropic format
-            return JSONResponse(
-                status_code=response.status_code,
-                content={
-                    "type": "error",
-                    "error": {
-                        "type": "api_error",
-                        "message": error_message
-                    }
-                }
-            )
-        
-        # Prepare messages for token counting
-        messages_for_tokenizer = [msg.model_dump() for msg in request_data.messages]
-        
         if request_data.stream:
-            # Streaming mode
+            # Streaming mode with first token retry
+            # Request is made inside retry loop, not here
+            async def make_request():
+                """Create new request to Kiro API."""
+                return await http_client.request_with_retry(
+                    "POST",
+                    url,
+                    kiro_payload,
+                    stream=True
+                )
+            
             async def stream_wrapper():
                 streaming_error = None
                 client_disconnected = False
                 try:
-                    async for chunk in stream_kiro_to_anthropic(
-                        response,
-                        request_data.model,
-                        model_cache,
-                        auth_manager,
-                        request_messages=messages_for_tokenizer
+                    async for chunk in stream_with_first_token_retry_anthropic(
+                        make_request=make_request,
+                        model=request_data.model,
+                        model_cache=model_cache,
+                        auth_manager=auth_manager,
+                        request_messages=messages_for_tokenizer,
+                        request_tools=tools_for_tokenizer
                     ):
                         yield chunk
                 except GeneratorExit:
@@ -308,7 +276,56 @@ async def messages(
             )
         
         else:
-            # Non-streaming mode
+            # Non-streaming mode - make request here
+            response = await http_client.request_with_retry(
+                "POST",
+                url,
+                kiro_payload,
+                stream=True
+            )
+            
+            if response.status_code != 200:
+                try:
+                    error_content = await response.aread()
+                except Exception:
+                    error_content = b"Unknown error"
+                
+                await http_client.close()
+                error_text = error_content.decode('utf-8', errors='replace')
+                logger.error(f"Error from Kiro API: {response.status_code} - {error_text}")
+                
+                # Try to parse JSON response from Kiro
+                error_message = error_text
+                try:
+                    error_json = json.loads(error_text)
+                    if "message" in error_json:
+                        error_message = error_json["message"]
+                        if "reason" in error_json:
+                            error_message = f"{error_message} (reason: {error_json['reason']})"
+                except (json.JSONDecodeError, KeyError):
+                    pass
+                
+                # Log access log for error
+                logger.warning(
+                    f"HTTP {response.status_code} - POST /v1/messages - {error_message[:100]}"
+                )
+                
+                # Flush debug logs on error
+                if debug_logger:
+                    debug_logger.flush_on_error(response.status_code, error_message)
+                
+                # Return error in Anthropic format
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content={
+                        "type": "error",
+                        "error": {
+                            "type": "api_error",
+                            "message": error_message
+                        }
+                    }
+                )
+            
             anthropic_response = await collect_anthropic_response(
                 response,
                 request_data.model,

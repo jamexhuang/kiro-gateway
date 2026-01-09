@@ -45,10 +45,11 @@ from kiro.streaming_core import (
     FirstTokenTimeoutError,
     KiroEvent,
     calculate_tokens_from_context_usage,
+    stream_with_first_token_retry,
 )
-from kiro.tokenizer import count_tokens, count_message_tokens
+from kiro.tokenizer import count_tokens, count_message_tokens, count_tools_tokens
 from kiro.parsers import parse_bracket_tool_calls, deduplicate_tool_calls
-from kiro.config import FIRST_TOKEN_TIMEOUT, FAKE_REASONING_HANDLING
+from kiro.config import FIRST_TOKEN_TIMEOUT, FIRST_TOKEN_MAX_RETRIES, FAKE_REASONING_HANDLING
 
 if TYPE_CHECKING:
     from kiro.auth import KiroAuthManager
@@ -590,3 +591,81 @@ async def collect_anthropic_response(
             "output_tokens": output_tokens
         }
     }
+
+
+async def stream_with_first_token_retry_anthropic(
+    make_request,
+    model: str,
+    model_cache: "ModelInfoCache",
+    auth_manager: "KiroAuthManager",
+    max_retries: int = FIRST_TOKEN_MAX_RETRIES,
+    first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
+    request_messages: Optional[list] = None,
+    request_tools: Optional[list] = None
+) -> AsyncGenerator[str, None]:
+    """
+    Streaming with automatic retry on first token timeout for Anthropic API.
+    
+    If model doesn't respond within first_token_timeout seconds,
+    request is cancelled and a new one is made. Maximum max_retries attempts.
+    
+    This is seamless for user - they just see a delay,
+    but eventually get a response (or error after all attempts).
+    
+    Args:
+        make_request: Function to create new HTTP request
+        model: Model name
+        model_cache: Model cache
+        auth_manager: Authentication manager
+        max_retries: Maximum number of attempts
+        first_token_timeout: First token wait timeout (seconds)
+        request_messages: Original request messages (for fallback token counting)
+        request_tools: Original request tools (for fallback token counting)
+    
+    Yields:
+        Strings in Anthropic SSE format
+    
+    Raises:
+        Exception with Anthropic error format after exhausting all attempts
+    """
+    def create_http_error(status_code: int, error_text: str) -> Exception:
+        """Create exception for HTTP errors in Anthropic format."""
+        return Exception(json.dumps({
+            "type": "error",
+            "error": {
+                "type": "api_error",
+                "message": f"Upstream API error: {error_text}"
+            }
+        }))
+    
+    def create_timeout_error(retries: int, timeout: float) -> Exception:
+        """Create exception for timeout errors in Anthropic format."""
+        return Exception(json.dumps({
+            "type": "error",
+            "error": {
+                "type": "timeout_error",
+                "message": f"Model did not respond within {timeout}s after {retries} attempts. Please try again."
+            }
+        }))
+    
+    async def stream_processor(response: httpx.Response) -> AsyncGenerator[str, None]:
+        """Process response and yield Anthropic SSE chunks."""
+        async for chunk in stream_kiro_to_anthropic(
+            response,
+            model,
+            model_cache,
+            auth_manager,
+            first_token_timeout=first_token_timeout,
+            request_messages=request_messages
+        ):
+            yield chunk
+    
+    async for chunk in stream_with_first_token_retry(
+        make_request=make_request,
+        stream_processor=stream_processor,
+        max_retries=max_retries,
+        first_token_timeout=first_token_timeout,
+        on_http_error=create_http_error,
+        on_all_retries_failed=create_timeout_error,
+    ):
+        yield chunk
