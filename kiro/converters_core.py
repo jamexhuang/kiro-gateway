@@ -627,6 +627,11 @@ def merge_adjacent_messages(messages: List[UnifiedMessage]) -> List[UnifiedMessa
         return []
     
     merged = []
+    # Statistics for summary logging
+    merge_counts = {"user": 0, "assistant": 0}
+    total_tool_calls_merged = 0
+    total_tool_results_merged = 0
+    
     for msg in messages:
         if not merged:
             merged.append(msg)
@@ -651,18 +656,40 @@ def merge_adjacent_messages(messages: List[UnifiedMessage]) -> List[UnifiedMessa
                 if last.tool_calls is None:
                     last.tool_calls = []
                 last.tool_calls = list(last.tool_calls) + list(msg.tool_calls)
-                logger.debug(f"Merged tool_calls: added {len(msg.tool_calls)} tool calls")
+                total_tool_calls_merged += len(msg.tool_calls)
             
             # Merge tool_results for user messages
             if msg.role == "user" and msg.tool_results:
                 if last.tool_results is None:
                     last.tool_results = []
                 last.tool_results = list(last.tool_results) + list(msg.tool_results)
-                logger.debug(f"Merged tool_results: added {len(msg.tool_results)} tool results")
+                total_tool_results_merged += len(msg.tool_results)
             
-            logger.debug(f"Merged adjacent messages with role {msg.role}")
+            # Count merges by role
+            if msg.role in merge_counts:
+                merge_counts[msg.role] += 1
         else:
             merged.append(msg)
+    
+    # Log summary if any merges occurred
+    total_merges = sum(merge_counts.values())
+    if total_merges > 0:
+        parts = []
+        for role, count in merge_counts.items():
+            if count > 0:
+                parts.append(f"{count} {role}")
+        merge_summary = ", ".join(parts)
+        
+        extras = []
+        if total_tool_calls_merged > 0:
+            extras.append(f"{total_tool_calls_merged} tool_calls")
+        if total_tool_results_merged > 0:
+            extras.append(f"{total_tool_results_merged} tool_results")
+        
+        if extras:
+            logger.debug(f"Merged {total_merges} adjacent messages ({merge_summary}), including {', '.join(extras)}")
+        else:
+            logger.debug(f"Merged {total_merges} adjacent messages ({merge_summary})")
     
     return merged
 
