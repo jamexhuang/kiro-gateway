@@ -918,8 +918,8 @@ class TestBuildKiroPayloadToolCallsIntegration:
         print(f"Comparing toolResults count: Expected 2, Got {len(tool_results)}")
         assert len(tool_results) == 2, f"Should have 2 toolResults, got {len(tool_results)}"
         
-        # Note: tool_results use snake_case (tool_use_id) in unified format
-        tool_result_ids = [tr["tool_use_id"] for tr in tool_results]
+        # Note: tool_results in Kiro payload use camelCase (toolUseId)
+        tool_result_ids = [tr["toolUseId"] for tr in tool_results]
         print(f"ToolResult IDs: {tool_result_ids}")
         assert "tooluse_first" in tool_result_ids
         assert "tooluse_second" in tool_result_ids

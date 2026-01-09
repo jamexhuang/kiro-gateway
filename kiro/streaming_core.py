@@ -468,7 +468,9 @@ async def stream_with_first_token_retry(
             
         except Exception as e:
             # Other errors - no retry, propagate
-            logger.error(f"Unexpected error during streaming: {e}", exc_info=True)
+            # Use repr() to avoid loguru interpreting curly braces in error message as format placeholders
+            error_msg = repr(str(e))
+            logger.error(f"Unexpected error during streaming: {error_msg}", exc_info=True)
             if response:
                 try:
                     await response.aclose()
