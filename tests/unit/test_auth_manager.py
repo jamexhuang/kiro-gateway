@@ -1683,3 +1683,354 @@ class TestKiroAuthManagerSsoRegionSeparation:
             
             print("Verification: Only one request was made...")
             assert mock_client.post.call_count == 1
+
+
+# =============================================================================
+# Tests for is_token_expired() method
+# =============================================================================
+
+class TestKiroAuthManagerIsTokenExpired:
+    """Tests for is_token_expired() method.
+    
+    This method checks if the token has actually expired (not just expiring soon).
+    Used for graceful degradation when refresh fails.
+    """
+    
+    def test_is_token_expired_returns_true_when_no_expires_at(self):
+        """
+        What it does: Verifies that without expires_at token is considered expired.
+        Purpose: Ensure safe behavior when time information is missing.
+        """
+        print("Setup: Creating KiroAuthManager without expires_at...")
+        manager = KiroAuthManager(refresh_token="test_token")
+        manager._expires_at = None
+        
+        print("Verification: is_token_expired returns True...")
+        result = manager.is_token_expired()
+        print(f"Comparing result: Expected True, Got {result}")
+        assert result is True
+    
+    def test_is_token_expired_returns_true_when_expired(self):
+        """
+        What it does: Verifies that expired token is correctly identified.
+        Purpose: Ensure token in the past is considered expired.
+        """
+        print("Setup: Creating KiroAuthManager with expired token...")
+        manager = KiroAuthManager(refresh_token="test_token")
+        manager._expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        
+        print("Verification: is_token_expired returns True for expired token...")
+        result = manager.is_token_expired()
+        print(f"Comparing result: Expected True, Got {result}")
+        assert result is True
+    
+    def test_is_token_expired_returns_false_when_valid(self):
+        """
+        What it does: Verifies that valid token is not considered expired.
+        Purpose: Ensure token in the future is not considered expired.
+        """
+        print("Setup: Creating KiroAuthManager with valid token...")
+        manager = KiroAuthManager(refresh_token="test_token")
+        manager._expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        
+        print("Verification: is_token_expired returns False...")
+        result = manager.is_token_expired()
+        print(f"Comparing result: Expected False, Got {result}")
+        assert result is False
+    
+    def test_is_token_expired_returns_false_when_expiring_soon_but_not_expired(self):
+        """
+        What it does: Verifies difference between expiring soon and actually expired.
+        Purpose: Ensure token expiring in 5 minutes is NOT considered expired yet.
+        """
+        print("Setup: Creating KiroAuthManager with token expiring in 5 minutes...")
+        manager = KiroAuthManager(refresh_token="test_token")
+        manager._expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        
+        print("Verification: is_token_expiring_soon returns True (within threshold)...")
+        assert manager.is_token_expiring_soon() is True
+        
+        print("Verification: is_token_expired returns False (not actually expired)...")
+        result = manager.is_token_expired()
+        print(f"Comparing result: Expected False, Got {result}")
+        assert result is False
+
+
+# =============================================================================
+# Tests for graceful degradation in get_access_token() (SQLite mode)
+# =============================================================================
+
+class TestKiroAuthManagerGracefulDegradation:
+    """Tests for graceful degradation when refresh fails in SQLite mode.
+    
+    Background: When kiro-cli refreshes tokens in memory without persisting to SQLite,
+    the refresh_token in SQLite becomes stale. The gateway should gracefully fall back
+    to using the access_token directly until it actually expires.
+    """
+    
+    @pytest.mark.asyncio
+    async def test_get_access_token_reloads_sqlite_when_expiring_soon(self, tmp_path):
+        """
+        What it does: Verifies SQLite is reloaded when token is expiring soon.
+        Purpose: Pick up fresh tokens from kiro-cli before attempting refresh.
+        """
+        import sqlite3
+        import json
+        
+        print("Setup: Creating SQLite database with fresh token...")
+        db_file = tmp_path / "data.sqlite3"
+        conn = sqlite3.connect(str(db_file))
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            CREATE TABLE auth_kv (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        
+        # Token that expires in 1 hour (fresh)
+        fresh_token_data = {
+            "access_token": "fresh_access_token",
+            "refresh_token": "fresh_refresh_token",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "region": "us-east-1"
+        }
+        cursor.execute(
+            "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+            ("codewhisperer:odic:token", json.dumps(fresh_token_data))
+        )
+        
+        registration_data = {
+            "client_id": "test_client_id",
+            "client_secret": "test_client_secret",
+            "region": "us-east-1"
+        }
+        cursor.execute(
+            "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+            ("codewhisperer:odic:device-registration", json.dumps(registration_data))
+        )
+        conn.commit()
+        conn.close()
+        
+        print("Setup: Creating KiroAuthManager with expiring token...")
+        manager = KiroAuthManager(sqlite_db=str(db_file))
+        # Simulate token expiring soon (within threshold)
+        manager._access_token = "old_expiring_token"
+        manager._expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        
+        print("Verification: Token is expiring soon...")
+        assert manager.is_token_expiring_soon() is True
+        
+        print("Action: Calling get_access_token()...")
+        token = await manager.get_access_token()
+        
+        print("Verification: Got fresh token from SQLite reload...")
+        print(f"Comparing token: Expected 'fresh_access_token', Got '{token}'")
+        assert token == "fresh_access_token"
+    
+    @pytest.mark.asyncio
+    async def test_get_access_token_graceful_fallback_when_refresh_fails_but_token_valid(
+        self, tmp_path
+    ):
+        """
+        What it does: Verifies graceful fallback when refresh fails with 400 but access_token still valid.
+        Purpose: Use existing access_token until it actually expires when kiro-cli owns refresh.
+        """
+        import sqlite3
+        import json
+        
+        print("Setup: Creating SQLite database...")
+        db_file = tmp_path / "data.sqlite3"
+        conn = sqlite3.connect(str(db_file))
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            CREATE TABLE auth_kv (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        
+        # Token that is expiring soon but NOT expired yet
+        token_data = {
+            "access_token": "still_valid_access_token",
+            "refresh_token": "stale_refresh_token",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+            "region": "us-east-1"
+        }
+        cursor.execute(
+            "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+            ("codewhisperer:odic:token", json.dumps(token_data))
+        )
+        
+        registration_data = {
+            "client_id": "test_client_id",
+            "client_secret": "test_client_secret",
+            "region": "us-east-1"
+        }
+        cursor.execute(
+            "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+            ("codewhisperer:odic:device-registration", json.dumps(registration_data))
+        )
+        conn.commit()
+        conn.close()
+        
+        print("Setup: Creating KiroAuthManager...")
+        manager = KiroAuthManager(sqlite_db=str(db_file))
+        
+        print("Verification: Token is expiring soon but NOT expired...")
+        assert manager.is_token_expiring_soon() is True
+        assert manager.is_token_expired() is False
+        
+        print("Setup: Mocking HTTP client to return 400 twice (stale refresh token)...")
+        mock_error_response = AsyncMock()
+        mock_error_response.status_code = 400
+        mock_error_response.text = '{"error":"invalid_request"}'
+        mock_error_response.json = Mock(return_value={"error": "invalid_request"})
+        mock_error_response.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError(
+                "400 Bad Request",
+                request=Mock(),
+                response=mock_error_response
+            )
+        )
+        
+        with patch('kiro.auth.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_error_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+            
+            print("Action: Calling get_access_token() (expecting graceful fallback)...")
+            token = await manager.get_access_token()
+            
+            print("Verification: Got existing access_token (graceful fallback)...")
+            print(f"Comparing token: Expected 'still_valid_access_token', Got '{token}'")
+            assert token == "still_valid_access_token"
+    
+    @pytest.mark.asyncio
+    async def test_get_access_token_raises_when_refresh_fails_and_token_expired(
+        self, tmp_path
+    ):
+        """
+        What it does: Verifies error is raised when refresh fails and access_token is expired.
+        Purpose: Clear error message when user needs to run 'kiro-cli login'.
+        """
+        import sqlite3
+        import json
+        
+        print("Setup: Creating SQLite database with expired token...")
+        db_file = tmp_path / "data.sqlite3"
+        conn = sqlite3.connect(str(db_file))
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            CREATE TABLE auth_kv (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        
+        # Token that is already expired
+        token_data = {
+            "access_token": "expired_access_token",
+            "refresh_token": "stale_refresh_token",
+            "expires_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "region": "us-east-1"
+        }
+        cursor.execute(
+            "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+            ("codewhisperer:odic:token", json.dumps(token_data))
+        )
+        
+        registration_data = {
+            "client_id": "test_client_id",
+            "client_secret": "test_client_secret",
+            "region": "us-east-1"
+        }
+        cursor.execute(
+            "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+            ("codewhisperer:odic:device-registration", json.dumps(registration_data))
+        )
+        conn.commit()
+        conn.close()
+        
+        print("Setup: Creating KiroAuthManager...")
+        manager = KiroAuthManager(sqlite_db=str(db_file))
+        
+        print("Verification: Token is expired...")
+        assert manager.is_token_expired() is True
+        
+        print("Setup: Mocking HTTP client to return 400 (stale refresh token)...")
+        mock_error_response = AsyncMock()
+        mock_error_response.status_code = 400
+        mock_error_response.text = '{"error":"invalid_request"}'
+        mock_error_response.json = Mock(return_value={"error": "invalid_request"})
+        mock_error_response.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError(
+                "400 Bad Request",
+                request=Mock(),
+                response=mock_error_response
+            )
+        )
+        
+        with patch('kiro.auth.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_error_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+            
+            print("Action: Calling get_access_token() (expecting ValueError)...")
+            with pytest.raises(ValueError) as exc_info:
+                await manager.get_access_token()
+            
+            print(f"Verification: ValueError raised with helpful message: {exc_info.value}")
+            assert "kiro-cli login" in str(exc_info.value).lower()
+    
+    @pytest.mark.asyncio
+    async def test_get_access_token_non_sqlite_mode_propagates_400_error(self):
+        """
+        What it does: Verifies 400 error is propagated in non-SQLite mode.
+        Purpose: Ensure graceful degradation only applies to SQLite mode.
+        """
+        print("Setup: Creating KiroAuthManager WITHOUT sqlite_db...")
+        manager = KiroAuthManager(
+            refresh_token="test_refresh",
+            client_id="test_client_id",
+            client_secret="test_client_secret"
+        )
+        manager._access_token = "expiring_token"
+        manager._expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        
+        print("Verification: No sqlite_db set...")
+        assert manager._sqlite_db is None
+        
+        print("Setup: Mocking HTTP client to return 400...")
+        mock_error_response = AsyncMock()
+        mock_error_response.status_code = 400
+        mock_error_response.text = '{"error":"invalid_request"}'
+        mock_error_response.json = Mock(return_value={"error": "invalid_request"})
+        mock_error_response.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError(
+                "400 Bad Request",
+                request=Mock(),
+                response=mock_error_response
+            )
+        )
+        
+        with patch('kiro.auth.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_error_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+            
+            print("Action: Calling get_access_token() (expecting HTTPStatusError)...")
+            with pytest.raises(httpx.HTTPStatusError) as exc_info:
+                await manager.get_access_token()
+            
+            print("Verification: 400 error was propagated (no graceful degradation)...")
+            assert exc_info.value.response.status_code == 400

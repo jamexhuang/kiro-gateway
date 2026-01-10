@@ -376,6 +376,23 @@ class KiroAuthManager:
         
         return self._expires_at.timestamp() <= threshold
     
+    def is_token_expired(self) -> bool:
+        """
+        Checks if the token is actually expired (not just expiring soon).
+        
+        This is used for graceful degradation when refresh fails but
+        the access token might still be valid for a short time.
+        
+        Returns:
+            True if the token has already expired or if expiration time
+            information is not available
+        """
+        if not self._expires_at:
+            return True  # If no expiration info available, assume expired
+        
+        now = datetime.now(timezone.utc)
+        return now >= self._expires_at
+    
     async def _refresh_token_request(self) -> None:
         """
         Performs a token refresh request.
@@ -572,6 +589,11 @@ class KiroAuthManager:
         Thread-safe method using asyncio.Lock.
         Automatically refreshes the token if it has expired or is about to expire.
         
+        For SQLite mode (kiro-cli): implements graceful degradation when refresh fails.
+        If kiro-cli has been running and refreshing tokens in memory (without persisting
+        to SQLite), the refresh_token in SQLite becomes stale. In this case, we fall back
+        to using the access_token directly until it actually expires.
+        
         Returns:
             Valid access token
         
@@ -579,8 +601,47 @@ class KiroAuthManager:
             ValueError: If unable to obtain access token
         """
         async with self._lock:
-            if not self._access_token or self.is_token_expiring_soon():
+            # Token is valid and not expiring soon - just return it
+            if self._access_token and not self.is_token_expiring_soon():
+                return self._access_token
+            
+            # SQLite mode: reload credentials first, kiro-cli might have updated them
+            if self._sqlite_db and self.is_token_expiring_soon():
+                logger.debug("SQLite mode: reloading credentials before refresh attempt")
+                self._load_credentials_from_sqlite(self._sqlite_db)
+                # Check if reloaded token is now valid
+                if self._access_token and not self.is_token_expiring_soon():
+                    logger.debug("SQLite reload provided fresh token, no refresh needed")
+                    return self._access_token
+            
+            # Try to refresh the token
+            try:
                 await self._refresh_token_request()
+            except httpx.HTTPStatusError as e:
+                # Graceful degradation for SQLite mode when refresh fails twice
+                # This happens when kiro-cli refreshed tokens in memory without persisting
+                if e.response.status_code == 400 and self._sqlite_db:
+                    logger.warning(
+                        "Token refresh failed with 400 after SQLite reload. "
+                        "This may happen if kiro-cli refreshed tokens in memory without persisting."
+                    )
+                    # Check if access_token is still usable
+                    if self._access_token and not self.is_token_expired():
+                        logger.warning(
+                            "Using existing access_token until it expires. "
+                            "Run 'kiro-cli login' when convenient to refresh credentials."
+                        )
+                        return self._access_token
+                    else:
+                        raise ValueError(
+                            "Token expired and refresh failed. "
+                            "Please run 'kiro-cli login' to refresh your credentials."
+                        )
+                # Non-SQLite mode or non-400 error - propagate the exception
+                raise
+            except Exception:
+                # For any other exception, propagate it
+                raise
             
             if not self._access_token:
                 raise ValueError("Failed to obtain access token")
