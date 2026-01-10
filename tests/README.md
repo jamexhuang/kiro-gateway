@@ -80,7 +80,8 @@ tests/
 │   ├── test_converters_openai.py   # OpenAI Chat API → Kiro converter tests
 │   ├── test_debug_logger.py        # DebugLogger tests (off/errors/all modes)
 │   ├── test_main_cli.py            # CLI argument parsing tests (--host, --port)
-│   ├── test_models_anthropic.py    # Anthropic Pydantic models tests (image content blocks, Issue #30)
+│   ├── test_models_anthropic.py    # Anthropic Pydantic models tests (all content blocks, tools, streaming)
+│   ├── test_models_openai.py       # OpenAI Pydantic models tests (messages, tools, responses, streaming)
 │   ├── test_parsers.py             # AwsEventStreamParser tests
 │   ├── test_routes_anthropic.py    # Anthropic API endpoint tests (/v1/messages)
 │   ├── test_routes_openai.py       # OpenAI API endpoint tests (/v1/chat/completions)
