@@ -53,17 +53,21 @@ class UnifiedMessage:
     Unified message format used internally by converters.
     
     This format is API-agnostic and can be created from both OpenAI and Anthropic formats.
+    Serves as the canonical representation for all message data before conversion to Kiro API.
     
     Attributes:
         role: Message role (user, assistant, system)
         content: Text content or list of content blocks
         tool_calls: List of tool calls (for assistant messages)
         tool_results: List of tool results (for user messages with tool responses)
+        images: List of images in unified format (for multimodal user messages)
+                Format: [{"media_type": "image/jpeg", "data": "base64..."}]
     """
     role: str
     content: Any = ""
     tool_calls: Optional[List[Dict[str, Any]]] = None
     tool_results: Optional[List[Dict[str, Any]]] = None
+    images: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclass
@@ -129,6 +133,9 @@ def extract_text_content(content: Any) -> str:
         text_parts = []
         for item in content:
             if isinstance(item, dict):
+                # Skip image blocks - they're handled separately
+                if item.get("type") in ("image", "image_url"):
+                    continue
                 if item.get("type") == "text":
                     text_parts.append(item.get("text", ""))
                 elif "text" in item:
@@ -137,6 +144,121 @@ def extract_text_content(content: Any) -> str:
                 text_parts.append(item)
         return "".join(text_parts)
     return str(content)
+
+
+def extract_images_from_content(content: Any) -> List[Dict[str, Any]]:
+    """
+    Extracts images from message content in unified format.
+    
+    Supports multiple image formats used by different APIs:
+    
+    OpenAI format (image_url with data URL):
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/..."}}
+    
+    Anthropic format (image with source):
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "/9j/..."}}
+    
+    Args:
+        content: Content in any supported format (usually a list of content blocks)
+    
+    Returns:
+        List of images in unified format: [{"media_type": "image/jpeg", "data": "base64..."}]
+        Empty list if no images found or content is not a list.
+    
+    Example:
+        >>> extract_images_from_content([{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "abc123"}}])
+        [{'media_type': 'image/png', 'data': 'abc123'}]
+    """
+    images: List[Dict[str, Any]] = []
+    
+    if not isinstance(content, list):
+        return images
+    
+    for item in content:
+        # Handle both dict and Pydantic model objects
+        if isinstance(item, dict):
+            item_type = item.get("type")
+        elif hasattr(item, "type"):
+            item_type = item.type
+        else:
+            continue
+        
+        # OpenAI format: {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+        if item_type == "image_url":
+            if isinstance(item, dict):
+                image_url_obj = item.get("image_url", {})
+            else:
+                image_url_obj = getattr(item, "image_url", {})
+            
+            if isinstance(image_url_obj, dict):
+                url = image_url_obj.get("url", "")
+            elif hasattr(image_url_obj, "url"):
+                url = image_url_obj.url
+            else:
+                url = ""
+            
+            if url.startswith("data:"):
+                # Parse data URL: data:image/jpeg;base64,/9j/4AAQ...
+                try:
+                    header, data = url.split(",", 1)
+                    # Extract media type from "data:image/jpeg;base64"
+                    media_part = header.split(";")[0]  # "data:image/jpeg"
+                    media_type = media_part.replace("data:", "")  # "image/jpeg"
+                    
+                    if data:
+                        images.append({
+                            "media_type": media_type,
+                            "data": data
+                        })
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Failed to parse image data URL: {e}")
+            elif url.startswith("http"):
+                # URL-based images require fetching - not supported by Kiro API directly
+                logger.warning(f"URL-based images are not supported by Kiro API, skipping: {url[:80]}...")
+        
+        # Anthropic format: {"type": "image", "source": {"type": "base64", "media_type": "...", "data": "..."}}
+        elif item_type == "image":
+            source = item.get("source", {}) if isinstance(item, dict) else getattr(item, "source", None)
+            
+            if source is None:
+                continue
+            
+            if isinstance(source, dict):
+                source_type = source.get("type")
+                
+                if source_type == "base64":
+                    media_type = source.get("media_type", "image/jpeg")
+                    data = source.get("data", "")
+                    
+                    if data:
+                        images.append({
+                            "media_type": media_type,
+                            "data": data
+                        })
+                elif source_type == "url":
+                    # URL-based images in Anthropic format
+                    url = source.get("url", "")
+                    logger.warning(f"URL-based images are not supported by Kiro API, skipping: {url[:80]}...")
+            
+            # Handle Pydantic model objects (ImageContentBlock.source)
+            elif hasattr(source, "type"):
+                if source.type == "base64":
+                    media_type = getattr(source, "media_type", "image/jpeg")
+                    data = getattr(source, "data", "")
+                    
+                    if data:
+                        images.append({
+                            "media_type": media_type,
+                            "data": data
+                        })
+                elif source.type == "url":
+                    url = getattr(source, "url", "")
+                    logger.warning(f"URL-based images are not supported by Kiro API, skipping: {url[:80]}...")
+    
+    if images:
+        logger.debug(f"Extracted {len(images)} image(s) from content")
+    
+    return images
 
 
 # ==================================================================================================
@@ -371,6 +493,55 @@ def convert_tools_to_kiro_format(tools: Optional[List[UnifiedTool]]) -> List[Dic
         })
     
     return kiro_tools
+
+
+# ==================================================================================================
+# Image Conversion to Kiro Format
+# ==================================================================================================
+
+def convert_images_to_kiro_format(images: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """
+    Converts unified images to Kiro API format.
+    
+    Unified format: [{"media_type": "image/jpeg", "data": "base64..."}]
+    Kiro format: [{"format": "jpeg", "source": {"bytes": "base64..."}}]
+    
+    Args:
+        images: List of images in unified format
+    
+    Returns:
+        List of images in Kiro format, ready for userInputMessageContext.images
+    
+    Example:
+        >>> convert_images_to_kiro_format([{"media_type": "image/png", "data": "abc123"}])
+        [{'format': 'png', 'source': {'bytes': 'abc123'}}]
+    """
+    if not images:
+        return []
+    
+    kiro_images = []
+    for img in images:
+        media_type = img.get("media_type", "image/jpeg")
+        data = img.get("data", "")
+        
+        if not data:
+            logger.warning("Skipping image with empty data")
+            continue
+        
+        # Extract format from media_type: "image/jpeg" -> "jpeg"
+        format_str = media_type.split("/")[-1] if "/" in media_type else media_type
+        
+        kiro_images.append({
+            "format": format_str,
+            "source": {
+                "bytes": data
+            }
+        })
+    
+    if kiro_images:
+        logger.debug(f"Converted {len(kiro_images)} image(s) to Kiro format")
+    
+    return kiro_images
 
 
 # ==================================================================================================
@@ -839,17 +1010,30 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
                 "origin": "AI_EDITOR",
             }
             
+            # Build userInputMessageContext for tools and images
+            user_input_context: Dict[str, Any] = {}
+            
+            # Process images - extract from message or content
+            images = msg.images or extract_images_from_content(msg.content)
+            if images:
+                kiro_images = convert_images_to_kiro_format(images)
+                if kiro_images:
+                    user_input_context["images"] = kiro_images
+            
             # Process tool_results - convert to Kiro format if present
             if msg.tool_results:
-                # Convert unified format to Kiro format
                 kiro_tool_results = convert_tool_results_to_kiro_format(msg.tool_results)
                 if kiro_tool_results:
-                    user_input["userInputMessageContext"] = {"toolResults": kiro_tool_results}
+                    user_input_context["toolResults"] = kiro_tool_results
             else:
                 # Try to extract from content (already in Kiro format)
                 tool_results = extract_tool_results_from_content(msg.content)
                 if tool_results:
-                    user_input["userInputMessageContext"] = {"toolResults": tool_results}
+                    user_input_context["toolResults"] = tool_results
+            
+            # Add context if not empty
+            if user_input_context:
+                user_input["userInputMessageContext"] = user_input_context
             
             history.append({"userInputMessage": user_input})
             
@@ -971,12 +1155,20 @@ def build_kiro_payload(
         current_content = "Continue"
     
     # Build user_input_context
-    user_input_context = {}
+    user_input_context: Dict[str, Any] = {}
     
     # Add tools if present
     kiro_tools = convert_tools_to_kiro_format(processed_tools)
     if kiro_tools:
         user_input_context["tools"] = kiro_tools
+    
+    # Process images in current message - extract from message or content
+    images = current_message.images or extract_images_from_content(current_message.content)
+    if images:
+        kiro_images = convert_images_to_kiro_format(images)
+        if kiro_images:
+            user_input_context["images"] = kiro_images
+            logger.debug(f"Added {len(kiro_images)} image(s) to current message")
     
     # Process tool_results in current message - convert to Kiro format if present
     if current_message.tool_results:

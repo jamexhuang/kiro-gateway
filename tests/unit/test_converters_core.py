@@ -16,6 +16,8 @@ from unittest.mock import patch
 
 from kiro.converters_core import (
     extract_text_content,
+    extract_images_from_content,
+    convert_images_to_kiro_format,
     merge_adjacent_messages,
     ensure_assistant_before_tool_results,
     strip_all_tool_content,
@@ -33,6 +35,9 @@ from kiro.converters_core import (
     UnifiedMessage,
     UnifiedTool,
 )
+
+# Test data for images - 1x1 pixel JPEG
+TEST_IMAGE_BASE64 = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AVN//2Q=="
 
 
 # ==================================================================================================
@@ -159,6 +164,614 @@ class TestExtractTextContent:
         
         print(f"Comparing result: Expected '', Got '{result}'")
         assert result == ""
+
+
+# ==================================================================================================
+# Tests for extract_images_from_content (Issue #30 fix)
+# ==================================================================================================
+
+class TestExtractImagesFromContent:
+    """
+    Tests for extract_images_from_content function.
+    
+    This function extracts images from message content in unified format.
+    Supports both OpenAI (image_url with data URL) and Anthropic (image with source) formats.
+    
+    This is a critical function for Issue #30 fix - 422 Validation Error for image content blocks.
+    """
+    
+    def test_extracts_from_openai_format_data_url(self):
+        """
+        What it does: Verifies extraction from OpenAI image_url format with data URL.
+        Purpose: Ensure OpenAI Vision API format is handled correctly.
+        
+        OpenAI format: {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+        """
+        print("Setup: OpenAI format image content...")
+        content = [
+            {"type": "text", "text": "What's in this image?"},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{TEST_IMAGE_BASE64}"}
+            }
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        
+        print("Checking media_type...")
+        assert result[0]["media_type"] == "image/jpeg"
+        
+        print("Checking data...")
+        assert result[0]["data"] == TEST_IMAGE_BASE64
+    
+    def test_extracts_from_anthropic_format_base64(self):
+        """
+        What it does: Verifies extraction from Anthropic image format with base64 source.
+        Purpose: Ensure Anthropic Messages API format is handled correctly.
+        
+        Anthropic format: {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "..."}}
+        """
+        print("Setup: Anthropic format image content...")
+        content = [
+            {"type": "text", "text": "Describe this image"},
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": TEST_IMAGE_BASE64
+                }
+            }
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        
+        print("Checking media_type...")
+        assert result[0]["media_type"] == "image/png"
+        
+        print("Checking data...")
+        assert result[0]["data"] == TEST_IMAGE_BASE64
+    
+    def test_extracts_from_mixed_content(self):
+        """
+        What it does: Verifies extraction from mixed content (text + multiple images).
+        Purpose: Ensure all images are extracted from multimodal content.
+        """
+        print("Setup: Mixed content with multiple images...")
+        content = [
+            {"type": "text", "text": "Compare these images:"},
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": "image1_data"}
+            },
+            {"type": "text", "text": "and"},
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": "image2_data"}
+            }
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 2, Got {len(result)}")
+        assert len(result) == 2
+        
+        print("Checking first image...")
+        assert result[0]["media_type"] == "image/jpeg"
+        assert result[0]["data"] == "image1_data"
+        
+        print("Checking second image...")
+        assert result[1]["media_type"] == "image/png"
+        assert result[1]["data"] == "image2_data"
+    
+    def test_returns_empty_for_string_content(self):
+        """
+        What it does: Verifies empty list return for string content.
+        Purpose: Ensure string content doesn't contain images.
+        """
+        print("Setup: String content...")
+        content = "Just a text message"
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_returns_empty_for_empty_content(self):
+        """
+        What it does: Verifies empty list return for empty content.
+        Purpose: Ensure empty list returns empty list.
+        """
+        print("Setup: Empty list...")
+        content = []
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_returns_empty_for_none_content(self):
+        """
+        What it does: Verifies empty list return for None content.
+        Purpose: Ensure None doesn't cause errors.
+        """
+        print("Setup: None content...")
+        content = None
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_returns_empty_for_text_only_content(self):
+        """
+        What it does: Verifies empty list return for text-only content.
+        Purpose: Ensure text blocks don't produce images.
+        """
+        print("Setup: Text-only content...")
+        content = [
+            {"type": "text", "text": "Hello"},
+            {"type": "text", "text": "World"}
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_handles_url_images_with_warning(self):
+        """
+        What it does: Verifies URL-based images are skipped with warning.
+        Purpose: Ensure URL images don't crash but are logged as unsupported.
+        
+        URL-based images require fetching and are not supported by Kiro API directly.
+        """
+        print("Setup: URL-based image content...")
+        content = [
+            {
+                "type": "image_url",
+                "image_url": {"url": "https://example.com/image.jpg"}
+            }
+        ]
+        
+        print("Action: Extracting images (should skip URL images)...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []  # URL images are skipped
+    
+    def test_handles_anthropic_url_source_with_warning(self):
+        """
+        What it does: Verifies Anthropic URL source images are skipped with warning.
+        Purpose: Ensure Anthropic URL format doesn't crash but is logged as unsupported.
+        """
+        print("Setup: Anthropic URL source image...")
+        content = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "url",
+                    "url": "https://example.com/image.png"
+                }
+            }
+        ]
+        
+        print("Action: Extracting images (should skip URL images)...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []  # URL images are skipped
+    
+    def test_handles_invalid_data_url(self):
+        """
+        What it does: Verifies handling of invalid data URL format.
+        Purpose: Ensure malformed data URLs don't crash the function.
+        """
+        print("Setup: Invalid data URL...")
+        content = [
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:invalid_format_without_comma"}
+            }
+        ]
+        
+        print("Action: Extracting images (should handle gracefully)...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []  # Invalid data URL is skipped
+    
+    def test_handles_empty_data_in_image(self):
+        """
+        What it does: Verifies handling of image with empty data.
+        Purpose: Ensure images with empty data are skipped.
+        """
+        print("Setup: Image with empty data...")
+        content = [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": ""}
+            }
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []  # Empty data is skipped
+    
+    def test_extracts_from_pydantic_image_content_block(self):
+        """
+        What it does: Verifies extraction from Pydantic ImageContentBlock objects.
+        Purpose: Ensure Pydantic models are handled correctly (Issue #30 fix).
+        
+        This is the critical test for Issue #30 - the original bug was that
+        Pydantic ImageContentBlock objects weren't being handled.
+        """
+        from kiro.models_anthropic import ImageContentBlock, Base64ImageSource
+        
+        print("Setup: Pydantic ImageContentBlock...")
+        content = [
+            ImageContentBlock(
+                type="image",
+                source=Base64ImageSource(
+                    type="base64",
+                    media_type="image/webp",
+                    data=TEST_IMAGE_BASE64
+                )
+            )
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        
+        print("Checking media_type...")
+        assert result[0]["media_type"] == "image/webp"
+        
+        print("Checking data...")
+        assert result[0]["data"] == TEST_IMAGE_BASE64
+    
+    def test_extracts_from_pydantic_url_image_source(self):
+        """
+        What it does: Verifies handling of Pydantic URLImageSource objects.
+        Purpose: Ensure Pydantic URL sources are skipped with warning.
+        """
+        from kiro.models_anthropic import ImageContentBlock, URLImageSource
+        
+        print("Setup: Pydantic ImageContentBlock with URL source...")
+        content = [
+            ImageContentBlock(
+                type="image",
+                source=URLImageSource(
+                    type="url",
+                    url="https://example.com/image.gif"
+                )
+            )
+        ]
+        
+        print("Action: Extracting images (should skip URL images)...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []  # URL images are skipped
+    
+    def test_extracts_multiple_formats_mixed(self):
+        """
+        What it does: Verifies extraction from mixed OpenAI and Anthropic formats.
+        Purpose: Ensure both formats can coexist in the same content list.
+        """
+        print("Setup: Mixed OpenAI and Anthropic formats...")
+        content = [
+            # OpenAI format
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,openai_image_data"}
+            },
+            # Anthropic format
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": "anthropic_image_data"}
+            }
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 2, Got {len(result)}")
+        assert len(result) == 2
+        
+        print("Checking OpenAI image...")
+        assert result[0]["media_type"] == "image/jpeg"
+        assert result[0]["data"] == "openai_image_data"
+        
+        print("Checking Anthropic image...")
+        assert result[1]["media_type"] == "image/png"
+        assert result[1]["data"] == "anthropic_image_data"
+    
+    def test_handles_missing_source_in_anthropic_format(self):
+        """
+        What it does: Verifies handling of Anthropic image without source.
+        Purpose: Ensure malformed Anthropic images don't crash.
+        """
+        print("Setup: Anthropic image without source...")
+        content = [
+            {"type": "image"}  # Missing source
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_handles_missing_image_url_in_openai_format(self):
+        """
+        What it does: Verifies handling of OpenAI image_url without image_url field.
+        Purpose: Ensure malformed OpenAI images don't crash.
+        """
+        print("Setup: OpenAI image_url without image_url field...")
+        content = [
+            {"type": "image_url"}  # Missing image_url
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_extracts_gif_format(self):
+        """
+        What it does: Verifies extraction of GIF images.
+        Purpose: Ensure GIF format is supported.
+        """
+        print("Setup: GIF image...")
+        content = [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/gif", "data": "gif_data"}
+            }
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["media_type"] == "image/gif"
+    
+    def test_extracts_webp_format(self):
+        """
+        What it does: Verifies extraction of WebP images.
+        Purpose: Ensure WebP format is supported.
+        """
+        print("Setup: WebP image...")
+        content = [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/webp", "data": "webp_data"}
+            }
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["media_type"] == "image/webp"
+    
+    def test_uses_default_media_type_when_missing(self):
+        """
+        What it does: Verifies default media_type is used when not specified.
+        Purpose: Ensure missing media_type defaults to image/jpeg.
+        """
+        print("Setup: Image without media_type...")
+        content = [
+            {
+                "type": "image",
+                "source": {"type": "base64", "data": "some_data"}  # No media_type
+            }
+        ]
+        
+        print("Action: Extracting images...")
+        result = extract_images_from_content(content)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["media_type"] == "image/jpeg"  # Default
+
+
+# ==================================================================================================
+# Tests for convert_images_to_kiro_format
+# ==================================================================================================
+
+class TestConvertImagesToKiroFormat:
+    """
+    Tests for convert_images_to_kiro_format function.
+    
+    This function converts unified images to Kiro API format.
+    
+    Unified format: [{"media_type": "image/jpeg", "data": "base64..."}]
+    Kiro format: [{"format": "jpeg", "source": {"bytes": "base64..."}}]
+    """
+    
+    def test_converts_single_image(self):
+        """
+        What it does: Verifies conversion of a single image.
+        Purpose: Ensure basic conversion from unified to Kiro format works.
+        """
+        print("Setup: Single image in unified format...")
+        images = [{"media_type": "image/jpeg", "data": TEST_IMAGE_BASE64}]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        
+        print("Checking format...")
+        assert result[0]["format"] == "jpeg"
+        
+        print("Checking source.bytes...")
+        assert result[0]["source"]["bytes"] == TEST_IMAGE_BASE64
+    
+    def test_converts_multiple_images(self):
+        """
+        What it does: Verifies conversion of multiple images.
+        Purpose: Ensure all images are converted correctly.
+        """
+        print("Setup: Multiple images...")
+        images = [
+            {"media_type": "image/jpeg", "data": "jpeg_data"},
+            {"media_type": "image/png", "data": "png_data"},
+            {"media_type": "image/gif", "data": "gif_data"}
+        ]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 3, Got {len(result)}")
+        assert len(result) == 3
+        
+        print("Checking formats...")
+        assert result[0]["format"] == "jpeg"
+        assert result[1]["format"] == "png"
+        assert result[2]["format"] == "gif"
+    
+    def test_returns_empty_for_none(self):
+        """
+        What it does: Verifies handling of None.
+        Purpose: Ensure None returns empty list.
+        """
+        print("Setup: None images...")
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(None)
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_returns_empty_for_empty_list(self):
+        """
+        What it does: Verifies handling of empty list.
+        Purpose: Ensure empty list returns empty list.
+        """
+        print("Setup: Empty images list...")
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format([])
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_skips_images_with_empty_data(self):
+        """
+        What it does: Verifies skipping of images with empty data.
+        Purpose: Ensure images without data are not included.
+        """
+        print("Setup: Image with empty data...")
+        images = [
+            {"media_type": "image/jpeg", "data": ""},
+            {"media_type": "image/png", "data": "valid_data"}
+        ]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        assert result[0]["format"] == "png"
+    
+    def test_extracts_format_from_media_type(self):
+        """
+        What it does: Verifies extraction of format from media_type.
+        Purpose: Ensure "image/jpeg" becomes "jpeg".
+        """
+        print("Setup: Various media types...")
+        images = [
+            {"media_type": "image/jpeg", "data": "data1"},
+            {"media_type": "image/png", "data": "data2"},
+            {"media_type": "image/gif", "data": "data3"},
+            {"media_type": "image/webp", "data": "data4"}
+        ]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result formats: {[r['format'] for r in result]}")
+        assert result[0]["format"] == "jpeg"
+        assert result[1]["format"] == "png"
+        assert result[2]["format"] == "gif"
+        assert result[3]["format"] == "webp"
+    
+    def test_handles_media_type_without_slash(self):
+        """
+        What it does: Verifies handling of media_type without slash.
+        Purpose: Ensure edge case media_type is handled.
+        """
+        print("Setup: Media type without slash...")
+        images = [{"media_type": "jpeg", "data": "data"}]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["format"] == "jpeg"
+    
+    def test_uses_default_media_type_when_missing(self):
+        """
+        What it does: Verifies default media_type is used when not specified.
+        Purpose: Ensure missing media_type defaults to image/jpeg.
+        """
+        print("Setup: Image without media_type...")
+        images = [{"data": "some_data"}]  # No media_type
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["format"] == "jpeg"  # Default from "image/jpeg"
+    
+    def test_preserves_large_image_data(self):
+        """
+        What it does: Verifies large image data is preserved.
+        Purpose: Ensure large images are not truncated.
+        """
+        print("Setup: Large image data...")
+        large_data = "A" * 100000  # 100KB of data
+        images = [{"media_type": "image/png", "data": large_data}]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result data length: {len(result[0]['source']['bytes'])}")
+        assert len(result[0]["source"]["bytes"]) == 100000
 
 
 # ==================================================================================================
@@ -2194,6 +2807,193 @@ class TestBuildKiroHistory:
         
         print(f"Message 3 content: '{result[3]['assistantResponseMessage']['content']}'")
         assert result[3]["assistantResponseMessage"]["content"] == "Response"
+    
+    def test_builds_user_message_with_images(self):
+        """
+        What it does: Verifies building of user message with images.
+        Purpose: Ensure images are included in userInputMessageContext.images.
+        
+        This is a critical test for Issue #30 fix - images should be in Kiro format.
+        """
+        print("Setup: User message with images...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="What's in this image?",
+                images=[{"media_type": "image/jpeg", "data": TEST_IMAGE_BASE64}]
+            )
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert "userInputMessage" in result[0]
+        
+        user_msg = result[0]["userInputMessage"]
+        print(f"User message: {user_msg}")
+        
+        print("Checking that userInputMessageContext exists...")
+        assert "userInputMessageContext" in user_msg
+        
+        print("Checking that images are in context...")
+        context = user_msg["userInputMessageContext"]
+        assert "images" in context
+        
+        print("Checking image format (Kiro format)...")
+        images = context["images"]
+        assert len(images) == 1
+        assert images[0]["format"] == "jpeg"
+        assert images[0]["source"]["bytes"] == TEST_IMAGE_BASE64
+    
+    def test_builds_user_message_with_multiple_images(self):
+        """
+        What it does: Verifies building of user message with multiple images.
+        Purpose: Ensure all images are included in Kiro format.
+        """
+        print("Setup: User message with multiple images...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Compare these images",
+                images=[
+                    {"media_type": "image/jpeg", "data": "image1_data"},
+                    {"media_type": "image/png", "data": "image2_data"}
+                ]
+            )
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        context = result[0]["userInputMessage"]["userInputMessageContext"]
+        images = context["images"]
+        
+        print(f"Comparing image count: Expected 2, Got {len(images)}")
+        assert len(images) == 2
+        
+        print("Checking first image...")
+        assert images[0]["format"] == "jpeg"
+        assert images[0]["source"]["bytes"] == "image1_data"
+        
+        print("Checking second image...")
+        assert images[1]["format"] == "png"
+        assert images[1]["source"]["bytes"] == "image2_data"
+    
+    def test_builds_user_message_with_images_and_tool_results(self):
+        """
+        What it does: Verifies building of user message with both images and tool_results.
+        Purpose: Ensure both images and toolResults are in userInputMessageContext.
+        """
+        print("Setup: User message with images and tool_results...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Here's the image and tool result",
+                images=[{"media_type": "image/png", "data": "image_data"}],
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_123",
+                    "content": "Tool output"
+                }]
+            )
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        context = result[0]["userInputMessage"]["userInputMessageContext"]
+        
+        print("Checking that both images and toolResults are present...")
+        assert "images" in context
+        assert "toolResults" in context
+        
+        print("Checking images...")
+        assert len(context["images"]) == 1
+        assert context["images"][0]["format"] == "png"
+        
+        print("Checking toolResults...")
+        assert len(context["toolResults"]) == 1
+        assert context["toolResults"][0]["toolUseId"] == "call_123"
+    
+    def test_no_images_context_when_no_images(self):
+        """
+        What it does: Verifies that images key is not added when there are no images.
+        Purpose: Ensure clean payload without empty images array.
+        """
+        print("Setup: User message without images...")
+        messages = [
+            UnifiedMessage(role="user", content="Hello, no images here")
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        user_msg = result[0]["userInputMessage"]
+        
+        print("Checking that images key is not present...")
+        # Either no context at all, or context without images
+        if "userInputMessageContext" in user_msg:
+            context = user_msg["userInputMessageContext"]
+            assert "images" not in context or context.get("images") == []
+        else:
+            print("No userInputMessageContext - OK")
+    
+    def test_builds_user_message_with_webp_image(self):
+        """
+        What it does: Verifies building of user message with WebP image.
+        Purpose: Ensure WebP format is correctly converted to Kiro format.
+        """
+        print("Setup: User message with WebP image...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Analyze this WebP image",
+                images=[{"media_type": "image/webp", "data": "webp_image_data"}]
+            )
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        context = result[0]["userInputMessage"]["userInputMessageContext"]
+        images = context["images"]
+        
+        print("Checking WebP format...")
+        assert len(images) == 1
+        assert images[0]["format"] == "webp"
+        assert images[0]["source"]["bytes"] == "webp_image_data"
+    
+    def test_builds_user_message_with_gif_image(self):
+        """
+        What it does: Verifies building of user message with GIF image.
+        Purpose: Ensure GIF format is correctly converted to Kiro format.
+        """
+        print("Setup: User message with GIF image...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="What's happening in this GIF?",
+                images=[{"media_type": "image/gif", "data": "gif_image_data"}]
+            )
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        context = result[0]["userInputMessage"]["userInputMessageContext"]
+        images = context["images"]
+        
+        print("Checking GIF format...")
+        assert len(images) == 1
+        assert images[0]["format"] == "gif"
+        assert images[0]["source"]["bytes"] == "gif_image_data"
 
 
 # ==================================================================================================
@@ -3405,3 +4205,357 @@ class TestBuildKiroPayloadIssue20:
         for msg in history:
             if "assistantResponseMessage" in msg:
                 assert "toolUses" not in msg["assistantResponseMessage"]
+
+
+# ==================================================================================================
+# Tests for build_kiro_payload with Images (Issue #30)
+# ==================================================================================================
+
+class TestBuildKiroPayloadImages:
+    """
+    Tests for build_kiro_payload function with image content.
+    
+    Issue #30: 422 Validation Error when sending image content blocks.
+    The fix adds support for image content blocks in messages.
+    
+    These tests verify that images are correctly included in the Kiro payload.
+    """
+    
+    def test_includes_images_in_current_message(self):
+        """
+        What it does: Verifies that images are included in the current message.
+        Purpose: Ensure images from the last user message are in the payload.
+        
+        This is a critical test for Issue #30 fix.
+        """
+        print("Setup: User message with image as current message...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="What's in this image?",
+                images=[{"media_type": "image/jpeg", "data": TEST_IMAGE_BASE64}]
+            )
+        ]
+        
+        print("Action: Building Kiro payload...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="You are a helpful assistant.",
+            model_id="claude-sonnet-4",
+            tools=None,
+            conversation_id="test-conv-123",
+            profile_arn="arn:aws:codewhisperer:us-east-1:123456789:profile/test",
+            inject_thinking=False
+        )
+        
+        print(f"Result payload keys: {result.payload.keys()}")
+        print("Checking that payload was built successfully...")
+        assert "conversationState" in result.payload
+        
+        current_msg = result.payload["conversationState"]["currentMessage"]["userInputMessage"]
+        print(f"Current message: {current_msg}")
+        
+        print("Checking that userInputMessageContext exists...")
+        assert "userInputMessageContext" in current_msg
+        
+        context = current_msg["userInputMessageContext"]
+        print("Checking that images are in context...")
+        assert "images" in context
+        
+        images = context["images"]
+        print(f"Images: {images}")
+        assert len(images) == 1
+        
+        print("Checking image format (Kiro format)...")
+        assert images[0]["format"] == "jpeg"
+        assert images[0]["source"]["bytes"] == TEST_IMAGE_BASE64
+    
+    def test_includes_multiple_images_in_current_message(self):
+        """
+        What it does: Verifies that multiple images are included in the current message.
+        Purpose: Ensure all images from the last user message are in the payload.
+        """
+        print("Setup: User message with multiple images...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Compare these images",
+                images=[
+                    {"media_type": "image/jpeg", "data": "image1_data"},
+                    {"media_type": "image/png", "data": "image2_data"},
+                    {"media_type": "image/gif", "data": "image3_data"}
+                ]
+            )
+        ]
+        
+        print("Action: Building Kiro payload...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4",
+            tools=None,
+            conversation_id="test-conv",
+            profile_arn="arn:test",
+            inject_thinking=False
+        )
+        
+        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
+        images = context["images"]
+        
+        print(f"Comparing image count: Expected 3, Got {len(images)}")
+        assert len(images) == 3
+        
+        print("Checking image formats...")
+        assert images[0]["format"] == "jpeg"
+        assert images[1]["format"] == "png"
+        assert images[2]["format"] == "gif"
+    
+    def test_includes_images_in_history(self):
+        """
+        What it does: Verifies that images are included in history messages.
+        Purpose: Ensure images from previous user messages are preserved in history.
+        """
+        print("Setup: Conversation with images in history...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="What's in this image?",
+                images=[{"media_type": "image/jpeg", "data": "history_image_data"}]
+            ),
+            UnifiedMessage(role="assistant", content="I see a cat in the image."),
+            UnifiedMessage(role="user", content="What color is the cat?")
+        ]
+        
+        print("Action: Building Kiro payload...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4",
+            tools=None,
+            conversation_id="test-conv",
+            profile_arn="arn:test",
+            inject_thinking=False
+        )
+        
+        print("Checking history...")
+        history = result.payload["conversationState"]["history"]
+        print(f"History length: {len(history)}")
+        assert len(history) >= 1
+        
+        print("Checking that first history message has images...")
+        first_msg = history[0]["userInputMessage"]
+        assert "userInputMessageContext" in first_msg
+        context = first_msg["userInputMessageContext"]
+        assert "images" in context
+        
+        images = context["images"]
+        print(f"History images: {images}")
+        assert len(images) == 1
+        assert images[0]["format"] == "jpeg"
+        assert images[0]["source"]["bytes"] == "history_image_data"
+    
+    def test_images_with_tools(self):
+        """
+        What it does: Verifies that images work correctly with tools.
+        Purpose: Ensure images and tools can coexist in the same request.
+        """
+        print("Setup: User message with image and tools defined...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Analyze this image and use tools if needed",
+                images=[{"media_type": "image/png", "data": "image_with_tools_data"}]
+            )
+        ]
+        
+        tools = [UnifiedTool(
+            name="analyze_image",
+            description="Analyze an image",
+            input_schema={"type": "object", "properties": {}}
+        )]
+        
+        print("Action: Building Kiro payload with tools...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4",
+            tools=tools,
+            conversation_id="test-conv",
+            profile_arn="arn:test",
+            inject_thinking=False
+        )
+        
+        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
+        
+        print("Checking that both images and tools are present...")
+        assert "images" in context
+        assert "tools" in context
+        
+        print("Checking images...")
+        assert len(context["images"]) == 1
+        assert context["images"][0]["format"] == "png"
+        
+        print("Checking tools...")
+        assert len(context["tools"]) == 1
+        assert context["tools"][0]["toolSpecification"]["name"] == "analyze_image"
+    
+    def test_images_with_tool_results(self):
+        """
+        What it does: Verifies that images work correctly with tool results.
+        Purpose: Ensure images and tool_results can coexist in the same message.
+        """
+        print("Setup: User message with image and tool_results...")
+        messages = [
+            UnifiedMessage(role="user", content="Call a tool"),
+            UnifiedMessage(
+                role="assistant",
+                content="",
+                tool_calls=[{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "get_data", "arguments": "{}"}
+                }]
+            ),
+            UnifiedMessage(
+                role="user",
+                content="Here's the result and an image",
+                images=[{"media_type": "image/jpeg", "data": "image_with_result_data"}],
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_123",
+                    "content": "Tool output"
+                }]
+            )
+        ]
+        
+        tools = [UnifiedTool(
+            name="get_data",
+            description="Get data",
+            input_schema={"type": "object", "properties": {}}
+        )]
+        
+        print("Action: Building Kiro payload...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4",
+            tools=tools,
+            conversation_id="test-conv",
+            profile_arn="arn:test",
+            inject_thinking=False
+        )
+        
+        # The last user message becomes current message
+        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
+        
+        print("Checking that both images and toolResults are present...")
+        assert "images" in context
+        assert "toolResults" in context
+        
+        print("Checking images...")
+        assert len(context["images"]) == 1
+        assert context["images"][0]["format"] == "jpeg"
+        
+        print("Checking toolResults...")
+        assert len(context["toolResults"]) == 1
+    
+    def test_no_images_when_none_provided(self):
+        """
+        What it does: Verifies that images key is not added when no images are provided.
+        Purpose: Ensure clean payload without unnecessary empty arrays.
+        """
+        print("Setup: User message without images...")
+        messages = [
+            UnifiedMessage(role="user", content="Hello, no images here")
+        ]
+        
+        print("Action: Building Kiro payload...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4",
+            tools=None,
+            conversation_id="test-conv",
+            profile_arn="arn:test",
+            inject_thinking=False
+        )
+        
+        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"].get("userInputMessageContext", {})
+        
+        print("Checking that images key is not present or empty...")
+        # Either no images key, or empty images array
+        if "images" in context:
+            assert context["images"] == [], "Images should be empty when none provided"
+        else:
+            print("No images key - OK")
+    
+    def test_large_image_data_preserved(self):
+        """
+        What it does: Verifies that large image data is preserved without truncation.
+        Purpose: Ensure large images are not corrupted during conversion.
+        """
+        print("Setup: User message with large image data...")
+        large_image_data = "A" * 500000  # 500KB of data
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Analyze this large image",
+                images=[{"media_type": "image/png", "data": large_image_data}]
+            )
+        ]
+        
+        print("Action: Building Kiro payload...")
+        result = build_kiro_payload(
+            messages=messages,
+            system_prompt="",
+            model_id="claude-sonnet-4",
+            tools=None,
+            conversation_id="test-conv",
+            profile_arn="arn:test",
+            inject_thinking=False
+        )
+        
+        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
+        images = context["images"]
+        
+        print(f"Checking image data length: Expected 500000, Got {len(images[0]['source']['bytes'])}")
+        assert len(images[0]["source"]["bytes"]) == 500000
+        assert images[0]["source"]["bytes"] == large_image_data
+    
+    def test_images_with_thinking_injection(self):
+        """
+        What it does: Verifies that images work correctly with thinking injection.
+        Purpose: Ensure images are preserved when fake reasoning is enabled.
+        """
+        print("Setup: User message with image and thinking injection...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="What's in this image?",
+                images=[{"media_type": "image/jpeg", "data": "thinking_test_image"}]
+            )
+        ]
+        
+        print("Action: Building Kiro payload with thinking injection...")
+        with patch('kiro.converters_core.FAKE_REASONING_ENABLED', True):
+            with patch('kiro.converters_core.FAKE_REASONING_MAX_TOKENS', 4000):
+                result = build_kiro_payload(
+                    messages=messages,
+                    system_prompt="",
+                    model_id="claude-sonnet-4",
+                    tools=None,
+                    conversation_id="test-conv",
+                    profile_arn="arn:test",
+                    inject_thinking=True
+                )
+        
+        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
+        
+        print("Checking that images are still present...")
+        assert "images" in context
+        assert len(context["images"]) == 1
+        assert context["images"][0]["source"]["bytes"] == "thinking_test_image"
+        
+        print("Checking that thinking tags were injected in content...")
+        content = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["content"]
+        assert "<thinking_mode>" in content

@@ -86,8 +86,56 @@ class ToolResultContentBlock(BaseModel):
     is_error: Optional[bool] = None
 
 
-# Union type for all content blocks
-ContentBlock = Union[TextContentBlock, ToolUseContentBlock, ToolResultContentBlock]
+# ==================================================================================================
+# Image Content Block Models
+# ==================================================================================================
+
+class Base64ImageSource(BaseModel):
+    """
+    Base64-encoded image source in Anthropic format.
+    
+    Attributes:
+        type: Always "base64"
+        media_type: MIME type (e.g., "image/jpeg", "image/png", "image/gif", "image/webp")
+        data: Base64-encoded image data
+    """
+    type: Literal["base64"] = "base64"
+    media_type: str
+    data: str
+
+
+class URLImageSource(BaseModel):
+    """
+    URL-based image source in Anthropic format.
+    
+    Note: URL images require fetching and converting to base64 for Kiro API.
+    Currently logged as warning and skipped.
+    
+    Attributes:
+        type: Always "url"
+        url: HTTP(S) URL to the image
+    """
+    type: Literal["url"] = "url"
+    url: str
+
+
+class ImageContentBlock(BaseModel):
+    """
+    Image content block in Anthropic format.
+    
+    Represents an image in a message. Supports both base64-encoded
+    images and URL references.
+    
+    Attributes:
+        type: Always "image"
+        source: Image source (base64 or URL)
+    """
+    type: Literal["image"] = "image"
+    source: Union[Base64ImageSource, URLImageSource]
+
+
+# Union type for all content blocks (including images)
+ContentBlock = Union[TextContentBlock, ImageContentBlock, ToolUseContentBlock, ToolResultContentBlock]
 
 
 # ==================================================================================================
