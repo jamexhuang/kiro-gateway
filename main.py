@@ -77,6 +77,7 @@ from kiro.model_resolver import ModelResolver
 from kiro.routes_openai import router as openai_router
 from kiro.routes_anthropic import router as anthropic_router
 from kiro.exceptions import validation_exception_handler
+from kiro.debug_middleware import DebugLoggerMiddleware
 
 
 # --- Loguru Configuration ---
@@ -402,6 +403,12 @@ app.add_middleware(
     allow_methods=["*"],  # Allow all methods (GET, POST, OPTIONS, etc.)
     allow_headers=["*"],  # Allow all headers
 )
+
+
+# --- Debug Logger Middleware ---
+# Initializes debug logging BEFORE Pydantic validation
+# This allows capturing validation errors (422) in debug logs
+app.add_middleware(DebugLoggerMiddleware)
 
 
 # --- Validation Error Handler Registration ---

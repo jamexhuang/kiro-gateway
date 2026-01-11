@@ -79,6 +79,8 @@ tests/
 │   ├── test_converters_core.py     # Shared conversion logic tests (UnifiedMessage, merging, etc.)
 │   ├── test_converters_openai.py   # OpenAI Chat API → Kiro converter tests
 │   ├── test_debug_logger.py        # DebugLogger tests (off/errors/all modes)
+│   ├── test_debug_middleware.py    # DebugLoggerMiddleware tests (endpoint filtering, mode handling)
+│   ├── test_exceptions.py          # Exception handlers tests (validation_exception_handler, sanitize_validation_errors)
 │   ├── test_http_client.py         # KiroHttpClient tests
 │   ├── test_main_cli.py            # CLI argument parsing tests (--host, --port)
 │   ├── test_model_resolver.py      # Dynamic Model Resolution System tests

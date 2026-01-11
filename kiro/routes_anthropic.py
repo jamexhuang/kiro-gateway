@@ -149,17 +149,8 @@ async def messages(
     auth_manager: KiroAuthManager = request.app.state.auth_manager
     model_cache: ModelInfoCache = request.app.state.model_cache
     
-    # Prepare debug logs
-    if debug_logger:
-        debug_logger.prepare_new_request()
-    
-    # Log incoming request
-    try:
-        request_body = json.dumps(request_data.model_dump(), ensure_ascii=False, indent=2).encode('utf-8')
-        if debug_logger:
-            debug_logger.log_request_body(request_body)
-    except Exception as e:
-        logger.warning(f"Failed to log request body: {e}")
+    # Note: prepare_new_request() and log_request_body() are now called by DebugLoggerMiddleware
+    # This ensures debug logging works even for requests that fail Pydantic validation (422 errors)
     
     # Generate conversation ID
     conversation_id = generate_conversation_id()

@@ -70,6 +70,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     
     Logs error details and returns an informative response.
     Correctly handles bytes objects in errors by converting them to strings.
+    Also flushes debug logs for validation errors when DEBUG_MODE is enabled.
     
     Args:
         request: FastAPI Request object
@@ -85,7 +86,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     sanitized_errors = sanitize_validation_errors(exc.errors())
     
     logger.error(f"Validation error (422): {sanitized_errors}")
-    logger.error(f"Request body: {body_str[:500]}...")
+    # Log body at DEBUG level to avoid cluttering console with potentially large payloads
+    logger.debug(f"Request body: {body_str[:500]}...")
+    
+    # Flush debug logs for validation errors
+    # This is called AFTER middleware has initialized debug logging,
+    # so all app logs during request processing will be captured
+    try:
+        from kiro.debug_logger import debug_logger
+        if debug_logger:
+            error_message = f"Validation error: {sanitized_errors}"
+            debug_logger.flush_on_error(422, error_message)
+    except ImportError:
+        pass  # debug_logger not available
     
     return JSONResponse(
         status_code=422,
