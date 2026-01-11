@@ -9,12 +9,29 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
+[![Sponsor](https://img.shields.io/badge/💖_Sponsor-Support_Development-ff69b4)](https://app.lava.top/jwadow)
 
 *Use Claude models through any OpenAI or Anthropic compatible tool*
 
-[Features](#-features) • [Quick Start](#-quick-start) • [Configuration](#%EF%B8%8F-configuration) • [API Reference](#-api-reference) • [License](#-license)
+[Models](#-supported-models) • [Features](#-features) • [Quick Start](#-quick-start) • [Configuration](#%EF%B8%8F-configuration) • [💖 Sponsor](#-support-the-project)
 
 </div>
+
+---
+
+## 🤖 Supported Models
+
+🧠 **Claude Opus 4.5** — The most powerful model. Best for complex reasoning, deep analysis, and research tasks.
+
+🚀 **Claude Sonnet 4.5** — Balanced performance. Great for coding, writing, and general-purpose tasks.
+
+⚡ **Claude Haiku 4.5** — Lightning fast. Perfect for quick responses, simple tasks, and chat.
+
+📦 **Claude Sonnet 4** — Previous generation. Still powerful and reliable for most use cases.
+
+📦 **Claude 3.7 Sonnet** — Legacy model. Available for backward compatibility.
+
+> 💡 **Smart Model Resolution:** Use any model name format — `claude-sonnet-4-5`, `claude-sonnet-4.5`, or even versioned names like `claude-sonnet-4-5-20250929`. The gateway normalizes them automatically.
 
 ---
 
@@ -225,21 +242,6 @@ If you need to manually extract the refresh token (e.g., for debugging), you can
 | `/v1/models` | GET | List available models |
 | `/v1/chat/completions` | POST | OpenAI Chat Completions API |
 | `/v1/messages` | POST | Anthropic Messages API |
-
-### Available Models
-
-Kiro Gateway supports the following Claude models:
-
-**🚀 Latest Models**
-- **Claude Opus 4.5** — Most powerful model, best for complex reasoning and analysis
-- **Claude Sonnet 4.5** — Balanced model, great for general-purpose tasks
-- **Claude Haiku 4.5** — Fast and lightweight, perfect for quick responses
-
-**📦 Additional Models**
-- **Claude Sonnet 4** — Previous generation, still powerful and reliable
-- **Claude 3.7 Sonnet** — Legacy model, available for compatibility
-
-> **Note:** The gateway automatically handles model name variations. You can use either the base model name (e.g., `claude-sonnet-4-5`) or versioned variants (e.g., `claude-sonnet-4-5-20250929`). The gateway will normalize them automatically.
 
 ---
 
