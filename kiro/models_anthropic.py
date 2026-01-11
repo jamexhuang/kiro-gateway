@@ -134,8 +134,14 @@ class ImageContentBlock(BaseModel):
     source: Union[Base64ImageSource, URLImageSource]
 
 
-# Union type for all content blocks (including images)
-ContentBlock = Union[TextContentBlock, ImageContentBlock, ToolUseContentBlock, ToolResultContentBlock]
+# Union type for all content blocks (including images and thinking)
+ContentBlock = Union[
+    TextContentBlock,
+    ThinkingContentBlock,
+    ImageContentBlock,
+    ToolUseContentBlock,
+    ToolResultContentBlock,
+]
 
 
 # ==================================================================================================
