@@ -506,11 +506,17 @@ def convert_images_to_kiro_format(images: Optional[List[Dict[str, Any]]]) -> Lis
     Unified format: [{"media_type": "image/jpeg", "data": "base64..."}]
     Kiro format: [{"format": "jpeg", "source": {"bytes": "base64..."}}]
     
+    IMPORTANT: Images must be placed directly in userInputMessage.images,
+    NOT in userInputMessageContext.images. This matches the native Kiro IDE format.
+    
+    Also handles the case where data contains a full data URL (data:image/jpeg;base64,...)
+    by stripping the prefix and extracting pure base64.
+    
     Args:
         images: List of images in unified format
     
     Returns:
-        List of images in Kiro format, ready for userInputMessageContext.images
+        List of images in Kiro format, ready for userInputMessage.images
     
     Example:
         >>> convert_images_to_kiro_format([{"media_type": "image/png", "data": "abc123"}])
@@ -527,6 +533,21 @@ def convert_images_to_kiro_format(images: Optional[List[Dict[str, Any]]]) -> Lis
         if not data:
             logger.warning("Skipping image with empty data")
             continue
+        
+        # Strip data URL prefix if present (some clients send "data:image/jpeg;base64,..." in data field)
+        # Kiro API expects pure base64 without the prefix
+        if data.startswith("data:"):
+            try:
+                header, actual_data = data.split(",", 1)
+                # Extract media type from header if present
+                media_part = header.split(";")[0]  # "data:image/jpeg"
+                extracted_media_type = media_part.replace("data:", "")
+                if extracted_media_type:
+                    media_type = extracted_media_type
+                data = actual_data
+                logger.debug(f"Stripped data URL prefix, extracted media_type: {media_type}")
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Failed to parse data URL prefix: {e}")
         
         # Extract format from media_type: "image/jpeg" -> "jpeg"
         format_str = media_type.split("/")[-1] if "/" in media_type else media_type
@@ -1010,15 +1031,17 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
                 "origin": "AI_EDITOR",
             }
             
-            # Build userInputMessageContext for tools and images
-            user_input_context: Dict[str, Any] = {}
-            
             # Process images - extract from message or content
+            # IMPORTANT: images go directly into userInputMessage, NOT into userInputMessageContext
+            # This matches the native Kiro IDE format
             images = msg.images or extract_images_from_content(msg.content)
             if images:
                 kiro_images = convert_images_to_kiro_format(images)
                 if kiro_images:
-                    user_input_context["images"] = kiro_images
+                    user_input["images"] = kiro_images
+            
+            # Build userInputMessageContext for tools and toolResults only
+            user_input_context: Dict[str, Any] = {}
             
             # Process tool_results - convert to Kiro format if present
             if msg.tool_results:
@@ -1031,7 +1054,7 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
                 if tool_results:
                     user_input_context["toolResults"] = tool_results
             
-            # Add context if not empty
+            # Add context if not empty (contains toolResults only, not images)
             if user_input_context:
                 user_input["userInputMessageContext"] = user_input_context
             
@@ -1154,21 +1177,23 @@ def build_kiro_payload(
     if not current_content:
         current_content = "Continue"
     
-    # Build user_input_context
+    # Process images in current message - extract from message or content
+    # IMPORTANT: images go directly into userInputMessage, NOT into userInputMessageContext
+    # This matches the native Kiro IDE format
+    images = current_message.images or extract_images_from_content(current_message.content)
+    kiro_images = None
+    if images:
+        kiro_images = convert_images_to_kiro_format(images)
+        if kiro_images:
+            logger.debug(f"Added {len(kiro_images)} image(s) to current message")
+    
+    # Build user_input_context for tools and toolResults only (NOT images)
     user_input_context: Dict[str, Any] = {}
     
     # Add tools if present
     kiro_tools = convert_tools_to_kiro_format(processed_tools)
     if kiro_tools:
         user_input_context["tools"] = kiro_tools
-    
-    # Process images in current message - extract from message or content
-    images = current_message.images or extract_images_from_content(current_message.content)
-    if images:
-        kiro_images = convert_images_to_kiro_format(images)
-        if kiro_images:
-            user_input_context["images"] = kiro_images
-            logger.debug(f"Added {len(kiro_images)} image(s) to current message")
     
     # Process tool_results in current message - convert to Kiro format if present
     if current_message.tool_results:
@@ -1193,7 +1218,11 @@ def build_kiro_payload(
         "origin": "AI_EDITOR",
     }
     
-    # Add user_input_context if present
+    # Add images directly to userInputMessage (NOT to userInputMessageContext)
+    if kiro_images:
+        user_input_message["images"] = kiro_images
+    
+    # Add user_input_context if present (contains tools and toolResults only)
     if user_input_context:
         user_input_message["userInputMessageContext"] = user_input_context
     

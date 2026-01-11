@@ -772,6 +772,149 @@ class TestConvertImagesToKiroFormat:
         
         print(f"Result data length: {len(result[0]['source']['bytes'])}")
         assert len(result[0]["source"]["bytes"]) == 100000
+    
+    # ==================================================================================
+    # Data URL Prefix Stripping Tests (Issue #32 fix)
+    # ==================================================================================
+    
+    def test_strips_data_url_prefix_jpeg(self):
+        """
+        What it does: Verifies that data URL prefix is stripped from JPEG image data.
+        Purpose: Ensure Kiro API receives pure base64 without the data URL prefix (Issue #32 fix).
+        
+        Some clients send the full data URL in the data field instead of pure base64.
+        Kiro API expects pure base64 without the "data:image/jpeg;base64," prefix.
+        """
+        print("Setup: Image with data URL prefix (JPEG)...")
+        pure_base64 = "/9j/4AAQSkZJRg=="  # Sample JPEG base64
+        images = [{"media_type": "image/jpeg", "data": f"data:image/jpeg;base64,{pure_base64}"}]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        print(f"Comparing bytes: Expected '{pure_base64}', Got '{result[0]['source']['bytes']}'")
+        assert result[0]["source"]["bytes"] == pure_base64
+        assert result[0]["format"] == "jpeg"
+    
+    def test_strips_data_url_prefix_png(self):
+        """
+        What it does: Verifies that data URL prefix is stripped from PNG image data.
+        Purpose: Ensure PNG images with data URL prefix are handled correctly (Issue #32 fix).
+        """
+        print("Setup: Image with data URL prefix (PNG)...")
+        pure_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        images = [{"media_type": "image/png", "data": f"data:image/png;base64,{pure_base64}"}]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        print(f"Comparing bytes: Expected pure base64, Got '{result[0]['source']['bytes'][:50]}...'")
+        assert result[0]["source"]["bytes"] == pure_base64
+        assert result[0]["format"] == "png"
+    
+    def test_extracts_media_type_from_data_url(self):
+        """
+        What it does: Verifies that media_type is extracted from data URL header.
+        Purpose: Ensure media_type from data URL overrides the original media_type (Issue #32 fix).
+        
+        When data URL contains media type info, it should be used instead of the
+        original media_type field (which might be incorrect or generic).
+        """
+        print("Setup: Image with mismatched media_type and data URL...")
+        pure_base64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"  # GIF
+        # Original media_type says jpeg, but data URL says gif
+        images = [{"media_type": "image/jpeg", "data": f"data:image/gif;base64,{pure_base64}"}]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        print("Checking that media_type from data URL is used...")
+        assert result[0]["format"] == "gif"  # Should use gif from data URL, not jpeg
+        assert result[0]["source"]["bytes"] == pure_base64
+    
+    def test_handles_malformed_data_url_no_comma(self):
+        """
+        What it does: Verifies graceful handling of malformed data URL without comma.
+        Purpose: Ensure function doesn't crash on malformed data URLs (Issue #32 fix).
+        
+        If data URL is malformed (no comma separator), the function should
+        log a warning and use the original data as-is.
+        """
+        print("Setup: Malformed data URL without comma...")
+        malformed_data = "data:image/jpeg;base64_without_comma"
+        images = [{"media_type": "image/jpeg", "data": malformed_data}]
+        
+        print("Action: Converting to Kiro format (should handle gracefully)...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        # The function should still produce output, using the malformed data as-is
+        # (since split(",", 1) will fail and the except block will catch it)
+        assert len(result) == 1
+        # After the fix, malformed data URL should be preserved as-is
+        assert result[0]["source"]["bytes"] == malformed_data
+    
+    def test_preserves_pure_base64_data(self):
+        """
+        What it does: Verifies that pure base64 data (without prefix) is preserved.
+        Purpose: Ensure normal base64 data is not modified (Issue #32 fix).
+        
+        When data is already pure base64 (doesn't start with "data:"),
+        it should be passed through unchanged.
+        """
+        print("Setup: Pure base64 data without prefix...")
+        pure_base64 = TEST_IMAGE_BASE64
+        images = [{"media_type": "image/jpeg", "data": pure_base64}]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        print("Checking that pure base64 is preserved unchanged...")
+        assert result[0]["source"]["bytes"] == pure_base64
+        assert result[0]["format"] == "jpeg"
+    
+    def test_strips_data_url_prefix_webp(self):
+        """
+        What it does: Verifies that data URL prefix is stripped from WebP image data.
+        Purpose: Ensure WebP images with data URL prefix are handled correctly (Issue #32 fix).
+        """
+        print("Setup: Image with data URL prefix (WebP)...")
+        pure_base64 = "UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA="
+        images = [{"media_type": "image/webp", "data": f"data:image/webp;base64,{pure_base64}"}]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        assert result[0]["source"]["bytes"] == pure_base64
+        assert result[0]["format"] == "webp"
+    
+    def test_handles_data_url_with_empty_base64(self):
+        """
+        What it does: Verifies handling of data URL with empty base64 part.
+        Purpose: Ensure empty data after prefix is handled correctly (Issue #32 fix).
+        
+        Note: The function strips the prefix but doesn't re-check for empty data after stripping.
+        This means an image with "data:image/jpeg;base64," will result in empty bytes.
+        This is acceptable behavior as Kiro API will handle the validation.
+        """
+        print("Setup: Data URL with empty base64 part...")
+        images = [{"media_type": "image/jpeg", "data": "data:image/jpeg;base64,"}]
+        
+        print("Action: Converting to Kiro format...")
+        result = convert_images_to_kiro_format(images)
+        
+        print(f"Result: {result}")
+        print("Checking that image is converted (with empty bytes)...")
+        # The function strips the prefix but doesn't re-check for empty data
+        # This results in an image with empty bytes
+        assert len(result) == 1
+        assert result[0]["source"]["bytes"] == ""
+        assert result[0]["format"] == "jpeg"
 
 
 # ==================================================================================================
@@ -2811,9 +2954,10 @@ class TestBuildKiroHistory:
     def test_builds_user_message_with_images(self):
         """
         What it does: Verifies building of user message with images.
-        Purpose: Ensure images are included in userInputMessageContext.images.
+        Purpose: Ensure images are included directly in userInputMessage.images (Issue #32 fix).
         
-        This is a critical test for Issue #30 fix - images should be in Kiro format.
+        This is a critical test for Issue #30/#32 fix - images should be in Kiro format
+        and placed directly in userInputMessage, NOT in userInputMessageContext.
         """
         print("Setup: User message with images...")
         messages = [
@@ -2834,15 +2978,11 @@ class TestBuildKiroHistory:
         user_msg = result[0]["userInputMessage"]
         print(f"User message: {user_msg}")
         
-        print("Checking that userInputMessageContext exists...")
-        assert "userInputMessageContext" in user_msg
-        
-        print("Checking that images are in context...")
-        context = user_msg["userInputMessageContext"]
-        assert "images" in context
+        print("Checking that images are directly in userInputMessage (Issue #32 fix)...")
+        assert "images" in user_msg
         
         print("Checking image format (Kiro format)...")
-        images = context["images"]
+        images = user_msg["images"]
         assert len(images) == 1
         assert images[0]["format"] == "jpeg"
         assert images[0]["source"]["bytes"] == TEST_IMAGE_BASE64
@@ -2850,7 +2990,7 @@ class TestBuildKiroHistory:
     def test_builds_user_message_with_multiple_images(self):
         """
         What it does: Verifies building of user message with multiple images.
-        Purpose: Ensure all images are included in Kiro format.
+        Purpose: Ensure all images are included directly in userInputMessage (Issue #32 fix).
         """
         print("Setup: User message with multiple images...")
         messages = [
@@ -2868,8 +3008,8 @@ class TestBuildKiroHistory:
         result = build_kiro_history(messages, "claude-sonnet-4")
         
         print(f"Result: {result}")
-        context = result[0]["userInputMessage"]["userInputMessageContext"]
-        images = context["images"]
+        user_msg = result[0]["userInputMessage"]
+        images = user_msg["images"]
         
         print(f"Comparing image count: Expected 2, Got {len(images)}")
         assert len(images) == 2
@@ -2885,7 +3025,7 @@ class TestBuildKiroHistory:
     def test_builds_user_message_with_images_and_tool_results(self):
         """
         What it does: Verifies building of user message with both images and tool_results.
-        Purpose: Ensure both images and toolResults are in userInputMessageContext.
+        Purpose: Ensure images are in userInputMessage and toolResults are in userInputMessageContext (Issue #32 fix).
         """
         print("Setup: User message with images and tool_results...")
         messages = [
@@ -2905,15 +3045,18 @@ class TestBuildKiroHistory:
         result = build_kiro_history(messages, "claude-sonnet-4")
         
         print(f"Result: {result}")
-        context = result[0]["userInputMessage"]["userInputMessageContext"]
+        user_msg = result[0]["userInputMessage"]
+        context = user_msg.get("userInputMessageContext", {})
         
-        print("Checking that both images and toolResults are present...")
-        assert "images" in context
+        print("Checking that images are directly in userInputMessage (Issue #32 fix)...")
+        assert "images" in user_msg
+        
+        print("Checking that toolResults are in userInputMessageContext...")
         assert "toolResults" in context
         
         print("Checking images...")
-        assert len(context["images"]) == 1
-        assert context["images"][0]["format"] == "png"
+        assert len(user_msg["images"]) == 1
+        assert user_msg["images"][0]["format"] == "png"
         
         print("Checking toolResults...")
         assert len(context["toolResults"]) == 1
@@ -2946,7 +3089,7 @@ class TestBuildKiroHistory:
     def test_builds_user_message_with_webp_image(self):
         """
         What it does: Verifies building of user message with WebP image.
-        Purpose: Ensure WebP format is correctly converted to Kiro format.
+        Purpose: Ensure WebP format is correctly converted to Kiro format in userInputMessage (Issue #32 fix).
         """
         print("Setup: User message with WebP image...")
         messages = [
@@ -2961,8 +3104,8 @@ class TestBuildKiroHistory:
         result = build_kiro_history(messages, "claude-sonnet-4")
         
         print(f"Result: {result}")
-        context = result[0]["userInputMessage"]["userInputMessageContext"]
-        images = context["images"]
+        user_msg = result[0]["userInputMessage"]
+        images = user_msg["images"]
         
         print("Checking WebP format...")
         assert len(images) == 1
@@ -2972,7 +3115,7 @@ class TestBuildKiroHistory:
     def test_builds_user_message_with_gif_image(self):
         """
         What it does: Verifies building of user message with GIF image.
-        Purpose: Ensure GIF format is correctly converted to Kiro format.
+        Purpose: Ensure GIF format is correctly converted to Kiro format in userInputMessage (Issue #32 fix).
         """
         print("Setup: User message with GIF image...")
         messages = [
@@ -2987,8 +3130,8 @@ class TestBuildKiroHistory:
         result = build_kiro_history(messages, "claude-sonnet-4")
         
         print(f"Result: {result}")
-        context = result[0]["userInputMessage"]["userInputMessageContext"]
-        images = context["images"]
+        user_msg = result[0]["userInputMessage"]
+        images = user_msg["images"]
         
         print("Checking GIF format...")
         assert len(images) == 1
@@ -4224,9 +4367,9 @@ class TestBuildKiroPayloadImages:
     def test_includes_images_in_current_message(self):
         """
         What it does: Verifies that images are included in the current message.
-        Purpose: Ensure images from the last user message are in the payload.
+        Purpose: Ensure images from the last user message are directly in userInputMessage (Issue #32 fix).
         
-        This is a critical test for Issue #30 fix.
+        This is a critical test for Issue #30/#32 fix - images should be in userInputMessage, NOT in userInputMessageContext.
         """
         print("Setup: User message with image as current message...")
         messages = [
@@ -4255,14 +4398,10 @@ class TestBuildKiroPayloadImages:
         current_msg = result.payload["conversationState"]["currentMessage"]["userInputMessage"]
         print(f"Current message: {current_msg}")
         
-        print("Checking that userInputMessageContext exists...")
-        assert "userInputMessageContext" in current_msg
+        print("Checking that images are directly in userInputMessage (Issue #32 fix)...")
+        assert "images" in current_msg
         
-        context = current_msg["userInputMessageContext"]
-        print("Checking that images are in context...")
-        assert "images" in context
-        
-        images = context["images"]
+        images = current_msg["images"]
         print(f"Images: {images}")
         assert len(images) == 1
         
@@ -4273,7 +4412,7 @@ class TestBuildKiroPayloadImages:
     def test_includes_multiple_images_in_current_message(self):
         """
         What it does: Verifies that multiple images are included in the current message.
-        Purpose: Ensure all images from the last user message are in the payload.
+        Purpose: Ensure all images from the last user message are directly in userInputMessage (Issue #32 fix).
         """
         print("Setup: User message with multiple images...")
         messages = [
@@ -4299,8 +4438,8 @@ class TestBuildKiroPayloadImages:
             inject_thinking=False
         )
         
-        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
-        images = context["images"]
+        current_msg = result.payload["conversationState"]["currentMessage"]["userInputMessage"]
+        images = current_msg["images"]
         
         print(f"Comparing image count: Expected 3, Got {len(images)}")
         assert len(images) == 3
@@ -4313,7 +4452,7 @@ class TestBuildKiroPayloadImages:
     def test_includes_images_in_history(self):
         """
         What it does: Verifies that images are included in history messages.
-        Purpose: Ensure images from previous user messages are preserved in history.
+        Purpose: Ensure images from previous user messages are directly in userInputMessage (Issue #32 fix).
         """
         print("Setup: Conversation with images in history...")
         messages = [
@@ -4342,13 +4481,11 @@ class TestBuildKiroPayloadImages:
         print(f"History length: {len(history)}")
         assert len(history) >= 1
         
-        print("Checking that first history message has images...")
+        print("Checking that first history message has images directly in userInputMessage (Issue #32 fix)...")
         first_msg = history[0]["userInputMessage"]
-        assert "userInputMessageContext" in first_msg
-        context = first_msg["userInputMessageContext"]
-        assert "images" in context
+        assert "images" in first_msg
         
-        images = context["images"]
+        images = first_msg["images"]
         print(f"History images: {images}")
         assert len(images) == 1
         assert images[0]["format"] == "jpeg"
@@ -4357,7 +4494,7 @@ class TestBuildKiroPayloadImages:
     def test_images_with_tools(self):
         """
         What it does: Verifies that images work correctly with tools.
-        Purpose: Ensure images and tools can coexist in the same request.
+        Purpose: Ensure images are in userInputMessage and tools are in userInputMessageContext (Issue #32 fix).
         """
         print("Setup: User message with image and tools defined...")
         messages = [
@@ -4385,15 +4522,18 @@ class TestBuildKiroPayloadImages:
             inject_thinking=False
         )
         
-        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
+        current_msg = result.payload["conversationState"]["currentMessage"]["userInputMessage"]
+        context = current_msg.get("userInputMessageContext", {})
         
-        print("Checking that both images and tools are present...")
-        assert "images" in context
+        print("Checking that images are directly in userInputMessage (Issue #32 fix)...")
+        assert "images" in current_msg
+        
+        print("Checking that tools are in userInputMessageContext...")
         assert "tools" in context
         
         print("Checking images...")
-        assert len(context["images"]) == 1
-        assert context["images"][0]["format"] == "png"
+        assert len(current_msg["images"]) == 1
+        assert current_msg["images"][0]["format"] == "png"
         
         print("Checking tools...")
         assert len(context["tools"]) == 1
@@ -4402,7 +4542,7 @@ class TestBuildKiroPayloadImages:
     def test_images_with_tool_results(self):
         """
         What it does: Verifies that images work correctly with tool results.
-        Purpose: Ensure images and tool_results can coexist in the same message.
+        Purpose: Ensure images are in userInputMessage and tool_results are in userInputMessageContext (Issue #32 fix).
         """
         print("Setup: User message with image and tool_results...")
         messages = [
@@ -4446,15 +4586,18 @@ class TestBuildKiroPayloadImages:
         )
         
         # The last user message becomes current message
-        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
+        current_msg = result.payload["conversationState"]["currentMessage"]["userInputMessage"]
+        context = current_msg.get("userInputMessageContext", {})
         
-        print("Checking that both images and toolResults are present...")
-        assert "images" in context
+        print("Checking that images are directly in userInputMessage (Issue #32 fix)...")
+        assert "images" in current_msg
+        
+        print("Checking that toolResults are in userInputMessageContext...")
         assert "toolResults" in context
         
         print("Checking images...")
-        assert len(context["images"]) == 1
-        assert context["images"][0]["format"] == "jpeg"
+        assert len(current_msg["images"]) == 1
+        assert current_msg["images"][0]["format"] == "jpeg"
         
         print("Checking toolResults...")
         assert len(context["toolResults"]) == 1
@@ -4492,7 +4635,7 @@ class TestBuildKiroPayloadImages:
     def test_large_image_data_preserved(self):
         """
         What it does: Verifies that large image data is preserved without truncation.
-        Purpose: Ensure large images are not corrupted during conversion.
+        Purpose: Ensure large images are not corrupted during conversion (Issue #32 fix).
         """
         print("Setup: User message with large image data...")
         large_image_data = "A" * 500000  # 500KB of data
@@ -4515,8 +4658,8 @@ class TestBuildKiroPayloadImages:
             inject_thinking=False
         )
         
-        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
-        images = context["images"]
+        current_msg = result.payload["conversationState"]["currentMessage"]["userInputMessage"]
+        images = current_msg["images"]
         
         print(f"Checking image data length: Expected 500000, Got {len(images[0]['source']['bytes'])}")
         assert len(images[0]["source"]["bytes"]) == 500000
@@ -4525,7 +4668,7 @@ class TestBuildKiroPayloadImages:
     def test_images_with_thinking_injection(self):
         """
         What it does: Verifies that images work correctly with thinking injection.
-        Purpose: Ensure images are preserved when fake reasoning is enabled.
+        Purpose: Ensure images are preserved in userInputMessage when fake reasoning is enabled (Issue #32 fix).
         """
         print("Setup: User message with image and thinking injection...")
         messages = [
@@ -4549,13 +4692,13 @@ class TestBuildKiroPayloadImages:
                     inject_thinking=True
                 )
         
-        context = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]
+        current_msg = result.payload["conversationState"]["currentMessage"]["userInputMessage"]
         
-        print("Checking that images are still present...")
-        assert "images" in context
-        assert len(context["images"]) == 1
-        assert context["images"][0]["source"]["bytes"] == "thinking_test_image"
+        print("Checking that images are directly in userInputMessage (Issue #32 fix)...")
+        assert "images" in current_msg
+        assert len(current_msg["images"]) == 1
+        assert current_msg["images"][0]["source"]["bytes"] == "thinking_test_image"
         
         print("Checking that thinking tags were injected in content...")
-        content = result.payload["conversationState"]["currentMessage"]["userInputMessage"]["content"]
+        content = current_msg["content"]
         assert "<thinking_mode>" in content
