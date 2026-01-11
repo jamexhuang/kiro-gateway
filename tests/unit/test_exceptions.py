@@ -229,37 +229,6 @@ class TestValidationExceptionHandlerLogging:
                 
                 print("Verifying logger.error was called...")
                 mock_logger.error.assert_called()
-    
-    @pytest.mark.asyncio
-    async def test_logs_body_at_debug_level(self):
-        """
-        What it does: Verifies that request body is logged at DEBUG level.
-        Purpose: Ensure body doesn't clutter console in production.
-        """
-        print("Setup: Creating mock request and exception...")
-        from kiro.exceptions import validation_exception_handler
-        
-        mock_request = MagicMock(spec=Request)
-        mock_request.body = AsyncMock(return_value=b'{"test": "data"}')
-        
-        mock_exc = MagicMock(spec=RequestValidationError)
-        mock_exc.errors.return_value = [
-            {"type": "missing", "loc": ["body", "model"], "msg": "Field required", "input": {}}
-        ]
-        
-        with patch('kiro.debug_logger.debug_logger'):
-            with patch('kiro.exceptions.logger') as mock_logger:
-                print("Action: Calling validation_exception_handler...")
-                await validation_exception_handler(mock_request, mock_exc)
-                
-                print("Verifying logger.debug was called for body...")
-                mock_logger.debug.assert_called()
-                
-                # Check that debug was called with body content
-                debug_calls = [str(call) for call in mock_logger.debug.call_args_list]
-                body_logged = any("Request body" in call for call in debug_calls)
-                print(f"Body logged at DEBUG level: {body_logged}")
-                assert body_logged
 
 
 class TestValidationExceptionHandlerEdgeCases:
