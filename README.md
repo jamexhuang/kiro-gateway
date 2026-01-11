@@ -41,9 +41,10 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 |---------|-------------|
 | 🔌 **OpenAI-compatible API** | Works with any OpenAI-compatible tool |
 | 🔌 **Anthropic-compatible API** | Native `/v1/messages` endpoint |
-| 🧠 **Extended Thinking** | See how the model reasons before answering |
-| 💬 **Full message history** | Passes complete conversation context |
+| 🧠 **Extended Thinking** | Reasoning is exclusive to our project |
+| 👁️ **Vision Support** | Send images to model |
 | 🛠️ **Tool Calling** | Supports function calling |
+| 💬 **Full message history** | Passes complete conversation context |
 | 📡 **Streaming** | Full SSE streaming support |
 | 🔄 **Retry Logic** | Automatic retries on errors (403, 429, 5xx) |
 | 📋 **Extended model list** | Including versioned models |
