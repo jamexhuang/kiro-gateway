@@ -4,6 +4,8 @@
 
 **Proxy gateway for Kiro API (AWS CodeWhisperer)**
 
+[🇷🇺 Русский](docs/ru/README.md) • [🇨🇳 中文](docs/zh/README.md) • [🇪🇸 Español](docs/es/README.md) • [🇮🇩 Indonesia](docs/id/README.md) • [🇧🇷 Português](docs/pt/README.md) • [🇯🇵 日本語](docs/ja/README.md) • [🇻🇳 Tiếng Việt](docs/vi/README.md) • [🇹🇷 Türkçe](docs/tr/README.md) • [🇰🇷 한국어](docs/ko/README.md)
+
 Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
