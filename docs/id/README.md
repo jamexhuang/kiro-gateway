@@ -21,9 +21,9 @@ Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 
 ---
 
-## 🤖 Model yang Didukung
+## 🤖 Model yang Tersedia
 
-🧠 **Claude Opus 4.5** — Model paling kuat. Terbaik untuk penalaran kompleks, analisis mendalam, dan tugas penelitian.
+> ⚠️ **Penting:** Ketersediaan model bergantung pada paket Kiro Anda (gratis/berbayar). Gateway menyediakan akses ke model yang tersedia di IDE atau CLI Anda berdasarkan langganan Anda. Daftar di bawah menunjukkan model yang umumnya tersedia di **paket gratis**.
 
 🚀 **Claude Sonnet 4.5** — Performa seimbang. Bagus untuk coding, menulis, dan tugas umum.
 
@@ -32,6 +32,8 @@ Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 📦 **Claude Sonnet 4** — Generasi sebelumnya. Masih kuat dan andal untuk sebagian besar kasus penggunaan.
 
 📦 **Claude 3.7 Sonnet** — Model lama. Tersedia untuk kompatibilitas mundur.
+
+> 🔒 **Claude Opus 4.5** telah dihapus dari paket gratis pada 17 Januari 2026. Mungkin tersedia di paket berbayar — periksa daftar model di IDE/CLI Anda.
 
 > 💡 **Resolusi Model Cerdas:** Gunakan format nama model apa pun — `claude-sonnet-4-5`, `claude-sonnet-4.5`, atau bahkan nama berversi seperti `claude-sonnet-4-5-20250929`. Gateway akan menormalisasi secara otomatis.
 

@@ -21,9 +21,9 @@
 
 ---
 
-## 🤖 Các Mô hình Được Hỗ trợ
+## 🤖 Các Mô hình Có sẵn
 
-🧠 **Claude Opus 4.5** — Mô hình mạnh nhất. Tốt nhất cho suy luận phức tạp, phân tích sâu và các nhiệm vụ nghiên cứu.
+> ⚠️ **Quan trọng:** Tính khả dụng của mô hình phụ thuộc vào gói Kiro của bạn (miễn phí/trả phí). Cổng cung cấp quyền truy cập vào các mô hình có sẵn trong IDE hoặc CLI của bạn dựa trên đăng ký của bạn. Danh sách dưới đây hiển thị các mô hình thường có sẵn trên **gói miễn phí**.
 
 🚀 **Claude Sonnet 4.5** — Hiệu suất cân bằng. Tuyệt vời cho lập trình, viết lách và các nhiệm vụ đa năng.
 
@@ -32,6 +32,8 @@
 📦 **Claude Sonnet 4** — Thế hệ trước. Vẫn mạnh mẽ và đáng tin cậy cho hầu hết các trường hợp sử dụng.
 
 📦 **Claude 3.7 Sonnet** — Mô hình cũ. Có sẵn để tương thích ngược.
+
+> 🔒 **Claude Opus 4.5** đã bị xóa khỏi gói miễn phí vào ngày 17 tháng 1 năm 2026. Nó có thể có sẵn trên các gói trả phí — kiểm tra danh sách mô hình trong IDE/CLI của bạn.
 
 > 💡 **Phân giải Mô hình Thông minh:** Sử dụng bất kỳ định dạng tên mô hình nào — `claude-sonnet-4-5`, `claude-sonnet-4.5`, hoặc thậm chí tên có phiên bản như `claude-sonnet-4-5-20250929`. Cổng sẽ tự động chuẩn hóa.
 

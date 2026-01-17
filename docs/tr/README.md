@@ -21,9 +21,9 @@
 
 ---
 
-## 🤖 Desteklenen Modeller
+## 🤖 Mevcut Modeller
 
-🧠 **Claude Opus 4.5** — En güçlü model. Karmaşık akıl yürütme, derin analiz ve araştırma görevleri için en iyisi.
+> ⚠️ **Önemli:** Model kullanılabilirliği Kiro planınıza (ücretsiz/ücretli) bağlıdır. Gateway, aboneliğinize göre IDE veya CLI'nizde mevcut olan modellere erişim sağlar. Aşağıdaki liste **ücretsiz planda** yaygın olarak mevcut olan modelleri gösterir.
 
 🚀 **Claude Sonnet 4.5** — Dengeli performans. Kodlama, yazma ve genel amaçlı görevler için harika.
 
@@ -32,6 +32,8 @@
 📦 **Claude Sonnet 4** — Önceki nesil. Çoğu kullanım durumu için hala güçlü ve güvenilir.
 
 📦 **Claude 3.7 Sonnet** — Eski model. Geriye dönük uyumluluk için mevcut.
+
+> 🔒 **Claude Opus 4.5** 17 Ocak 2026'da ücretsiz plandan kaldırıldı. Ücretli planlarda mevcut olabilir — IDE/CLI'nizdeki model listesini kontrol edin.
 
 > 💡 **Akıllı Model Çözümleme:** Herhangi bir model adı formatı kullanın — `claude-sonnet-4-5`, `claude-sonnet-4.5`, hatta `claude-sonnet-4-5-20250929` gibi sürümlü isimler. Gateway otomatik olarak normalleştirir.
 

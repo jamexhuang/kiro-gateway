@@ -21,9 +21,9 @@ Feito com ❤️ por [@Jwadow](https://github.com/jwadow)
 
 ---
 
-## 🤖 Modelos Suportados
+## 🤖 Modelos Disponíveis
 
-🧠 **Claude Opus 4.5** — O modelo mais poderoso. Melhor para raciocínio complexo, análise profunda e tarefas de pesquisa.
+> ⚠️ **Importante:** A disponibilidade de modelos depende do seu plano Kiro (gratuito/pago). O gateway fornece acesso aos modelos disponíveis no seu IDE ou CLI com base na sua assinatura. A lista abaixo mostra os modelos comumente disponíveis no **plano gratuito**.
 
 🚀 **Claude Sonnet 4.5** — Desempenho equilibrado. Ótimo para programação, escrita e tarefas de uso geral.
 
@@ -32,6 +32,8 @@ Feito com ❤️ por [@Jwadow](https://github.com/jwadow)
 📦 **Claude Sonnet 4** — Geração anterior. Ainda poderoso e confiável para a maioria dos casos de uso.
 
 📦 **Claude 3.7 Sonnet** — Modelo legado. Disponível para compatibilidade retroativa.
+
+> 🔒 **Claude Opus 4.5** foi removido do plano gratuito em 17 de janeiro de 2026. Pode estar disponível em planos pagos — verifique a lista de modelos no seu IDE/CLI.
 
 > 💡 **Resolução Inteligente de Modelos:** Use qualquer formato de nome de modelo — `claude-sonnet-4-5`, `claude-sonnet-4.5`, ou até nomes versionados como `claude-sonnet-4-5-20250929`. O gateway normaliza automaticamente.
 
