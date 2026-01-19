@@ -360,6 +360,65 @@ class KiroAuthManager:
         except Exception as e:
             logger.error(f"Error saving credentials: {e}")
     
+    def _save_credentials_to_sqlite(self) -> None:
+        """
+        Saves updated credentials back to SQLite database.
+        
+        This ensures that tokens refreshed by the gateway are persisted
+        and available after gateway restart or for other processes reading
+        the same SQLite database.
+        
+        Updates the auth_kv table with fresh access_token, refresh_token,
+        and expires_at values after successful token refresh.
+        """
+        if not self._sqlite_db:
+            return
+        
+        try:
+            path = Path(self._sqlite_db).expanduser()
+            if not path.exists():
+                logger.warning(f"SQLite database not found for writing: {self._sqlite_db}")
+                return
+            
+            # Use timeout to avoid blocking if database is locked
+            conn = sqlite3.connect(str(path), timeout=5.0)
+            cursor = conn.cursor()
+            
+            # Prepare token data matching the structure from _load_credentials_from_sqlite
+            token_data = {
+                "access_token": self._access_token,
+                "refresh_token": self._refresh_token,
+                "expires_at": self._expires_at.isoformat() if self._expires_at else None,
+                "region": self._sso_region or self._region,
+            }
+            if self._scopes:
+                token_data["scopes"] = self._scopes
+            
+            token_json = json.dumps(token_data)
+            
+            # Try to update kirocli:odic:token first (newer format)
+            cursor.execute(
+                "UPDATE auth_kv SET value = ? WHERE key = ?",
+                (token_json, "kirocli:odic:token")
+            )
+            
+            # If no rows updated, try codewhisperer:odic:token (legacy format)
+            if cursor.rowcount == 0:
+                cursor.execute(
+                    "UPDATE auth_kv SET value = ? WHERE key = ?",
+                    (token_json, "codewhisperer:odic:token")
+                )
+            
+            conn.commit()
+            conn.close()
+            
+            logger.debug(f"Credentials saved to SQLite: {self._sqlite_db}")
+            
+        except sqlite3.Error as e:
+            logger.error(f"SQLite error saving credentials: {e}")
+        except Exception as e:
+            logger.error(f"Error saving credentials to SQLite: {e}")
+    
     def is_token_expiring_soon(self) -> bool:
         """
         Checks if the token is expiring soon.
@@ -463,8 +522,11 @@ class KiroAuthManager:
         
         logger.info(f"Token refreshed via Kiro Desktop Auth, expires: {self._expires_at.isoformat()}")
         
-        # Save to file
-        self._save_credentials_to_file()
+        # Save to file or SQLite depending on configuration
+        if self._sqlite_db:
+            self._save_credentials_to_sqlite()
+        else:
+            self._save_credentials_to_file()
     
     async def _refresh_token_aws_sso_oidc(self) -> None:
         """
@@ -579,8 +641,11 @@ class KiroAuthManager:
         
         logger.info(f"Token refreshed via AWS SSO OIDC, expires: {self._expires_at.isoformat()}")
         
-        # Save to file
-        self._save_credentials_to_file()
+        # Save to file or SQLite depending on configuration
+        if self._sqlite_db:
+            self._save_credentials_to_sqlite()
+        else:
+            self._save_credentials_to_file()
     
     async def get_access_token(self) -> str:
         """
