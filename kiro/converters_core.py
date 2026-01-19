@@ -460,6 +460,48 @@ def process_tools_with_long_descriptions(
     return processed_tools if processed_tools else None, tool_documentation
 
 
+def validate_tool_names(tools: Optional[List[UnifiedTool]]) -> None:
+    """
+    Validates tool names against Kiro API 64-character limit.
+    
+    Logs WARNING for each problematic tool and raises ValueError
+    with complete list of violations.
+    
+    Args:
+        tools: List of tools to validate
+    
+    Raises:
+        ValueError: If any tool name exceeds 64 characters
+    
+    Example:
+        >>> validate_tool_names([UnifiedTool(name="short_name", description="test")])
+        # No error
+        >>> validate_tool_names([UnifiedTool(name="a" * 70, description="test")])
+        # Raises ValueError with detailed message
+    """
+    if not tools:
+        return
+    
+    problematic_tools = []
+    for tool in tools:
+        if len(tool.name) > 64:
+            problematic_tools.append((tool.name, len(tool.name)))
+    
+    if problematic_tools:
+        # Build detailed error message for client (no logging here - routes will log)
+        tool_list = "\n".join([
+            f"  - '{name}' ({length} characters)"
+            for name, length in problematic_tools
+        ])
+        
+        raise ValueError(
+            f"Tool name(s) exceed Kiro API limit of 64 characters:\n"
+            f"{tool_list}\n\n"
+            f"Solution: Use shorter tool names (max 64 characters).\n"
+            f"Example: 'get_user_data' instead of 'get_authenticated_user_profile_data_with_extended_information_about_it'"
+        )
+
+
 def convert_tools_to_kiro_format(tools: Optional[List[UnifiedTool]]) -> List[Dict[str, Any]]:
     """
     Converts unified tools to Kiro API format.
@@ -1115,6 +1157,9 @@ def build_kiro_payload(
     """
     # Process tools with long descriptions
     processed_tools, tool_documentation = process_tools_with_long_descriptions(tools)
+    
+    # Validate tool names against Kiro API 64-character limit
+    validate_tool_names(processed_tools)
     
     # Add tool documentation to system prompt if present
     full_system_prompt = system_prompt
