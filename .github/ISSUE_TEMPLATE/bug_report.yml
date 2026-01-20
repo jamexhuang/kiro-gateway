@@ -20,7 +20,7 @@ body:
     attributes:
       label: Kiro Gateway Version
       description: Which version are you using?
-      placeholder: "e.g. v2.0.0-rc.1"
+      placeholder: "e.g. latest or v2.0.0-rc.1"
     validations:
       required: true
 
@@ -29,7 +29,7 @@ body:
     attributes:
       label: What happened?
       description: Describe what you were doing and what went wrong
-      placeholder: "I was trying to use X and got a 400 error \"Improperly formed request\"..."
+      placeholder: "Example: I was trying to use X in OpenCode and got a 400 error \"Improperly formed request\"..."
     validations:
       required: true
 
