@@ -2,9 +2,9 @@
 
 # 👻 Kiro Gateway
 
-**Kiro API (AWS CodeWhisperer) 用プロキシゲートウェイ**
+**Kiro API (Amazon Q Developer / AWS CodeWhisperer) 用プロキシゲートウェイ**
 
-[🇬🇧 English](../../README.md) • [🇷🇺 Русский](../ru/README.md) • [🇨🇳 中文](../zh/README.md) • [🇪🇸 Español](../es/README.md) • [🇮🇩 Indonesia](../id/README.md) • [🇧🇷 Português](../pt/README.md) • [🇻🇳 Tiếng Việt](../vi/README.md) • [🇹🇷 Türkçe](../tr/README.md) • [🇰🇷 한국어](../ko/README.md)
+[🇬🇧 English](../../README.md) • [🇷🇺 Русский](../ru/README.md) • [🇨🇳 中文](../zh/README.md) • [🇪🇸 Español](../es/README.md) • [🇮🇩 Indonesia](../id/README.md) • [🇧🇷 Português](../pt/README.md) • [🇰🇷 한국어](../ko/README.md)
 
 [@Jwadow](https://github.com/jwadow) が ❤️ を込めて作成
 
@@ -13,7 +13,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-開発を支援-ff69b4)](#-プロジェクトを支援)
 
-*OpenAI または Anthropic 互換のツールで Claude モデルを使用*
+*Kiro の Claude モデルを Claude Code、OpenCode、Cursor、Cline、Roo Code、Kilo Code、Obsidian、OpenAI SDK、LangChain、Continue などの OpenAI または Anthropic 互換ツールで使用*
 
 [モデル](#-対応モデル) • [機能](#-機能) • [クイックスタート](#-クイックスタート) • [設定](#%EF%B8%8F-設定) • [💖 サポート](#-プロジェクトを支援)
 
@@ -25,6 +25,8 @@
 
 > ⚠️ **重要：** モデルの利用可能性は Kiro プラン（無料/有料）によって異なります。ゲートウェイは、サブスクリプションに基づいて IDE または CLI で利用可能なモデルへのアクセスを提供します。以下のリストは**無料プラン**で一般的に利用可能なモデルを示しています。
 
+> 🔒 **Claude Opus 4.5** は 2026年1月17日に無料プランから削除されました。有料プランで利用可能な場合があります — IDE/CLI のモデルリストを確認してください。
+
 🚀 **Claude Sonnet 4.5** — バランスの取れたパフォーマンス。コーディング、ライティング、汎用タスクに最適。
 
 ⚡ **Claude Haiku 4.5** — 超高速。クイックレスポンス、シンプルなタスク、チャットに最適。
@@ -32,8 +34,6 @@
 📦 **Claude Sonnet 4** — 前世代モデル。ほとんどのユースケースで依然として強力で信頼性が高い。
 
 📦 **Claude 3.7 Sonnet** — レガシーモデル。後方互換性のために利用可能。
-
-> 🔒 **Claude Opus 4.5** は 2026年1月17日に無料プランから削除されました。有料プランで利用可能な場合があります — IDE/CLI のモデルリストを確認してください。
 
 > 💡 **スマートモデル解決:** どんなモデル名形式でも使用可能 — `claude-sonnet-4-5`、`claude-sonnet-4.5`、または `claude-sonnet-4-5-20250929` のようなバージョン付き名前も。ゲートウェイが自動的に正規化します。
 
@@ -63,7 +63,7 @@
 - Python 3.10+
 - 以下のいずれか：
   - ログイン済みアカウントの [Kiro IDE](https://kiro.dev/)、または
-  - AWS SSO (Builder ID) を使用した [Kiro CLI](https://kiro.dev/cli/)
+  - AWS SSO (AWS IAM Identity Center, OIDC) を使用した [Kiro CLI](https://kiro.dev/cli/) - 無料の Builder ID または企業アカウント
 
 ### インストール
 
@@ -94,9 +94,13 @@ python main.py --port 9000
 
 ## ⚙️ 設定
 
-### オプション 1：JSON 認証情報ファイル
+### オプション 1：JSON 認証情報ファイル (Kiro IDE / Enterprise)
 
 認証情報ファイルへのパスを指定：
+
+対応環境：
+- **Kiro IDE**（標準）- 個人アカウント用
+- **Enterprise** - SSO を使用した企業アカウント用
 
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/kiro-auth-token.json"
@@ -137,9 +141,11 @@ PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
 KIRO_REGION="us-east-1"
 ```
 
-### オプション 3：AWS SSO 認証情報 (kiro-cli)
+### オプション 3：AWS SSO 認証情報 (kiro-cli / Enterprise)
 
-AWS IAM Identity Center (SSO) で `kiro-cli` を使用している場合、ゲートウェイは自動的に AWS SSO OIDC 認証を検出して使用します。
+AWS SSO (AWS IAM Identity Center) で `kiro-cli` または Kiro IDE を使用している場合、ゲートウェイは自動的に適切な認証を検出して使用します。
+
+無料の Builder ID アカウントと企業アカウントの両方で動作します。
 
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
@@ -147,7 +153,7 @@ KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
 # プロキシサーバーを保護するパスワード
 PROXY_API_KEY="my-super-secret-password-123"
 
-# 注意：AWS SSO OIDC (Builder ID) ユーザーは PROFILE_ARN 不要
+# 注意：AWS SSO (Builder ID および企業アカウント) ユーザーは PROFILE_ARN 不要
 # ゲートウェイはそれなしで動作します
 ```
 
@@ -167,7 +173,7 @@ AWS SSO 認証情報ファイル（`~/.aws/sso/cache/` から）には以下が�
 }
 ```
 
-**注意：** AWS SSO OIDC (Builder ID) ユーザーは `profileArn` 不要。ゲートウェイはそれなしで動作します（指定された場合は無視されます）。
+**注意：** AWS SSO (Builder ID および企業アカウント) ユーザーは `profileArn` 不要。ゲートウェイはそれなしで動作します（指定された場合は無視されます）。
 
 </details>
 
@@ -179,7 +185,7 @@ AWS SSO 認証情報ファイル（`~/.aws/sso/cache/` から）には以下が�
 - **Kiro Desktop Auth**（デフォルト）：`clientId` と `clientSecret` が存在しない場合に使用
   - エンドポイント：`https://prod.{region}.auth.desktop.kiro.dev/refreshToken`
   
-- **AWS SSO OIDC**：`clientId` と `clientSecret` が存在する場合に使用
+- **AWS SSO (OIDC)**：`clientId` と `clientSecret` が存在する場合に使用
   - エンドポイント：`https://oidc.{region}.amazonaws.com/token`
 
 追加設定は不要 — 認証情報ファイルを指定するだけ！
@@ -196,7 +202,7 @@ KIRO_CLI_DB_FILE="~/.local/share/kiro-cli/data.sqlite3"
 # プロキシサーバーを保護するパスワード
 PROXY_API_KEY="my-super-secret-password-123"
 
-# 注意：AWS SSO OIDC (Builder ID) ユーザーは PROFILE_ARN 不要
+# 注意：AWS SSO (Builder ID および企業アカウント) ユーザーは PROFILE_ARN 不要
 # ゲートウェイはそれなしで動作します
 ```
 

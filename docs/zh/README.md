@@ -2,9 +2,9 @@
 
 # 👻 Kiro Gateway
 
-**Kiro API (AWS CodeWhisperer) 代理网关**
+**Kiro API (Amazon Q Developer / AWS CodeWhisperer) 代理网关**
 
-[🇬🇧 English](../../README.md) • [🇷🇺 Русский](../ru/README.md) • [🇪🇸 Español](../es/README.md) • [🇮🇩 Indonesia](../id/README.md) • [🇧🇷 Português](../pt/README.md) • [🇯🇵 日本語](../ja/README.md) • [🇻🇳 Tiếng Việt](../vi/README.md) • [🇹🇷 Türkçe](../tr/README.md) • [🇰🇷 한국어](../ko/README.md)
+[🇬🇧 English](../../README.md) • [🇷🇺 Русский](../ru/README.md) • [🇪🇸 Español](../es/README.md) • [🇮🇩 Indonesia](../id/README.md) • [🇧🇷 Português](../pt/README.md) • [🇯🇵 日本語](../ja/README.md) • [🇰🇷 한국어](../ko/README.md)
 
 由 [@Jwadow](https://github.com/jwadow) 用 ❤️ 制作
 
@@ -13,7 +13,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-支持开发-ff69b4)](#-支持项目)
 
-*通过任何兼容 OpenAI 或 Anthropic 的工具使用 Claude 模型*
+*通过 Claude Code、OpenCode、Cursor、Cline、Roo Code、Kilo Code、Obsidian、OpenAI SDK、LangChain、Continue 和其他兼容 OpenAI 或 Anthropic 的工具使用 Kiro 的 Claude 模型*
 
 [模型](#-支持的模型) • [功能](#-功能特性) • [快速开始](#-快速开始) • [配置](#%EF%B8%8F-配置) • [💖 支持](#-支持项目)
 
@@ -25,6 +25,8 @@
 
 > ⚠️ **重要：** 模型可用性取决于您的 Kiro 套餐（免费/付费）。网关提供对您的 IDE 或 CLI 中基于订阅可用的模型的访问。下面的列表显示**免费套餐**上通常可用的模型。
 
+> 🔒 **Claude Opus 4.5** 已于 2026 年 1 月 17 日从免费套餐中移除。它可能在付费套餐上可用 — 请检查您的 IDE/CLI 模型列表。
+
 🚀 **Claude Sonnet 4.5** — 性能均衡。非常适合编程、写作和通用任务。
 
 ⚡ **Claude Haiku 4.5** — 闪电般快速。非常适合快速响应、简单任务和聊天。
@@ -32,8 +34,6 @@
 📦 **Claude Sonnet 4** — 上一代模型。对于大多数用例仍然强大可靠。
 
 📦 **Claude 3.7 Sonnet** — 旧版模型。为向后兼容而保留。
-
-> 🔒 **Claude Opus 4.5** 已于 2026 年 1 月 17 日从免费套餐中移除。它可能在付费套餐上可用 — 请检查您的 IDE/CLI 模型列表。
 
 > 💡 **智能模型解析：** 使用任何模型名称格式 — `claude-sonnet-4-5`、`claude-sonnet-4.5`，甚至版本化名称如 `claude-sonnet-4-5-20250929`。网关会自动标准化它们。
 
@@ -63,7 +63,7 @@
 - Python 3.10+
 - 以下之一：
   - 已登录账户的 [Kiro IDE](https://kiro.dev/)，或
-  - 带有 AWS SSO (Builder ID) 的 [Kiro CLI](https://kiro.dev/cli/)
+  - 带有 AWS SSO (AWS IAM Identity Center, OIDC) 的 [Kiro CLI](https://kiro.dev/cli/) - 免费 Builder ID 或企业账户
 
 ### 安装
 
@@ -94,9 +94,13 @@ python main.py --port 9000
 
 ## ⚙️ 配置
 
-### 选项 1：JSON 凭据文件
+### 选项 1：JSON 凭据文件 (Kiro IDE / Enterprise)
 
 指定凭据文件的路径：
+
+适用于：
+- **Kiro IDE**（标准）- 用于个人账户
+- **Enterprise** - 用于带有 SSO 的企业账户
 
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/kiro-auth-token.json"
@@ -137,9 +141,11 @@ PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
 KIRO_REGION="us-east-1"
 ```
 
-### 选项 3：AWS SSO 凭据 (kiro-cli)
+### 选项 3：AWS SSO 凭据 (kiro-cli / Enterprise)
 
-如果您使用带有 AWS IAM Identity Center (SSO) 的 `kiro-cli`，网关将自动检测并使用 AWS SSO OIDC 认证。
+如果您使用带有 AWS SSO (AWS IAM Identity Center) 的 `kiro-cli` 或 Kiro IDE，网关将自动检测并使用相应的认证。
+
+适用于免费 Builder ID 账户和企业账户。
 
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
@@ -147,7 +153,7 @@ KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
 # 保护您的代理服务器的密码
 PROXY_API_KEY="my-super-secret-password-123"
 
-# 注意：AWS SSO OIDC (Builder ID) 用户不需要 PROFILE_ARN
+# 注意：AWS SSO (Builder ID 和企业账户) 用户不需要 PROFILE_ARN
 # 网关无需它即可工作
 ```
 
@@ -167,7 +173,7 @@ AWS SSO 凭据文件（来自 `~/.aws/sso/cache/`）包含：
 }
 ```
 
-**注意：** AWS SSO OIDC (Builder ID) 用户不需要 `profileArn`。网关无需它即可工作（如果指定，将被忽略）。
+**注意：** AWS SSO (Builder ID 和企业账户) 用户不需要 `profileArn`。网关无需它即可工作（如果指定，将被忽略）。
 
 </details>
 
@@ -179,7 +185,7 @@ AWS SSO 凭据文件（来自 `~/.aws/sso/cache/`）包含：
 - **Kiro Desktop Auth**（默认）：当 `clientId` 和 `clientSecret` 不存在时使用
   - 端点：`https://prod.{region}.auth.desktop.kiro.dev/refreshToken`
   
-- **AWS SSO OIDC**：当 `clientId` 和 `clientSecret` 存在时使用
+- **AWS SSO (OIDC)**：当 `clientId` 和 `clientSecret` 存在时使用
   - 端点：`https://oidc.{region}.amazonaws.com/token`
 
 无需额外配置 — 只需指向您的凭据文件！
@@ -196,7 +202,7 @@ KIRO_CLI_DB_FILE="~/.local/share/kiro-cli/data.sqlite3"
 # 保护您的代理服务器的密码
 PROXY_API_KEY="my-super-secret-password-123"
 
-# 注意：AWS SSO OIDC (Builder ID) 用户不需要 PROFILE_ARN
+# 注意：AWS SSO (Builder ID 和企业账户) 用户不需要 PROFILE_ARN
 # 网关无需它即可工作
 ```
 

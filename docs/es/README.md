@@ -2,9 +2,9 @@
 
 # 👻 Kiro Gateway
 
-**Gateway proxy para Kiro API (AWS CodeWhisperer)**
+**Gateway proxy para Kiro API (Amazon Q Developer / AWS CodeWhisperer)**
 
-[🇬🇧 English](../../README.md) • [🇷🇺 Русский](../ru/README.md) • [🇨🇳 中文](../zh/README.md) • [🇮🇩 Indonesia](../id/README.md) • [🇧🇷 Português](../pt/README.md) • [🇯🇵 日本語](../ja/README.md) • [🇻🇳 Tiếng Việt](../vi/README.md) • [🇹🇷 Türkçe](../tr/README.md) • [🇰🇷 한국어](../ko/README.md)
+[🇬🇧 English](../../README.md) • [🇷🇺 Русский](../ru/README.md) • [🇨🇳 中文](../zh/README.md) • [🇮🇩 Indonesia](../id/README.md) • [🇧🇷 Português](../pt/README.md) • [🇯🇵 日本語](../ja/README.md) • [🇰🇷 한국어](../ko/README.md)
 
 Hecho con ❤️ por [@Jwadow](https://github.com/jwadow)
 
@@ -13,7 +13,7 @@ Hecho con ❤️ por [@Jwadow](https://github.com/jwadow)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-Apoya_el_Desarrollo-ff69b4)](#-apoya-el-proyecto)
 
-*Usa modelos Claude a través de cualquier herramienta compatible con OpenAI o Anthropic*
+*Usa modelos Claude de Kiro con Claude Code, OpenCode, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue y otras herramientas compatibles con OpenAI o Anthropic*
 
 [Modelos](#-modelos-soportados) • [Características](#-características) • [Inicio Rápido](#-inicio-rápido) • [Configuración](#%EF%B8%8F-configuración) • [💖 Apoyar](#-apoya-el-proyecto)
 
@@ -25,6 +25,8 @@ Hecho con ❤️ por [@Jwadow](https://github.com/jwadow)
 
 > ⚠️ **Importante:** La disponibilidad de modelos depende de tu plan de Kiro (gratuito/pago). El gateway proporciona acceso a los modelos disponibles en tu IDE o CLI según tu suscripción. La lista a continuación muestra los modelos comúnmente disponibles en el **plan gratuito**.
 
+> 🔒 **Claude Opus 4.5** fue eliminado del plan gratuito el 17 de enero de 2026. Puede estar disponible en planes de pago — verifica la lista de modelos en tu IDE/CLI.
+
 🚀 **Claude Sonnet 4.5** — Rendimiento equilibrado. Excelente para programación, escritura y tareas de propósito general.
 
 ⚡ **Claude Haiku 4.5** — Velocidad relámpago. Perfecto para respuestas rápidas, tareas simples y chat.
@@ -32,8 +34,6 @@ Hecho con ❤️ por [@Jwadow](https://github.com/jwadow)
 📦 **Claude Sonnet 4** — Generación anterior. Todavía potente y confiable para la mayoría de casos de uso.
 
 📦 **Claude 3.7 Sonnet** — Modelo heredado. Disponible para compatibilidad retroactiva.
-
-> 🔒 **Claude Opus 4.5** fue eliminado del plan gratuito el 17 de enero de 2026. Puede estar disponible en planes de pago — verifica la lista de modelos en tu IDE/CLI.
 
 > 💡 **Resolución Inteligente de Modelos:** Usa cualquier formato de nombre de modelo — `claude-sonnet-4-5`, `claude-sonnet-4.5`, o incluso nombres versionados como `claude-sonnet-4-5-20250929`. El gateway los normaliza automáticamente.
 
@@ -63,7 +63,7 @@ Hecho con ❤️ por [@Jwadow](https://github.com/jwadow)
 - Python 3.10+
 - Uno de los siguientes:
   - [Kiro IDE](https://kiro.dev/) con cuenta iniciada, O
-  - [Kiro CLI](https://kiro.dev/cli/) con AWS SSO (Builder ID)
+  - [Kiro CLI](https://kiro.dev/cli/) con AWS SSO (AWS IAM Identity Center, OIDC) - Builder ID gratuito o cuenta empresarial
 
 ### Instalación
 
@@ -94,9 +94,13 @@ El servidor estará disponible en `http://localhost:8000`
 
 ## ⚙️ Configuración
 
-### Opción 1: Archivo JSON de Credenciales
+### Opción 1: Archivo JSON de Credenciales (Kiro IDE / Enterprise)
 
 Especifica la ruta al archivo de credenciales:
+
+Funciona con:
+- **Kiro IDE** (estándar) - para cuentas personales
+- **Enterprise** - para cuentas empresariales con SSO
 
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/kiro-auth-token.json"
@@ -137,9 +141,11 @@ PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
 KIRO_REGION="us-east-1"
 ```
 
-### Opción 3: Credenciales AWS SSO (kiro-cli)
+### Opción 3: Credenciales AWS SSO (kiro-cli / Enterprise)
 
-Si usas `kiro-cli` con AWS IAM Identity Center (SSO), el gateway detectará y usará automáticamente la autenticación AWS SSO OIDC.
+Si usas `kiro-cli` o Kiro IDE con AWS SSO (AWS IAM Identity Center), el gateway detectará y usará automáticamente la autenticación apropiada.
+
+Funciona tanto con cuentas Builder ID gratuitas como con cuentas empresariales.
 
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
@@ -147,7 +153,7 @@ KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
 # Contraseña para proteger TU servidor proxy
 PROXY_API_KEY="my-super-secret-password-123"
 
-# Nota: PROFILE_ARN NO es necesario para usuarios de AWS SSO OIDC (Builder ID)
+# Nota: PROFILE_ARN NO es necesario para AWS SSO (Builder ID y cuentas empresariales)
 # El gateway funcionará sin él
 ```
 
@@ -167,7 +173,7 @@ Los archivos de credenciales de AWS SSO (de `~/.aws/sso/cache/`) contienen:
 }
 ```
 
-**Nota:** Los usuarios de AWS SSO OIDC (Builder ID) NO necesitan `profileArn`. El gateway funcionará sin él (si se especifica, será ignorado).
+**Nota:** Los usuarios de AWS SSO (Builder ID y cuentas empresariales) NO necesitan `profileArn`. El gateway funcionará sin él (si se especifica, será ignorado).
 
 </details>
 
@@ -179,7 +185,7 @@ El gateway detecta automáticamente el tipo de autenticación basándose en el a
 - **Kiro Desktop Auth** (predeterminado): Usado cuando `clientId` y `clientSecret` NO están presentes
   - Endpoint: `https://prod.{region}.auth.desktop.kiro.dev/refreshToken`
   
-- **AWS SSO OIDC**: Usado cuando `clientId` y `clientSecret` están presentes
+- **AWS SSO (OIDC)**: Usado cuando `clientId` y `clientSecret` están presentes
   - Endpoint: `https://oidc.{region}.amazonaws.com/token`
 
 ¡No se necesita configuración adicional — solo apunta a tu archivo de credenciales!
@@ -196,7 +202,7 @@ KIRO_CLI_DB_FILE="~/.local/share/kiro-cli/data.sqlite3"
 # Contraseña para proteger TU servidor proxy
 PROXY_API_KEY="my-super-secret-password-123"
 
-# Nota: PROFILE_ARN NO es necesario para usuarios de AWS SSO OIDC (Builder ID)
+# Nota: PROFILE_ARN NO es necesario para AWS SSO (Builder ID y cuentas empresariales)
 # El gateway funcionará sin él
 ```
 

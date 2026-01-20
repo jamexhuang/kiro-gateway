@@ -2,9 +2,9 @@
 
 # 👻 Kiro Gateway
 
-**Gateway proxy untuk Kiro API (AWS CodeWhisperer)**
+**Gateway proxy untuk Kiro API (Amazon Q Developer / AWS CodeWhisperer)**
 
-[🇬🇧 English](../../README.md) • [🇷🇺 Русский](../ru/README.md) • [🇨🇳 中文](../zh/README.md) • [🇪🇸 Español](../es/README.md) • [🇧🇷 Português](../pt/README.md) • [🇯🇵 日本語](../ja/README.md) • [🇻🇳 Tiếng Việt](../vi/README.md) • [🇹🇷 Türkçe](../tr/README.md) • [🇰🇷 한국어](../ko/README.md)
+[🇬🇧 English](../../README.md) • [🇷🇺 Русский](../ru/README.md) • [🇨🇳 中文](../zh/README.md) • [🇪🇸 Español](../es/README.md) • [🇧🇷 Português](../pt/README.md) • [🇯🇵 日本語](../ja/README.md) • [🇰🇷 한국어](../ko/README.md)
 
 Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 
@@ -13,7 +13,7 @@ Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-Dukung_Pengembangan-ff69b4)](#-dukung-proyek)
 
-*Gunakan model Claude melalui alat apa pun yang kompatibel dengan OpenAI atau Anthropic*
+*Gunakan model Claude dari Kiro dengan Claude Code, OpenCode, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue dan alat lain yang kompatibel dengan OpenAI atau Anthropic*
 
 [Model](#-model-yang-didukung) • [Fitur](#-fitur) • [Mulai Cepat](#-mulai-cepat) • [Konfigurasi](#%EF%B8%8F-konfigurasi) • [💖 Dukung](#-dukung-proyek)
 
@@ -25,6 +25,8 @@ Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 
 > ⚠️ **Penting:** Ketersediaan model bergantung pada paket Kiro Anda (gratis/berbayar). Gateway menyediakan akses ke model yang tersedia di IDE atau CLI Anda berdasarkan langganan Anda. Daftar di bawah menunjukkan model yang umumnya tersedia di **paket gratis**.
 
+> 🔒 **Claude Opus 4.5** telah dihapus dari paket gratis pada 17 Januari 2026. Mungkin tersedia di paket berbayar — periksa daftar model di IDE/CLI Anda.
+
 🚀 **Claude Sonnet 4.5** — Performa seimbang. Bagus untuk coding, menulis, dan tugas umum.
 
 ⚡ **Claude Haiku 4.5** — Secepat kilat. Sempurna untuk respons cepat, tugas sederhana, dan chat.
@@ -32,8 +34,6 @@ Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 📦 **Claude Sonnet 4** — Generasi sebelumnya. Masih kuat dan andal untuk sebagian besar kasus penggunaan.
 
 📦 **Claude 3.7 Sonnet** — Model lama. Tersedia untuk kompatibilitas mundur.
-
-> 🔒 **Claude Opus 4.5** telah dihapus dari paket gratis pada 17 Januari 2026. Mungkin tersedia di paket berbayar — periksa daftar model di IDE/CLI Anda.
 
 > 💡 **Resolusi Model Cerdas:** Gunakan format nama model apa pun — `claude-sonnet-4-5`, `claude-sonnet-4.5`, atau bahkan nama berversi seperti `claude-sonnet-4-5-20250929`. Gateway akan menormalisasi secara otomatis.
 
@@ -63,7 +63,7 @@ Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 - Python 3.10+
 - Salah satu dari berikut:
   - [Kiro IDE](https://kiro.dev/) dengan akun yang sudah login, ATAU
-  - [Kiro CLI](https://kiro.dev/cli/) dengan AWS SSO (Builder ID)
+  - [Kiro CLI](https://kiro.dev/cli/) dengan AWS SSO (AWS IAM Identity Center, OIDC) - Builder ID gratis atau akun perusahaan
 
 ### Instalasi
 
@@ -94,9 +94,13 @@ Server akan tersedia di `http://localhost:8000`
 
 ## ⚙️ Konfigurasi
 
-### Opsi 1: File JSON Kredensial
+### Opsi 1: File JSON Kredensial (Kiro IDE / Enterprise)
 
 Tentukan path ke file kredensial:
+
+Bekerja dengan:
+- **Kiro IDE** (standar) - untuk akun pribadi
+- **Enterprise** - untuk akun perusahaan dengan SSO
 
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/kiro-auth-token.json"
@@ -137,9 +141,11 @@ PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..."
 KIRO_REGION="us-east-1"
 ```
 
-### Opsi 3: Kredensial AWS SSO (kiro-cli)
+### Opsi 3: Kredensial AWS SSO (kiro-cli / Enterprise)
 
-Jika Anda menggunakan `kiro-cli` dengan AWS IAM Identity Center (SSO), gateway akan secara otomatis mendeteksi dan menggunakan autentikasi AWS SSO OIDC.
+Jika Anda menggunakan `kiro-cli` atau Kiro IDE dengan AWS SSO (AWS IAM Identity Center), gateway akan secara otomatis mendeteksi dan menggunakan autentikasi yang sesuai.
+
+Bekerja dengan akun Builder ID gratis dan akun perusahaan.
 
 ```env
 KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
@@ -147,7 +153,7 @@ KIRO_CREDS_FILE="~/.aws/sso/cache/your-sso-cache-file.json"
 # Password untuk melindungi server proxy ANDA
 PROXY_API_KEY="my-super-secret-password-123"
 
-# Catatan: PROFILE_ARN TIDAK diperlukan untuk pengguna AWS SSO OIDC (Builder ID)
+# Catatan: PROFILE_ARN TIDAK diperlukan untuk AWS SSO (Builder ID dan akun perusahaan)
 # Gateway akan bekerja tanpanya
 ```
 
@@ -167,7 +173,7 @@ File kredensial AWS SSO (dari `~/.aws/sso/cache/`) berisi:
 }
 ```
 
-**Catatan:** Pengguna AWS SSO OIDC (Builder ID) TIDAK memerlukan `profileArn`. Gateway akan bekerja tanpanya (jika ditentukan, akan diabaikan).
+**Catatan:** Pengguna AWS SSO (Builder ID dan akun perusahaan) TIDAK memerlukan `profileArn`. Gateway akan bekerja tanpanya (jika ditentukan, akan diabaikan).
 
 </details>
 
@@ -179,7 +185,7 @@ Gateway secara otomatis mendeteksi tipe autentikasi berdasarkan file kredensial:
 - **Kiro Desktop Auth** (default): Digunakan ketika `clientId` dan `clientSecret` TIDAK ada
   - Endpoint: `https://prod.{region}.auth.desktop.kiro.dev/refreshToken`
   
-- **AWS SSO OIDC**: Digunakan ketika `clientId` dan `clientSecret` ada
+- **AWS SSO (OIDC)**: Digunakan ketika `clientId` dan `clientSecret` ada
   - Endpoint: `https://oidc.{region}.amazonaws.com/token`
 
 Tidak perlu konfigurasi tambahan — cukup arahkan ke file kredensial Anda!
@@ -196,7 +202,7 @@ KIRO_CLI_DB_FILE="~/.local/share/kiro-cli/data.sqlite3"
 # Password untuk melindungi server proxy ANDA
 PROXY_API_KEY="my-super-secret-password-123"
 
-# Catatan: PROFILE_ARN TIDAK diperlukan untuk pengguna AWS SSO OIDC (Builder ID)
+# Catatan: PROFILE_ARN TIDAK diperlukan untuk AWS SSO (Builder ID dan akun perusahaan)
 # Gateway akan bekerja tanpanya
 ```
 
