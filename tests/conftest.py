@@ -786,3 +786,112 @@ def create_kiro_usage_chunk(usage: float) -> bytes:
 def create_kiro_context_usage_chunk(percentage: float) -> bytes:
     """Utility for creating a Kiro SSE chunk with context usage."""
     return f'{{"contextUsagePercentage":{percentage}}}'.encode()
+
+
+# =============================================================================
+# Social Login Fixtures (for new functionality)
+# =============================================================================
+
+@pytest.fixture
+def temp_sqlite_db_social(tmp_path):
+    """
+    Creates a temporary SQLite database with social login credentials.
+    
+    Contains auth_kv table with key:
+    - 'kirocli:social:token': JSON with access_token, refresh_token, expires_at, provider
+    
+    This simulates kiro-cli with Google/GitHub social login (no client_id/client_secret).
+    """
+    import sqlite3
+    
+    db_file = tmp_path / "data_social.sqlite3"
+    conn = sqlite3.connect(str(db_file))
+    cursor = conn.cursor()
+    
+    # Create auth_kv table
+    cursor.execute("""
+        CREATE TABLE auth_kv (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    
+    # Insert social login token data
+    token_data = {
+        "access_token": "social_access_token",
+        "refresh_token": "social_refresh_token",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "provider": "google",
+        "profile_arn": "arn:aws:codewhisperer:us-east-1:123456789:profile/social",
+        "region": "us-east-1"
+    }
+    cursor.execute(
+        "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+        ("kirocli:social:token", json.dumps(token_data))
+    )
+    
+    conn.commit()
+    conn.close()
+    
+    return str(db_file)
+
+
+@pytest.fixture
+def temp_sqlite_db_all_keys(tmp_path):
+    """
+    Creates a SQLite database with ALL three token keys.
+    
+    Used for testing key priority:
+    1. kirocli:social:token (highest priority)
+    2. kirocli:odic:token
+    3. codewhisperer:odic:token (lowest priority)
+    """
+    import sqlite3
+    
+    db_file = tmp_path / "data_all_keys.sqlite3"
+    conn = sqlite3.connect(str(db_file))
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE auth_kv (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    
+    # Insert all three keys with different tokens
+    social_data = {
+        "access_token": "social_token",
+        "refresh_token": "social_refresh",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "provider": "google"
+    }
+    cursor.execute(
+        "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+        ("kirocli:social:token", json.dumps(social_data))
+    )
+    
+    odic_data = {
+        "access_token": "odic_token",
+        "refresh_token": "odic_refresh",
+        "expires_at": "2099-01-01T00:00:00Z"
+    }
+    cursor.execute(
+        "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+        ("kirocli:odic:token", json.dumps(odic_data))
+    )
+    
+    legacy_data = {
+        "access_token": "legacy_token",
+        "refresh_token": "legacy_refresh",
+        "expires_at": "2099-01-01T00:00:00Z"
+    }
+    cursor.execute(
+        "INSERT INTO auth_kv (key, value) VALUES (?, ?)",
+        ("codewhisperer:odic:token", json.dumps(legacy_data))
+    )
+    
+    conn.commit()
+    conn.close()
+    
+    return str(db_file)
