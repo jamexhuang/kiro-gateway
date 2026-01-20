@@ -623,6 +623,11 @@ class KiroAuthManager:
         This is the internal implementation called by _refresh_token_aws_sso_oidc().
         It performs a single refresh attempt with current in-memory credentials.
         
+        Uses AWS SSO OIDC CreateToken API format:
+        - Content-Type: application/json (not form-urlencoded)
+        - Parameter names: camelCase (clientId, not client_id)
+        - Payload: JSON object
+        
         Raises:
             ValueError: If required credentials are not set
             httpx.HTTPStatusError: On HTTP error (including 400 for invalid token)
@@ -636,21 +641,23 @@ class KiroAuthManager:
         
         logger.info("Refreshing Kiro token via AWS SSO OIDC...")
         
-        # AWS SSO OIDC uses form-urlencoded data
+        # AWS SSO OIDC CreateToken API uses JSON with camelCase parameters
         # Use SSO region for OIDC endpoint (may differ from API region)
         sso_region = self._sso_region or self._region
         url = get_aws_sso_oidc_url(sso_region)
-        data = {
-            "grant_type": "refresh_token",
-            "client_id": self._client_id,
-            "client_secret": self._client_secret,
-            "refresh_token": self._refresh_token,
+        
+        # IMPORTANT: AWS SSO OIDC CreateToken API requires:
+        # 1. JSON payload (not form-urlencoded)
+        # 2. camelCase parameter names (clientId, not client_id)
+        payload = {
+            "grantType": "refresh_token",
+            "clientId": self._client_id,
+            "clientSecret": self._client_secret,
+            "refreshToken": self._refresh_token,
         }
         
-        # Note: scope parameter is NOT sent during refresh per OAuth 2.0 RFC 6749 Section 6
-        # AWS SSO OIDC uses the originally granted scopes automatically
         headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Type": "application/json",
         }
         
         # Log request details (without secrets) for debugging
@@ -658,7 +665,7 @@ class KiroAuthManager:
                      f"api_region={self._region}, client_id={self._client_id[:8]}...")
         
         async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(url, data=data, headers=headers)
+            response = await client.post(url, json=payload, headers=headers)
             
             # Log response details for debugging (especially on errors)
             if response.status_code != 200:
@@ -678,6 +685,7 @@ class KiroAuthManager:
             
             result = response.json()
         
+        # AWS SSO OIDC CreateToken API returns camelCase fields
         new_access_token = result.get("accessToken")
         new_refresh_token = result.get("refreshToken")
         expires_in = result.get("expiresIn", 3600)

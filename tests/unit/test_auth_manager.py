@@ -964,10 +964,10 @@ class TestKiroAuthManagerAwsSsoOidcRefresh:
             assert url == expected_url
     
     @pytest.mark.asyncio
-    async def test_refresh_token_aws_sso_oidc_uses_form_urlencoded(self, mock_aws_sso_oidc_token_response):
+    async def test_refresh_token_aws_sso_oidc_uses_json_format(self, mock_aws_sso_oidc_token_response):
         """
-        What it does: Verifies form-urlencoded format usage.
-        Purpose: Ensure Content-Type = application/x-www-form-urlencoded.
+        What it does: Verifies JSON format usage (AWS SSO OIDC CreateToken API).
+        Purpose: Ensure Content-Type = application/json (not form-urlencoded).
         """
         print("Setup: Creating KiroAuthManager...")
         manager = KiroAuthManager(
@@ -991,17 +991,17 @@ class TestKiroAuthManagerAwsSsoOidcRefresh:
             
             await manager._refresh_token_aws_sso_oidc()
             
-            print("Verification: Content-Type = application/x-www-form-urlencoded...")
+            print("Verification: Content-Type = application/json...")
             call_args = mock_client.post.call_args
             headers = call_args[1].get('headers', {})
-            print(f"Comparing Content-Type: Expected 'application/x-www-form-urlencoded', Got '{headers.get('Content-Type')}'")
-            assert headers.get('Content-Type') == 'application/x-www-form-urlencoded'
+            print(f"Comparing Content-Type: Expected 'application/json', Got '{headers.get('Content-Type')}'")
+            assert headers.get('Content-Type') == 'application/json'
     
     @pytest.mark.asyncio
     async def test_refresh_token_aws_sso_oidc_sends_correct_grant_type(self, mock_aws_sso_oidc_token_response):
         """
-        What it does: Verifies correct grant_type is sent.
-        Purpose: Ensure grant_type=refresh_token.
+        What it does: Verifies correct grantType is sent (camelCase).
+        Purpose: Ensure grantType=refresh_token in JSON payload.
         """
         print("Setup: Creating KiroAuthManager...")
         manager = KiroAuthManager(
@@ -1025,11 +1025,11 @@ class TestKiroAuthManagerAwsSsoOidcRefresh:
             
             await manager._refresh_token_aws_sso_oidc()
             
-            print("Verification: grant_type = refresh_token...")
+            print("Verification: grantType = refresh_token (camelCase in JSON)...")
             call_args = mock_client.post.call_args
-            data = call_args[1].get('data', {})
-            print(f"Comparing grant_type: Expected 'refresh_token', Got '{data.get('grant_type')}'")
-            assert data.get('grant_type') == 'refresh_token'
+            json_payload = call_args[1].get('json', {})
+            print(f"Comparing grantType: Expected 'refresh_token', Got '{json_payload.get('grantType')}'")
+            assert json_payload.get('grantType') == 'refresh_token'
     
     @pytest.mark.asyncio
     async def test_refresh_token_aws_sso_oidc_updates_tokens(self, mock_aws_sso_oidc_token_response):
@@ -1132,16 +1132,16 @@ class TestKiroAuthManagerAwsSsoOidcRefresh:
             
             await manager._refresh_token_aws_sso_oidc()
             
-            print("Verification: scope NOT in request data...")
+            print("Verification: scope NOT in JSON payload...")
             call_args = mock_client.post.call_args
-            data = call_args[1].get('data', {})
-            print(f"Request data keys: {list(data.keys())}")
-            assert 'scope' not in data, "scope should NOT be sent in refresh request"
+            json_payload = call_args[1].get('json', {})
+            print(f"Request JSON keys: {list(json_payload.keys())}")
+            assert 'scope' not in json_payload, "scope should NOT be sent in refresh request"
             
-            print("Verification: only required fields sent...")
-            expected_keys = {'grant_type', 'client_id', 'client_secret', 'refresh_token'}
-            print(f"Comparing keys: Expected {expected_keys}, Got {set(data.keys())}")
-            assert set(data.keys()) == expected_keys
+            print("Verification: only required fields sent (camelCase)...")
+            expected_keys = {'grantType', 'clientId', 'clientSecret', 'refreshToken'}
+            print(f"Comparing keys: Expected {expected_keys}, Got {set(json_payload.keys())}")
+            assert set(json_payload.keys()) == expected_keys
     
     @pytest.mark.asyncio
     async def test_refresh_token_aws_sso_oidc_works_without_scopes(self, mock_aws_sso_oidc_token_response):
@@ -1176,10 +1176,10 @@ class TestKiroAuthManagerAwsSsoOidcRefresh:
             print("Verification: Token refreshed successfully...")
             assert manager._access_token == "new_aws_sso_access_token"
             
-            print("Verification: scope NOT in request data...")
+            print("Verification: scope NOT in request JSON payload...")
             call_args = mock_client.post.call_args
-            data = call_args[1].get('data', {})
-            assert 'scope' not in data
+            json_payload = call_args[1].get('json', {})
+            assert 'scope' not in json_payload
 
 
 # =============================================================================
@@ -1455,9 +1455,9 @@ class TestKiroAuthManagerSsoRegionSeparation:
                 
                 print("Verification: Request used in-memory token...")
                 call_args = mock_client.post.call_args
-                data = call_args[1].get('data', {})
-                print(f"Refresh token sent: {data.get('refresh_token')}")
-                assert data.get('refresh_token') == "memory_refresh_token"
+                json_payload = call_args[1].get('json', {})
+                print(f"Refresh token sent: {json_payload.get('refreshToken')}")
+                assert json_payload.get('refreshToken') == "memory_refresh_token"
     
     @pytest.mark.asyncio
     async def test_refresh_token_aws_sso_oidc_reloads_sqlite_on_400_error(
@@ -1563,7 +1563,7 @@ class TestKiroAuthManagerSsoRegionSeparation:
         async def mock_post(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            sent_tokens.append(kwargs.get('data', {}).get('refresh_token'))
+            sent_tokens.append(kwargs.get('json', {}).get('refreshToken'))
             if call_count == 1:
                 return mock_error_response
             return mock_success_response
