@@ -148,6 +148,9 @@ class KiroAuthManager:
         self._scopes: Optional[list] = None  # OAuth scopes for AWS SSO OIDC
         self._sso_region: Optional[str] = None  # SSO region for OIDC token refresh (may differ from API region)
         
+        # Enterprise Kiro IDE specific fields
+        self._client_id_hash: Optional[str] = None  # clientIdHash from Enterprise Kiro IDE
+        
         # Track which SQLite key we loaded credentials from (for saving back to correct location)
         self._sqlite_token_key: Optional[str] = None
         
@@ -311,6 +314,11 @@ class KiroAuthManager:
         - clientId: OAuth client ID
         - clientSecret: OAuth client secret
         
+        For Enterprise Kiro IDE:
+        - clientIdHash: Hash of client ID (Enterprise Kiro IDE)
+        - When clientIdHash is present, automatically loads clientId and clientSecret
+          from ~/.aws/sso/cache/{clientIdHash}.json (device registration file)
+        
         Args:
             file_path: Path to JSON file
         """
@@ -337,7 +345,12 @@ class KiroAuthManager:
                 self._api_host = get_kiro_api_host(self._region)
                 self._q_host = get_kiro_q_host(self._region)
             
-            # Load AWS SSO OIDC specific fields
+            # Load clientIdHash and device registration for Enterprise Kiro IDE
+            if 'clientIdHash' in data:
+                self._client_id_hash = data['clientIdHash']
+                self._load_enterprise_device_registration(self._client_id_hash)
+            
+            # Load AWS SSO OIDC specific fields (if directly in credentials file)
             if 'clientId' in data:
                 self._client_id = data['clientId']
             if 'clientSecret' in data:
@@ -359,6 +372,37 @@ class KiroAuthManager:
             
         except Exception as e:
             logger.error(f"Error loading credentials from file: {e}")
+    
+    def _load_enterprise_device_registration(self, client_id_hash: str) -> None:
+        """
+        Loads clientId and clientSecret from Enterprise Kiro IDE device registration file.
+        
+        Enterprise Kiro IDE uses AWS SSO OIDC authentication. Device registration is stored at:
+        ~/.aws/sso/cache/{clientIdHash}.json
+        
+        Args:
+            client_id_hash: Client ID hash used to locate the device registration file
+        """
+        try:
+            device_reg_path = Path.home() / ".aws" / "sso" / "cache" / f"{client_id_hash}.json"
+            
+            if not device_reg_path.exists():
+                logger.warning(f"Enterprise device registration file not found: {device_reg_path}")
+                return
+            
+            with open(device_reg_path, 'r', encoding='utf-8') as f:
+                device_data = json.load(f)
+            
+            if 'clientId' in device_data:
+                self._client_id = device_data['clientId']
+            
+            if 'clientSecret' in device_data:
+                self._client_secret = device_data['clientSecret']
+            
+            logger.info(f"Enterprise device registration loaded from {device_reg_path}")
+            
+        except Exception as e:
+            logger.error(f"Error loading enterprise device registration: {e}")
     
     def _save_credentials_to_file(self) -> None:
         """

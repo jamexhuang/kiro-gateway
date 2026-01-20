@@ -895,3 +895,92 @@ def temp_sqlite_db_all_keys(tmp_path):
     conn.close()
     
     return str(db_file)
+
+
+# =============================================================================
+# Enterprise Kiro IDE Fixtures (Issue #45)
+# =============================================================================
+
+@pytest.fixture
+def temp_enterprise_ide_creds_file(tmp_path):
+    """
+    Creates a temporary credentials file for Enterprise Kiro IDE.
+    
+    Contains:
+    - clientIdHash: Hash used to locate device registration file
+    - refreshToken, accessToken, expiresAt, region
+    
+    This simulates Enterprise Kiro IDE with IdC (AWS IAM Identity Center) login.
+    """
+    creds_file = tmp_path / "kiro-auth-token.json"
+    creds_data = {
+        "accessToken": "enterprise_access_token",
+        "refreshToken": "enterprise_refresh_token",
+        "expiresAt": "2099-01-01T00:00:00.000Z",
+        "profileArn": "arn:aws:codewhisperer:us-east-1:123456789:profile/enterprise",
+        "region": "us-east-1",
+        "clientIdHash": "abc123def456"
+    }
+    creds_file.write_text(json.dumps(creds_data))
+    return str(creds_file)
+
+
+@pytest.fixture
+def temp_enterprise_device_registration(tmp_path):
+    """
+    Creates a temporary device registration file for Enterprise Kiro IDE.
+    
+    Located at: ~/.aws/sso/cache/{clientIdHash}.json
+    Contains: clientId, clientSecret
+    """
+    # Create .aws/sso/cache directory structure
+    aws_dir = tmp_path / ".aws" / "sso" / "cache"
+    aws_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create device registration file
+    device_reg_file = aws_dir / "abc123def456.json"
+    device_reg_data = {
+        "clientId": "enterprise_client_id_12345",
+        "clientSecret": "enterprise_client_secret_67890",
+        "region": "us-east-1"
+    }
+    device_reg_file.write_text(json.dumps(device_reg_data))
+    
+    return str(device_reg_file)
+
+
+@pytest.fixture
+def temp_enterprise_ide_complete(tmp_path, monkeypatch):
+    """
+    Creates a complete Enterprise IDE setup with both credentials and device registration.
+    
+    Returns tuple: (creds_file_path, device_reg_file_path)
+    """
+    # Mock Path.home() to return tmp_path
+    monkeypatch.setattr('pathlib.Path.home', lambda: tmp_path)
+    
+    # Create credentials file
+    creds_file = tmp_path / "kiro-auth-token.json"
+    creds_data = {
+        "accessToken": "enterprise_access_token",
+        "refreshToken": "enterprise_refresh_token",
+        "expiresAt": "2099-01-01T00:00:00.000Z",
+        "profileArn": "arn:aws:codewhisperer:us-east-1:123456789:profile/enterprise",
+        "region": "us-east-1",
+        "clientIdHash": "abc123def456"
+    }
+    creds_file.write_text(json.dumps(creds_data))
+    
+    # Create device registration file
+    aws_dir = tmp_path / ".aws" / "sso" / "cache"
+    aws_dir.mkdir(parents=True, exist_ok=True)
+    
+    device_reg_file = aws_dir / "abc123def456.json"
+    device_reg_data = {
+        "clientId": "enterprise_client_id_12345",
+        "clientSecret": "enterprise_client_secret_67890",
+        "region": "us-east-1"
+    }
+    device_reg_file.write_text(json.dumps(device_reg_data))
+    
+    return (str(creds_file), str(device_reg_file))

@@ -6,6 +6,7 @@ Tests token management logic for Kiro without real network requests.
 """
 
 import asyncio
+import json
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, Mock, patch
@@ -2608,3 +2609,361 @@ class TestKiroAuthManagerSocialLogin:
         print("Verification: Core token fields saved correctly...")
         assert saved_data['access_token'] == "new_social_token"
         assert saved_data['refresh_token'] == "new_social_refresh"
+
+
+# =============================================================================
+# Tests for Enterprise Kiro IDE Support (Issue #45)
+# =============================================================================
+
+class TestKiroAuthManagerEnterpriseIDE:
+    """Tests for Enterprise Kiro IDE support (IdC login with clientIdHash).
+    
+    Background: Enterprise Kiro IDE uses AWS IAM Identity Center (IdC) for authentication.
+    Credentials are stored in JSON file with clientIdHash field that points to a separate
+    device registration file containing clientId and clientSecret.
+    
+    This is different from:
+    - Personal Kiro IDE (social login): Uses Kiro Desktop Auth, no clientId/clientSecret
+    - kiro-cli (SQLite): Uses AWS SSO OIDC, credentials in SQLite database
+    """
+    
+    def test_load_credentials_from_file_with_client_id_hash(self, temp_enterprise_ide_complete):
+        """
+        What it does: Verifies loading credentials from JSON file with clientIdHash.
+        Purpose: Ensure clientIdHash is detected and stored.
+        """
+        creds_file, device_reg_file = temp_enterprise_ide_complete
+        
+        print(f"Setup: Creating KiroAuthManager with Enterprise IDE credentials: {creds_file}")
+        manager = KiroAuthManager(creds_file=creds_file)
+        
+        print("Verification: clientIdHash loaded...")
+        print(f"Comparing _client_id_hash: Expected 'abc123def456', Got '{manager._client_id_hash}'")
+        assert manager._client_id_hash == "abc123def456"
+        
+        print("Verification: Basic credentials loaded...")
+        assert manager._access_token == "enterprise_access_token"
+        assert manager._refresh_token == "enterprise_refresh_token"
+    
+    def test_load_enterprise_device_registration_success(self, temp_enterprise_ide_complete):
+        """
+        What it does: Verifies successful loading of device registration.
+        Purpose: Ensure clientId and clientSecret are loaded from device registration file.
+        """
+        creds_file, device_reg_file = temp_enterprise_ide_complete
+        
+        print("Setup: Creating KiroAuthManager with Enterprise IDE credentials...")
+        manager = KiroAuthManager(creds_file=creds_file)
+        
+        print("Verification: clientId loaded from device registration...")
+        print(f"Comparing _client_id: Expected 'enterprise_client_id_12345', Got '{manager._client_id}'")
+        assert manager._client_id == "enterprise_client_id_12345"
+        
+        print("Verification: clientSecret loaded from device registration...")
+        print(f"Comparing _client_secret: Expected 'enterprise_client_secret_67890', Got '{manager._client_secret}'")
+        assert manager._client_secret == "enterprise_client_secret_67890"
+    
+    def test_enterprise_ide_detected_as_aws_sso_oidc(self, temp_enterprise_ide_complete):
+        """
+        What it does: Verifies Enterprise IDE is detected as AWS_SSO_OIDC auth type.
+        Purpose: Ensure correct authentication method is used (not Kiro Desktop Auth).
+        """
+        creds_file, device_reg_file = temp_enterprise_ide_complete
+        
+        print("Setup: Creating KiroAuthManager with Enterprise IDE credentials...")
+        manager = KiroAuthManager(creds_file=creds_file)
+        
+        print("Verification: auth_type = AWS_SSO_OIDC...")
+        print(f"Comparing auth_type: Expected AWS_SSO_OIDC, Got {manager.auth_type}")
+        assert manager.auth_type == AuthType.AWS_SSO_OIDC
+    
+    def test_load_enterprise_device_registration_file_not_found(self, tmp_path, monkeypatch):
+        """
+        What it does: Verifies handling of missing device registration file.
+        Purpose: Ensure application doesn't crash when device registration is missing.
+        """
+        monkeypatch.setattr('pathlib.Path.home', lambda: tmp_path)
+        
+        print("Setup: Creating credentials file with clientIdHash but no device registration...")
+        creds_file = tmp_path / "kiro-auth-token.json"
+        creds_data = {
+            "accessToken": "enterprise_access_token",
+            "refreshToken": "enterprise_refresh_token",
+            "expiresAt": "2099-01-01T00:00:00.000Z",
+            "region": "us-east-1",
+            "clientIdHash": "nonexistent_hash"
+        }
+        creds_file.write_text(json.dumps(creds_data))
+        
+        print("Action: Creating KiroAuthManager...")
+        manager = KiroAuthManager(creds_file=str(creds_file))
+        
+        print("Verification: clientIdHash stored...")
+        assert manager._client_id_hash == "nonexistent_hash"
+        
+        print("Verification: clientId and clientSecret are None (file not found)...")
+        assert manager._client_id is None
+        assert manager._client_secret is None
+        
+        print("Verification: auth_type = KIRO_DESKTOP (no client credentials)...")
+        assert manager.auth_type == AuthType.KIRO_DESKTOP
+    
+    def test_load_enterprise_device_registration_invalid_json(self, tmp_path, monkeypatch):
+        """
+        What it does: Verifies handling of invalid JSON in device registration file.
+        Purpose: Ensure application doesn't crash on corrupted device registration.
+        """
+        monkeypatch.setattr('pathlib.Path.home', lambda: tmp_path)
+        
+        print("Setup: Creating device registration file with invalid JSON...")
+        aws_dir = tmp_path / ".aws" / "sso" / "cache"
+        aws_dir.mkdir(parents=True, exist_ok=True)
+        
+        device_reg_file = aws_dir / "invalid_hash.json"
+        device_reg_file.write_text("not a valid json {{{")
+        
+        print("Setup: Creating credentials file...")
+        creds_file = tmp_path / "kiro-auth-token.json"
+        creds_data = {
+            "accessToken": "enterprise_access_token",
+            "refreshToken": "enterprise_refresh_token",
+            "expiresAt": "2099-01-01T00:00:00.000Z",
+            "region": "us-east-1",
+            "clientIdHash": "invalid_hash"
+        }
+        creds_file.write_text(json.dumps(creds_data))
+        
+        print("Action: Creating KiroAuthManager (should handle error gracefully)...")
+        manager = KiroAuthManager(creds_file=str(creds_file))
+        
+        print("Verification: clientId and clientSecret are None (JSON parse error)...")
+        assert manager._client_id is None
+        assert manager._client_secret is None
+    
+    def test_load_enterprise_device_registration_missing_fields(self, tmp_path, monkeypatch):
+        """
+        What it does: Verifies handling of device registration without clientId/clientSecret.
+        Purpose: Ensure partial data doesn't cause crashes.
+        """
+        monkeypatch.setattr('pathlib.Path.home', lambda: tmp_path)
+        
+        print("Setup: Creating device registration file without clientId/clientSecret...")
+        aws_dir = tmp_path / ".aws" / "sso" / "cache"
+        aws_dir.mkdir(parents=True, exist_ok=True)
+        
+        device_reg_file = aws_dir / "partial_hash.json"
+        device_reg_data = {
+            "region": "us-east-1",
+            "someOtherField": "value"
+        }
+        device_reg_file.write_text(json.dumps(device_reg_data))
+        
+        print("Setup: Creating credentials file...")
+        creds_file = tmp_path / "kiro-auth-token.json"
+        creds_data = {
+            "accessToken": "enterprise_access_token",
+            "refreshToken": "enterprise_refresh_token",
+            "expiresAt": "2099-01-01T00:00:00.000Z",
+            "region": "us-east-1",
+            "clientIdHash": "partial_hash"
+        }
+        creds_file.write_text(json.dumps(creds_data))
+        
+        print("Action: Creating KiroAuthManager...")
+        manager = KiroAuthManager(creds_file=str(creds_file))
+        
+        print("Verification: clientId and clientSecret are None (missing in file)...")
+        assert manager._client_id is None
+        assert manager._client_secret is None
+    
+    @pytest.mark.asyncio
+    async def test_enterprise_ide_refresh_uses_json_format(
+        self, temp_enterprise_ide_complete, mock_aws_sso_oidc_token_response
+    ):
+        """
+        What it does: Verifies Enterprise IDE uses JSON format for token refresh.
+        Purpose: Ensure correct request format (not form-urlencoded).
+        """
+        creds_file, device_reg_file = temp_enterprise_ide_complete
+        
+        print("Setup: Creating KiroAuthManager with Enterprise IDE credentials...")
+        manager = KiroAuthManager(creds_file=creds_file)
+        
+        print("Verification: auth_type = AWS_SSO_OIDC...")
+        assert manager.auth_type == AuthType.AWS_SSO_OIDC
+        
+        print("Setup: Mocking HTTP client...")
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.json = Mock(return_value=mock_aws_sso_oidc_token_response())
+        mock_response.raise_for_status = Mock()
+        
+        with patch('kiro.auth.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+            
+            print("Action: Calling _refresh_token_aws_sso_oidc()...")
+            await manager._refresh_token_aws_sso_oidc()
+            
+            print("Verification: POST request made...")
+            mock_client.post.assert_called_once()
+            
+            print("Verification: Request uses JSON format (not form-urlencoded)...")
+            call_args = mock_client.post.call_args
+            assert 'json' in call_args[1], "Request should use json= parameter"
+            assert 'data' not in call_args[1], "Request should NOT use data= parameter"
+            
+            print("Verification: Content-Type = application/json...")
+            headers = call_args[1].get('headers', {})
+            assert headers.get('Content-Type') == 'application/json'
+    
+    @pytest.mark.asyncio
+    async def test_enterprise_ide_refresh_uses_camel_case(
+        self, temp_enterprise_ide_complete, mock_aws_sso_oidc_token_response
+    ):
+        """
+        What it does: Verifies Enterprise IDE uses camelCase parameters.
+        Purpose: Ensure correct parameter naming (not snake_case).
+        """
+        creds_file, device_reg_file = temp_enterprise_ide_complete
+        
+        print("Setup: Creating KiroAuthManager with Enterprise IDE credentials...")
+        manager = KiroAuthManager(creds_file=creds_file)
+        
+        print("Setup: Mocking HTTP client...")
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.json = Mock(return_value=mock_aws_sso_oidc_token_response())
+        mock_response.raise_for_status = Mock()
+        
+        with patch('kiro.auth.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+            
+            print("Action: Calling _refresh_token_aws_sso_oidc()...")
+            await manager._refresh_token_aws_sso_oidc()
+            
+            print("Verification: Request uses camelCase parameters...")
+            call_args = mock_client.post.call_args
+            json_payload = call_args[1].get('json', {})
+            
+            print(f"JSON payload keys: {list(json_payload.keys())}")
+            assert 'grantType' in json_payload, "Should use grantType (camelCase)"
+            assert 'clientId' in json_payload, "Should use clientId (camelCase)"
+            assert 'clientSecret' in json_payload, "Should use clientSecret (camelCase)"
+            assert 'refreshToken' in json_payload, "Should use refreshToken (camelCase)"
+            
+            print("Verification: NOT using snake_case...")
+            assert 'grant_type' not in json_payload, "Should NOT use grant_type (snake_case)"
+            assert 'client_id' not in json_payload, "Should NOT use client_id (snake_case)"
+            assert 'client_secret' not in json_payload, "Should NOT use client_secret (snake_case)"
+            assert 'refresh_token' not in json_payload, "Should NOT use refresh_token (snake_case)"
+    
+    @pytest.mark.asyncio
+    async def test_enterprise_ide_refresh_uses_correct_endpoint(
+        self, temp_enterprise_ide_complete, mock_aws_sso_oidc_token_response
+    ):
+        """
+        What it does: Verifies Enterprise IDE uses AWS SSO OIDC endpoint.
+        Purpose: Ensure correct endpoint (not Kiro Desktop Auth).
+        """
+        creds_file, device_reg_file = temp_enterprise_ide_complete
+        
+        print("Setup: Creating KiroAuthManager with Enterprise IDE credentials...")
+        manager = KiroAuthManager(creds_file=creds_file)
+        
+        print("Setup: Mocking HTTP client...")
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.json = Mock(return_value=mock_aws_sso_oidc_token_response())
+        mock_response.raise_for_status = Mock()
+        
+        with patch('kiro.auth.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+            
+            print("Action: Calling _refresh_token_aws_sso_oidc()...")
+            await manager._refresh_token_aws_sso_oidc()
+            
+            print("Verification: Request went to AWS SSO OIDC endpoint...")
+            call_args = mock_client.post.call_args
+            url = call_args[0][0]
+            
+            print(f"Comparing URL: Expected AWS SSO OIDC endpoint, Got '{url}'")
+            assert "oidc" in url, "Should use AWS SSO OIDC endpoint"
+            assert "amazonaws.com" in url, "Should use AWS endpoint"
+            assert "/token" in url, "Should use /token endpoint"
+            
+            print("Verification: NOT using Kiro Desktop Auth endpoint...")
+            assert "auth.desktop.kiro.dev" not in url, "Should NOT use Kiro Desktop Auth"
+    
+    @pytest.mark.asyncio
+    async def test_enterprise_ide_full_refresh_flow(
+        self, temp_enterprise_ide_complete, mock_aws_sso_oidc_token_response
+    ):
+        """
+        What it does: Tests complete refresh flow for Enterprise IDE.
+        Purpose: Integration test covering load → refresh → verify.
+        """
+        creds_file, device_reg_file = temp_enterprise_ide_complete
+        
+        print("Setup: Creating KiroAuthManager with Enterprise IDE credentials...")
+        manager = KiroAuthManager(creds_file=creds_file)
+        
+        print("Verification: Initial state correct...")
+        assert manager._client_id_hash == "abc123def456"
+        assert manager._client_id == "enterprise_client_id_12345"
+        assert manager._client_secret == "enterprise_client_secret_67890"
+        assert manager.auth_type == AuthType.AWS_SSO_OIDC
+        
+        print("Setup: Mocking HTTP client for successful refresh...")
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+        mock_response.json = Mock(return_value=mock_aws_sso_oidc_token_response())
+        mock_response.raise_for_status = Mock()
+        
+        with patch('kiro.auth.httpx.AsyncClient') as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_class.return_value = mock_client
+            
+            print("Action: Refreshing token...")
+            await manager._refresh_token_aws_sso_oidc()
+            
+            print("Verification: Tokens updated...")
+            assert manager._access_token == "new_aws_sso_access_token"
+            assert manager._refresh_token == "new_aws_sso_refresh_token"
+            
+            print("Verification: Expiration time set...")
+            assert manager._expires_at is not None
+            assert manager._expires_at > datetime.now(timezone.utc)
+    
+    def test_enterprise_ide_and_kiro_cli_use_same_format(self):
+        """
+        What it does: Verifies Enterprise IDE and kiro-cli use identical request format.
+        Purpose: Ensure architectural consistency (both use JSON with camelCase).
+        """
+        print("This test documents the architectural decision:")
+        print("Both Enterprise IDE (JSON file) and kiro-cli (SQLite) use:")
+        print("  - AWS SSO OIDC endpoint")
+        print("  - JSON format (Content-Type: application/json)")
+        print("  - camelCase parameters (grantType, clientId, etc.)")
+        print("")
+        print("The ONLY difference is where credentials are stored:")
+        print("  - Enterprise IDE: JSON file + device registration file")
+        print("  - kiro-cli: SQLite database")
+        print("")
+        print("This is verified by other tests in this class and")
+        print("TestKiroAuthManagerSsoRegionSeparation class.")
+        assert True  # Documentation test

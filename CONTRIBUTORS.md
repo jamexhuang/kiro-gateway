@@ -9,3 +9,4 @@ Thank you to all the contributors who have helped improve this project!
 - [@JoeGrimes123](https://github.com/JoeGrimes123) — Suggesting the fake reasoning approach (#11)
 - [@kilhyeonjun](https://github.com/kilhyeonjun) — SQLite credentials reload for containers (#22), thinking tags fix for toolResults (#23)
 - [@cniu6](https://github.com/cniu6) — Image content block support inspiration (#26)
+- [@somehow-paul](https://github.com/somehow-paul) — Enterprise Kiro IDE support (#45, #48)
