@@ -99,6 +99,28 @@ SERVER_PORT: int = int(os.getenv("SERVER_PORT", str(DEFAULT_SERVER_PORT)))
 PROXY_API_KEY: str = os.getenv("PROXY_API_KEY", "my-super-secret-password-123")
 
 # ==================================================================================================
+# VPN/Proxy Settings for Kiro API Access
+# ==================================================================================================
+
+# VPN/Proxy URL for accessing Kiro API through a proxy server.
+# Leave empty to connect directly (default).
+#
+# Use cases:
+#   - China: GFW (Great Firewall) blocks AWS endpoints
+#   - Corporate networks: Often require mandatory proxy
+#   - Privacy: Hide your IP address from AWS
+#
+# Supports HTTP and SOCKS5 protocols.
+# Authentication can be embedded in the URL.
+#
+# Examples:
+#   VPN_PROXY_URL=http://127.0.0.1:7890
+#   VPN_PROXY_URL=socks5://127.0.0.1:1080
+#   VPN_PROXY_URL=http://user:password@proxy.company.com:8080
+#   VPN_PROXY_URL=192.168.1.100:8080  (defaults to http://)
+VPN_PROXY_URL: str = os.getenv("VPN_PROXY_URL", "")
+
+# ==================================================================================================
 # Kiro API Credentials
 # ==================================================================================================
 
@@ -383,9 +405,9 @@ FAKE_REASONING_INITIAL_BUFFER_SIZE: int = int(os.getenv("FAKE_REASONING_INITIAL_
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "2.0"
+APP_VERSION: str = "2.1"
 APP_TITLE: str = "Kiro Gateway"
-APP_DESCRIPTION: str = "OpenAI-compatible interface for Kiro API (AWS CodeWhisperer). Made by @jwadow"
+APP_DESCRIPTION: str = "Proxy gateway for Kiro API (Amazon Q Developer / AWS CodeWhisperer). OpenAI and Anthropic compatible. Made by @jwadow"
 
 
 def get_kiro_refresh_url(region: str) -> str:

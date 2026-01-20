@@ -45,6 +45,7 @@ Feito com ❤️ por [@Jwadow](https://github.com/jwadow)
 |---------|-----------|
 | 🔌 **API compatível com OpenAI** | Funciona com qualquer ferramenta compatível com OpenAI |
 | 🔌 **API compatível com Anthropic** | Endpoint nativo `/v1/messages` |
+| 🌐 **Suporte a VPN/Proxy** | Proxy HTTP/SOCKS5 para redes restritas |
 | 🧠 **Pensamento Estendido** | Raciocínio é exclusivo do nosso projeto |
 | 👁️ **Suporte a Visão** | Envie imagens para o modelo |
 | 🛠️ **Chamada de Ferramentas** | Suporta chamada de funções |
@@ -242,6 +243,59 @@ Se você precisar extrair manualmente o refresh token (por exemplo, para depura�
 - Procure por requisições para: `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
 
 </details>
+
+---
+
+## 🌐 Suporte a VPN/Proxy
+
+**Para usuários na China, redes corporativas ou regiões com problemas de conectividade com serviços AWS.**
+
+O gateway suporta rotear todas as solicitações da Kiro API através de um servidor VPN ou proxy. Isso é essencial se você enfrentar problemas de conexão com endpoints AWS ou precisar usar um proxy corporativo.
+
+### Configuração
+
+Adicione ao seu arquivo `.env`:
+
+```env
+# Proxy HTTP
+VPN_PROXY_URL=http://127.0.0.1:7890
+
+# Proxy SOCKS5
+VPN_PROXY_URL=socks5://127.0.0.1:1080
+
+# Com autenticação (proxies corporativos)
+VPN_PROXY_URL=http://username:password@proxy.company.com:8080
+
+# Sem protocolo (padrão para http://)
+VPN_PROXY_URL=192.168.1.100:8080
+```
+
+### Protocolos Suportados
+
+- ✅ **HTTP** — Protocolo proxy padrão
+- ✅ **HTTPS** — Conexões proxy seguras
+- ✅ **SOCKS5** — Protocolo proxy avançado (comum em software VPN)
+- ✅ **Autenticação** — Nome de usuário/senha incorporados na URL
+
+### Quando Você Precisa Disso
+
+| Situação | Solução |
+|----------|---------|
+| Timeouts de conexão com AWS | Use VPN/proxy para rotear tráfego |
+| Restrições de rede corporativa | Configure o proxy da sua empresa |
+| Problemas de conectividade regional | Use um serviço VPN com suporte a proxy |
+| Requisitos de privacidade | Roteie através do seu próprio servidor proxy |
+
+### Software VPN Popular com Suporte a Proxy
+
+A maioria dos clientes VPN fornece um servidor proxy local:
+- **Sing-box** — Cliente VPN moderno com suporte a proxy HTTP/SOCKS5
+- **Clash** — Geralmente executado em `http://127.0.0.1:7890`
+- **V2Ray** — Proxy SOCKS5/HTTP configurável
+- **Shadowsocks** — Suporte a proxy SOCKS5
+- **VPN Corporativo** — Consulte seu departamento de TI para configurações de proxy
+
+Deixe `VPN_PROXY_URL` vazio (padrão) se você não precisar de suporte a proxy.
 
 ---
 

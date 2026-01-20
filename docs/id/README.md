@@ -45,6 +45,7 @@ Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 |-------|-----------|
 | 🔌 **API kompatibel OpenAI** | Bekerja dengan alat apa pun yang kompatibel dengan OpenAI |
 | 🔌 **API kompatibel Anthropic** | Endpoint native `/v1/messages` |
+| 🌐 **Dukungan VPN/Proxy** | Proxy HTTP/SOCKS5 untuk jaringan terbatas |
 | 🧠 **Pemikiran Diperluas** | Penalaran adalah eksklusif proyek kami |
 | 👁️ **Dukungan Visi** | Kirim gambar ke model |
 | 🛠️ **Pemanggilan Alat** | Mendukung pemanggilan fungsi |
@@ -242,6 +243,59 @@ Jika Anda perlu mengekstrak refresh token secara manual (misalnya, untuk debuggi
 - Cari request ke: `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
 
 </details>
+
+---
+
+## 🌐 Dukungan VPN/Proxy
+
+**Untuk pengguna di China, jaringan korporat, atau wilayah dengan masalah konektivitas ke layanan AWS.**
+
+Gateway mendukung perutean semua permintaan Kiro API melalui server VPN atau proxy. Ini penting jika Anda mengalami masalah koneksi ke endpoint AWS atau perlu menggunakan proxy korporat.
+
+### Konfigurasi
+
+Tambahkan ke file `.env` Anda:
+
+```env
+# Proxy HTTP
+VPN_PROXY_URL=http://127.0.0.1:7890
+
+# Proxy SOCKS5
+VPN_PROXY_URL=socks5://127.0.0.1:1080
+
+# Dengan autentikasi (proxy korporat)
+VPN_PROXY_URL=http://username:password@proxy.company.com:8080
+
+# Tanpa protokol (default ke http://)
+VPN_PROXY_URL=192.168.1.100:8080
+```
+
+### Protokol yang Didukung
+
+- ✅ **HTTP** — Protokol proxy standar
+- ✅ **HTTPS** — Koneksi proxy aman
+- ✅ **SOCKS5** — Protokol proxy lanjutan (umum di software VPN)
+- ✅ **Autentikasi** — Username/password tertanam di URL
+
+### Kapan Anda Membutuhkannya
+
+| Situasi | Solusi |
+|---------|--------|
+| Timeout koneksi ke AWS | Gunakan VPN/proxy untuk merutekan lalu lintas |
+| Pembatasan jaringan korporat | Konfigurasi proxy perusahaan Anda |
+| Masalah konektivitas regional | Gunakan layanan VPN dengan dukungan proxy |
+| Persyaratan privasi | Rutekan melalui server proxy Anda sendiri |
+
+### Software VPN Populer dengan Dukungan Proxy
+
+Sebagian besar klien VPN menyediakan server proxy lokal:
+- **Sing-box** — Klien VPN modern dengan dukungan proxy HTTP/SOCKS5
+- **Clash** — Biasanya berjalan di `http://127.0.0.1:7890`
+- **V2Ray** — Proxy SOCKS5/HTTP yang dapat dikonfigurasi
+- **Shadowsocks** — Dukungan proxy SOCKS5
+- **VPN Korporat** — Tanyakan departemen IT Anda untuk pengaturan proxy
+
+Biarkan `VPN_PROXY_URL` kosong (default) jika Anda tidak memerlukan dukungan proxy.
 
 ---
 

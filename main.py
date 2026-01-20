@@ -42,6 +42,7 @@ Priority: CLI args > Environment variables > Default values
 import argparse
 import logging
 import sys
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -68,6 +69,7 @@ from kiro.config import (
     DEFAULT_SERVER_PORT,
     STREAMING_READ_TIMEOUT,
     HIDDEN_MODELS,
+    VPN_PROXY_URL,
     _warn_deprecated_debug_setting,
     _warn_timeout_configuration,
 )
@@ -166,6 +168,33 @@ def setup_logging_intercept():
 
 # Configure uvicorn/fastapi log interception
 setup_logging_intercept()
+
+
+# ==================================================================================================
+# VPN/Proxy Configuration
+# ==================================================================================================
+# Must be set BEFORE creating any httpx clients (including in lifespan)
+# httpx automatically picks up HTTP_PROXY, HTTPS_PROXY, ALL_PROXY from environment
+
+if VPN_PROXY_URL:
+    # Normalize URL - add http:// if no scheme specified
+    proxy_url_with_scheme = VPN_PROXY_URL if "://" in VPN_PROXY_URL else f"http://{VPN_PROXY_URL}"
+    
+    # Set environment variables for httpx to pick up automatically
+    os.environ['HTTP_PROXY'] = proxy_url_with_scheme
+    os.environ['HTTPS_PROXY'] = proxy_url_with_scheme
+    os.environ['ALL_PROXY'] = proxy_url_with_scheme
+    
+    # Exclude localhost from proxy to avoid routing local requests through it
+    no_proxy_hosts = os.environ.get("NO_PROXY", "")
+    local_hosts = "127.0.0.1,localhost"
+    if no_proxy_hosts:
+        os.environ["NO_PROXY"] = f"{no_proxy_hosts},{local_hosts}"
+    else:
+        os.environ["NO_PROXY"] = local_hosts
+    
+    logger.info(f"Proxy configured: {proxy_url_with_scheme}")
+    logger.debug(f"NO_PROXY: {os.environ['NO_PROXY']}")
 
 
 # --- Configuration Validation ---

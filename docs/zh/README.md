@@ -45,6 +45,7 @@
 |------|------|
 | 🔌 **兼容 OpenAI 的 API** | 与任何兼容 OpenAI 的工具配合使用 |
 | 🔌 **兼容 Anthropic 的 API** | 原生 `/v1/messages` 端点 |
+| 🌐 **VPN/代理支持** | 用于受限网络的 HTTP/SOCKS5 代理 |
 | 🧠 **扩展思维** | 推理功能是我们项目的独家特性 |
 | 👁️ **视觉支持** | 向模型发送图像 |
 | 🛠️ **工具调用** | 支持函数调用 |
@@ -242,6 +243,59 @@ PROXY_API_KEY="my-super-secret-password-123"
 - 查找发往以下地址的请求：`prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
 
 </details>
+
+---
+
+## 🌐 VPN/代理支持
+
+**适用于中国、企业网络或与 AWS 服务连接存在问题的地区的用户。**
+
+网关支持通过 VPN 或代理服务器路由所有 Kiro API 请求。如果您遇到与 AWS 端点的连接问题或需要使用企业代理，这是必需的。
+
+### 配置
+
+添加到您的 `.env` 文件：
+
+```env
+# HTTP 代理
+VPN_PROXY_URL=http://127.0.0.1:7890
+
+# SOCKS5 代理
+VPN_PROXY_URL=socks5://127.0.0.1:1080
+
+# 带身份验证（企业代理）
+VPN_PROXY_URL=http://username:password@proxy.company.com:8080
+
+# 无协议（默认为 http://）
+VPN_PROXY_URL=192.168.1.100:8080
+```
+
+### 支持的协议
+
+- ✅ **HTTP** — 标准代理协议
+- ✅ **HTTPS** — 安全代理连接
+- ✅ **SOCKS5** — 高级代理协议（VPN 软件中常见）
+- ✅ **身份验证** — URL 中嵌入的用户名/密码
+
+### 何时需要
+
+| 情况 | 解决方案 |
+|------|---------|
+| 与 AWS 连接超时 | 使用 VPN/代理路由流量 |
+| 企业网络限制 | 配置您公司的代理 |
+| 区域连接问题 | 使用支持代理的 VPN 服务 |
+| 隐私要求 | 通过您自己的代理服务器路由 |
+
+### 支持代理的流行 VPN 软件
+
+大多数 VPN 客户端提供本地代理服务器：
+- **Sing-box** — 支持 HTTP/SOCKS5 代理的现代 VPN 客户端
+- **Clash** — 通常在 `http://127.0.0.1:7890` 上运行
+- **V2Ray** — 可配置的 SOCKS5/HTTP 代理
+- **Shadowsocks** — SOCKS5 代理支持
+- **企业 VPN** — 向您的 IT 部门咨询代理设置
+
+如果您不需要代理支持，请将 `VPN_PROXY_URL` 留空（默认）。
 
 ---
 

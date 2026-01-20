@@ -45,6 +45,7 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 |---------|-------------|
 | 🔌 **OpenAI-compatible API** | Works with any OpenAI-compatible tool |
 | 🔌 **Anthropic-compatible API** | Native `/v1/messages` endpoint |
+| 🌐 **VPN/Proxy Support** | HTTP/SOCKS5 proxy for restricted networks |
 | 🧠 **Extended Thinking** | Reasoning is exclusive to our project |
 | 👁️ **Vision Support** | Send images to model |
 | 🛠️ **Tool Calling** | Supports function calling |
@@ -242,6 +243,59 @@ If you need to manually extract the refresh token (e.g., for debugging), you can
 - Look for requests to: `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
 
 </details>
+
+---
+
+## 🌐 VPN/Proxy Support
+
+**For users in China, corporate networks, or regions with connectivity issues to AWS services.**
+
+The gateway supports routing all Kiro API requests through a VPN or proxy server. This is essential if you experience connection problems to AWS endpoints or need to use a corporate proxy.
+
+### Configuration
+
+Add to your `.env` file:
+
+```env
+# HTTP proxy
+VPN_PROXY_URL=http://127.0.0.1:7890
+
+# SOCKS5 proxy
+VPN_PROXY_URL=socks5://127.0.0.1:1080
+
+# With authentication (corporate proxies)
+VPN_PROXY_URL=http://username:password@proxy.company.com:8080
+
+# Without protocol (defaults to http://)
+VPN_PROXY_URL=192.168.1.100:8080
+```
+
+### Supported Protocols
+
+- ✅ **HTTP** — Standard proxy protocol
+- ✅ **HTTPS** — Secure proxy connections
+- ✅ **SOCKS5** — Advanced proxy protocol (common in VPN software)
+- ✅ **Authentication** — Username/password embedded in URL
+
+### When You Need This
+
+| Situation | Solution |
+|-----------|----------|
+| Connection timeouts to AWS | Use VPN/proxy to route traffic |
+| Corporate network restrictions | Configure your company's proxy |
+| Regional connectivity issues | Use a VPN service with proxy support |
+| Privacy requirements | Route through your own proxy server |
+
+### Popular VPN Software with Proxy Support
+
+Most VPN clients provide a local proxy server you can use:
+- **Sing-box** — Modern VPN client with HTTP/SOCKS5 proxy
+- **Clash** — Usually runs on `http://127.0.0.1:7890`
+- **V2Ray** — Configurable SOCKS5/HTTP proxy
+- **Shadowsocks** — SOCKS5 proxy support
+- **Corporate VPN** — Check your IT department for proxy settings
+
+Leave `VPN_PROXY_URL` empty (default) if you don't need proxy support.
 
 ---
 
