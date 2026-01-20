@@ -119,9 +119,12 @@ PROXY_API_KEY="my-super-secret-password-123"
   "refreshToken": "eyJ...",
   "expiresAt": "2025-01-12T23:00:00.000Z",
   "profileArn": "arn:aws:codewhisperer:us-east-1:...",
-  "region": "us-east-1"
+  "region": "us-east-1",
+  "clientIdHash": "abc123..."  // Optional: for corporate SSO setups
 }
 ```
+
+> **Примечание:** Если у вас есть два JSON файла в `~/.aws/sso/cache/` (например, `kiro-auth-token.json` и файл с хешированным названием), используйте `kiro-auth-token.json` в `KIRO_CREDS_FILE`. Шлюз автоматически загрузит другой файл.
 
 </details>
 

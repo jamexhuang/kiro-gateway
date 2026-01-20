@@ -119,9 +119,12 @@ PROXY_API_KEY="my-super-secret-password-123"
   "refreshToken": "eyJ...",
   "expiresAt": "2025-01-12T23:00:00.000Z",
   "profileArn": "arn:aws:codewhisperer:us-east-1:...",
-  "region": "us-east-1"
+  "region": "us-east-1",
+  "clientIdHash": "abc123..."  // Optional: for corporate SSO setups
 }
 ```
+
+> **참고:** `~/.aws/sso/cache/`에 두 개의 JSON 파일이 있는 경우 (예: `kiro-auth-token.json` 및 해시 이름의 파일), `KIRO_CREDS_FILE`에서 `kiro-auth-token.json`을 사용하세요. 게이트웨이가 다른 파일을 자동으로 로드합니다.
 
 </details>
 

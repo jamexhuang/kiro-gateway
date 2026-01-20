@@ -119,9 +119,12 @@ PROXY_API_KEY="my-super-secret-password-123"
   "refreshToken": "eyJ...",
   "expiresAt": "2025-01-12T23:00:00.000Z",
   "profileArn": "arn:aws:codewhisperer:us-east-1:...",
-  "region": "us-east-1"
+  "region": "us-east-1",
+  "clientIdHash": "abc123..."  // Optional: for corporate SSO setups
 }
 ```
+
+> **Note:** If you have two JSON files in `~/.aws/sso/cache/` (e.g., `kiro-auth-token.json` and a file with a hash name), use `kiro-auth-token.json` in `KIRO_CREDS_FILE`. The gateway will automatically load the other file.
 
 </details>
 

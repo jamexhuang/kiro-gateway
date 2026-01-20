@@ -119,9 +119,12 @@ PROXY_API_KEY="my-super-secret-password-123"
   "refreshToken": "eyJ...",
   "expiresAt": "2025-01-12T23:00:00.000Z",
   "profileArn": "arn:aws:codewhisperer:us-east-1:...",
-  "region": "us-east-1"
+  "region": "us-east-1",
+  "clientIdHash": "abc123..."  // Optional: for corporate SSO setups
 }
 ```
+
+> **注意：** 如果您在 `~/.aws/sso/cache/` 中有两个 JSON 文件（例如 `kiro-auth-token.json` 和一个带有哈希名称的文件），请在 `KIRO_CREDS_FILE` 中使用 `kiro-auth-token.json`。网关将自动加载另一个文件。
 
 </details>
 
