@@ -69,6 +69,7 @@ from kiro.config import (
     DEFAULT_SERVER_PORT,
     STREAMING_READ_TIMEOUT,
     HIDDEN_MODELS,
+    FALLBACK_MODELS,
     VPN_PROXY_URL,
     _warn_deprecated_debug_setting,
     _warn_timeout_configuration,
@@ -350,7 +351,7 @@ async def lifespan(app: FastAPI):
     # Create model cache
     app.state.model_cache = ModelInfoCache()
     
-    # === BLOCKING: Load models from Kiro API at startup ===
+    # BLOCKING: Load models from Kiro API at startup
     # This ensures the cache is populated BEFORE accepting any requests.
     # No race conditions - requests only start after yield.
     logger.info("Loading models from Kiro API...")
@@ -376,15 +377,20 @@ async def lifespan(app: FastAPI):
                 data = response.json()
                 models_list = data.get("models", [])
                 await app.state.model_cache.update(models_list)
-                logger.debug(f"Loaded {len(models_list)} models from Kiro API: {[m.get('modelId') for m in models_list]}")
+                logger.debug(f"Successfully loaded {len(models_list)} models from Kiro API")
             else:
-                logger.warning(f"Failed to load models from API: HTTP {response.status_code}")
-                logger.warning("Server will start with hidden models only")
+                raise Exception(f"HTTP {response.status_code}")
     except Exception as e:
-        logger.warning(f"Failed to fetch models from Kiro API: {e}")
-        logger.warning("Server will start with hidden models only (fallback mode)")
+        # FALLBACK: Use built-in model list
+        logger.error(f"Failed to fetch models from Kiro API: {e}")
+        logger.error("Using pre-configured fallback models. Not all models may be available on your plan, or the list may be outdated.")
+        
+        # Populate cache with fallback models
+        await app.state.model_cache.update(FALLBACK_MODELS)
+        logger.debug(f"Loaded {len(FALLBACK_MODELS)} fallback models")
     
     # Add hidden models to cache (they appear in /v1/models but not in Kiro API)
+    # Hidden models are added ALWAYS, regardless of API success/failure
     for display_name, internal_id in HIDDEN_MODELS.items():
         app.state.model_cache.add_hidden_model(display_name, internal_id)
     

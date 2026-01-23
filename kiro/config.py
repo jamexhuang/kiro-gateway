@@ -204,6 +204,25 @@ HIDDEN_MODELS: Dict[str, str] = {
 }
 
 # ==================================================================================================
+# Fallback Models Configuration (DNS Failure Recovery)
+# ==================================================================================================
+
+# Fallback model list - used when /ListAvailableModels API is unreachable.
+# This ensures basic functionality even with DNS/network issues.
+#
+# IMPORTANT: This list represents known models at the time of this gateway version.
+# - Some models may not be available on your Kiro plan (e.g., Opus on free tier)
+# - New models released after this version won't appear here
+# - Update gateway regularly to get the latest model list
+FALLBACK_MODELS: List[Dict[str, str]] = [
+    {"modelId": "auto"},
+    {"modelId": "claude-sonnet-4"},
+    {"modelId": "claude-haiku-4.5"},
+    {"modelId": "claude-sonnet-4.5"},
+    {"modelId": "claude-opus-4.5"},
+]
+
+# ==================================================================================================
 # Model Cache Settings
 # ==================================================================================================
 
