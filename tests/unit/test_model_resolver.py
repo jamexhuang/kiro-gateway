@@ -243,6 +243,99 @@ class TestNormalizeModelName:
         print(f"Comparing result: Expected 'claude-3.0-opus', Got '{result}'")
         assert result == "claude-3.0-opus"
     
+    # === Inverted format with suffix (Pattern 5 - Cursor IDE) ===
+    
+    def test_inverted_format_with_high_suffix(self):
+        """
+        What it does: claude-4.5-opus-high → claude-opus-4.5
+        Goal: Check inverted format normalization with 'high' suffix (Cursor IDE).
+        
+        Cursor IDE sends model names in inverted format with priority suffix.
+        This is Pattern 5 from PR #49.
+        """
+        print("Action: Normalizing 'claude-4.5-opus-high'...")
+        result = normalize_model_name("claude-4.5-opus-high")
+        
+        print(f"Comparing result: Expected 'claude-opus-4.5', Got '{result}'")
+        assert result == "claude-opus-4.5"
+    
+    def test_inverted_format_with_low_suffix(self):
+        """
+        What it does: claude-4.5-sonnet-low → claude-sonnet-4.5
+        Goal: Check inverted format normalization with 'low' suffix (Cursor IDE).
+        """
+        print("Action: Normalizing 'claude-4.5-sonnet-low'...")
+        result = normalize_model_name("claude-4.5-sonnet-low")
+        
+        print(f"Comparing result: Expected 'claude-sonnet-4.5', Got '{result}'")
+        assert result == "claude-sonnet-4.5"
+    
+    def test_inverted_format_with_thinking_suffix(self):
+        """
+        What it does: claude-4.5-opus-high-thinking → claude-opus-4.5
+        Goal: Check inverted format with compound suffix (high-thinking).
+        
+        The pattern strips ALL suffixes after the family name.
+        """
+        print("Action: Normalizing 'claude-4.5-opus-high-thinking'...")
+        result = normalize_model_name("claude-4.5-opus-high-thinking")
+        
+        print(f"Comparing result: Expected 'claude-opus-4.5', Got '{result}'")
+        assert result == "claude-opus-4.5"
+    
+    def test_inverted_format_all_families(self):
+        """
+        What it does: Verifies inverted format works for all families.
+        Goal: Check haiku, sonnet, opus all work with inverted format.
+        """
+        print("Action: Normalizing inverted format for all families...")
+        
+        print("  Testing haiku...")
+        result_haiku = normalize_model_name("claude-4.5-haiku-high")
+        print(f"  Comparing: Expected 'claude-haiku-4.5', Got '{result_haiku}'")
+        assert result_haiku == "claude-haiku-4.5"
+        
+        print("  Testing sonnet...")
+        result_sonnet = normalize_model_name("claude-4.5-sonnet-low")
+        print(f"  Comparing: Expected 'claude-sonnet-4.5', Got '{result_sonnet}'")
+        assert result_sonnet == "claude-sonnet-4.5"
+        
+        print("  Testing opus...")
+        result_opus = normalize_model_name("claude-4.5-opus-high")
+        print(f"  Comparing: Expected 'claude-opus-4.5', Got '{result_opus}'")
+        assert result_opus == "claude-opus-4.5"
+    
+    def test_inverted_format_requires_suffix(self):
+        """
+        What it does: Verifies that suffix is required (doesn't match claude-3.7-sonnet).
+        Goal: CRITICAL - ensure Pattern 5 doesn't break already-normalized formats.
+        
+        This is the most important test for Pattern 5. The regex MUST require a suffix
+        to avoid matching already-normalized formats like claude-3.7-sonnet.
+        """
+        print("Action: Normalizing 'claude-3.7-sonnet' (should NOT match Pattern 5)...")
+        result = normalize_model_name("claude-3.7-sonnet")
+        
+        print(f"Comparing result: Expected 'claude-3.7-sonnet' (unchanged), Got '{result}'")
+        assert result == "claude-3.7-sonnet"
+        
+        print("Action: Normalizing 'claude-4.5-sonnet' (should NOT match Pattern 5)...")
+        result2 = normalize_model_name("claude-4.5-sonnet")
+        
+        print(f"Comparing result: Expected 'claude-4.5-sonnet' (unchanged), Got '{result2}'")
+        assert result2 == "claude-4.5-sonnet"
+    
+    def test_inverted_format_case_insensitive(self):
+        """
+        What it does: CLAUDE-4.5-OPUS-HIGH → claude-opus-4.5
+        Goal: Check case insensitivity for inverted format.
+        """
+        print("Action: Normalizing 'CLAUDE-4.5-OPUS-HIGH'...")
+        result = normalize_model_name("CLAUDE-4.5-OPUS-HIGH")
+        
+        print(f"Comparing result: Expected 'claude-opus-4.5', Got '{result}'")
+        assert result == "claude-opus-4.5"
+    
     # === Already normalized (passthrough) ===
     
     def test_passthrough_already_normalized_haiku(self):

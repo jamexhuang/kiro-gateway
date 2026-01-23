@@ -9,5 +9,5 @@ Thank you to all the contributors who have helped improve this project!
 - [@JoeGrimes123](https://github.com/JoeGrimes123) — Suggesting the fake reasoning approach (#11)
 - [@kilhyeonjun](https://github.com/kilhyeonjun) — SQLite credentials reload for containers (#22), thinking tags fix for toolResults (#23)
 - [@cniu6](https://github.com/cniu6) — Image content block support inspiration (#26)
-- [@somehow-paul](https://github.com/somehow-paul) — Enterprise Kiro IDE support (#45, #48)
+- [@somehow-paul](https://github.com/somehow-paul) — Enterprise Kiro IDE support (#45, #48), Cursor IDE compatibility design (#49)
 - [@bhaskoro-muthohar](https://github.com/bhaskoro-muthohar) — Root cause analysis and solution for MCP tool results bug (#46, #50)

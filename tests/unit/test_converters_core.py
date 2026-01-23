@@ -1273,7 +1273,7 @@ class TestEnsureAssistantBeforeToolResults:
     """
     Tests for ensure_assistant_before_tool_results function.
     
-    This function handles the case when clients (like Cline/Roo) send truncated
+    This function handles the case when clients (like Cline/Roo/Cursor) send truncated
     conversations with tool_results but without the preceding assistant message
     that contains the tool_calls. Since we don't know the original tool name,
     we strip the orphaned tool_results to avoid Kiro API rejection.
@@ -1358,11 +1358,11 @@ class TestEnsureAssistantBeforeToolResults:
     
     def test_strips_orphaned_tool_results_at_start(self):
         """
-        What it does: Verifies orphaned tool_results at the start are stripped.
-        Purpose: Ensure tool_results without preceding assistant are removed.
+        What it does: Verifies orphaned tool_results at the start are converted to text.
+        Purpose: Ensure tool_results without preceding assistant are converted to text representation.
         
         This is the critical bug fix test - when a client sends a truncated
-        conversation starting with tool_results, they should be stripped.
+        conversation starting with tool_results, they should be converted to text.
         """
         print("Setup: Conversation starting with orphaned tool_results...")
         messages = [
@@ -1379,21 +1379,26 @@ class TestEnsureAssistantBeforeToolResults:
         ]
         
         print("Action: Processing messages...")
-        result, stripped = ensure_assistant_before_tool_results(messages)
+        result, converted = ensure_assistant_before_tool_results(messages)
         
         print(f"Result: {result}")
         print(f"Comparing length: Expected 2, Got {len(result)}")
         assert len(result) == 2
         
-        print("Checking that orphaned tool_results are stripped...")
+        print("Checking that orphaned tool_results are converted to text...")
         assert result[0].tool_results is None
-        assert result[0].content == ""  # Content preserved
+        
+        print("Checking that content now contains the tool result as text...")
+        print(f"Content: '{result[0].content}'")
+        assert "[Tool Result (call_orphan)]" in result[0].content
+        assert "Orphaned result" in result[0].content
+        
         assert result[1].content == "Continue the conversation"
-        assert stripped is True
+        assert converted is True
     
-    def test_strips_tool_results_after_assistant_without_tool_calls(self):
+    def test_converts_tool_results_after_assistant_without_tool_calls(self):
         """
-        What it does: Verifies tool_results are stripped when preceding assistant has no tool_calls.
+        What it does: Verifies tool_results are converted when preceding assistant has no tool_calls.
         Purpose: Ensure tool_results require assistant with tool_calls, not just any assistant.
         """
         print("Setup: Assistant without tool_calls followed by user with tool_results...")
@@ -1412,16 +1417,21 @@ class TestEnsureAssistantBeforeToolResults:
         ]
         
         print("Action: Processing messages...")
-        result, stripped = ensure_assistant_before_tool_results(messages)
+        result, converted = ensure_assistant_before_tool_results(messages)
         
         print(f"Result: {result}")
-        print("Checking that tool_results are stripped...")
+        print("Checking that tool_results are converted to text...")
         assert result[2].tool_results is None
-        assert stripped is True
+        
+        print(f"Content after conversion: '{result[2].content}'")
+        assert "[Tool Result (call_123)]" in result[2].content
+        assert "Result" in result[2].content
+        
+        assert converted is True
     
-    def test_strips_tool_results_after_user_message(self):
+    def test_converts_tool_results_after_user_message(self):
         """
-        What it does: Verifies tool_results are stripped when preceded by user message.
+        What it does: Verifies tool_results are converted when preceded by user message.
         Purpose: Ensure tool_results require assistant, not user.
         """
         print("Setup: User message followed by user with tool_results...")
@@ -1439,17 +1449,22 @@ class TestEnsureAssistantBeforeToolResults:
         ]
         
         print("Action: Processing messages...")
-        result, stripped = ensure_assistant_before_tool_results(messages)
+        result, converted = ensure_assistant_before_tool_results(messages)
         
         print(f"Result: {result}")
-        print("Checking that tool_results are stripped...")
+        print("Checking that tool_results are converted to text...")
         assert result[1].tool_results is None
-        assert stripped is True
+        
+        print(f"Content after conversion: '{result[1].content}'")
+        assert "[Tool Result (call_123)]" in result[1].content
+        assert "Result" in result[1].content
+        
+        assert converted is True
     
-    def test_preserves_content_when_stripping_tool_results(self):
+    def test_preserves_content_when_converting_tool_results(self):
         """
-        What it does: Verifies message content is preserved when tool_results are stripped.
-        Purpose: Ensure only tool_results are removed, not the entire message.
+        What it does: Verifies message content is preserved and tool_results are appended as text.
+        Purpose: Ensure original content is kept and tool_results are converted to text representation.
         """
         print("Setup: Message with both content and orphaned tool_results...")
         messages = [
@@ -1465,18 +1480,27 @@ class TestEnsureAssistantBeforeToolResults:
         ]
         
         print("Action: Processing messages...")
-        result, stripped = ensure_assistant_before_tool_results(messages)
+        result, converted = ensure_assistant_before_tool_results(messages)
         
         print(f"Result: {result}")
-        print("Checking that content is preserved...")
-        assert result[0].content == "Here is some context"
+        print(f"Content after conversion: '{result[0].content}'")
+        
+        print("Checking that original content is preserved...")
+        assert "Here is some context" in result[0].content
+        
+        print("Checking that tool_results are converted to text and appended...")
+        assert "[Tool Result (call_123)]" in result[0].content
+        assert "Result" in result[0].content
+        
+        print("Checking that tool_results field is removed...")
         assert result[0].tool_results is None
-        assert stripped is True
+        
+        assert converted is True
     
-    def test_preserves_tool_calls_when_stripping_tool_results(self):
+    def test_preserves_tool_calls_when_converting_tool_results(self):
         """
-        What it does: Verifies tool_calls are preserved when tool_results are stripped.
-        Purpose: Ensure only tool_results are removed, tool_calls stay.
+        What it does: Verifies tool_calls are preserved when tool_results are converted.
+        Purpose: Ensure only tool_results are converted, tool_calls stay.
         """
         print("Setup: Message with tool_calls and orphaned tool_results...")
         messages = [
@@ -1497,19 +1521,24 @@ class TestEnsureAssistantBeforeToolResults:
         ]
         
         print("Action: Processing messages...")
-        result, stripped = ensure_assistant_before_tool_results(messages)
+        result, converted = ensure_assistant_before_tool_results(messages)
         
         print(f"Result: {result}")
         print("Checking that tool_calls are preserved...")
         assert result[0].tool_calls is not None
         assert len(result[0].tool_calls) == 1
+        
+        print("Checking that tool_results are converted to text...")
         assert result[0].tool_results is None
-        assert stripped is True
+        assert "[Tool Result (call_old)]" in result[0].content
+        assert "Old result" in result[0].content
+        
+        assert converted is True
     
     def test_handles_multiple_orphaned_tool_results(self):
         """
-        What it does: Verifies multiple orphaned tool_results are all stripped.
-        Purpose: Ensure all tool_results in the list are removed.
+        What it does: Verifies multiple orphaned tool_results are all converted.
+        Purpose: Ensure all tool_results in the list are converted to text.
         """
         print("Setup: Message with multiple orphaned tool_results...")
         messages = [
@@ -1525,12 +1554,215 @@ class TestEnsureAssistantBeforeToolResults:
         ]
         
         print("Action: Processing messages...")
-        result, stripped = ensure_assistant_before_tool_results(messages)
+        result, converted = ensure_assistant_before_tool_results(messages)
         
         print(f"Result: {result}")
-        print("Checking that all tool_results are stripped...")
+        print(f"Content after conversion: '{result[0].content}'")
+        
+        print("Checking that all tool_results are converted to text...")
         assert result[0].tool_results is None
-        assert stripped is True
+        assert "[Tool Result (call_1)]" in result[0].content
+        assert "Result 1" in result[0].content
+        assert "[Tool Result (call_2)]" in result[0].content
+        assert "Result 2" in result[0].content
+        assert "[Tool Result (call_3)]" in result[0].content
+        assert "Result 3" in result[0].content
+        
+        assert converted is True
+    
+    # ==================================================================================
+    # New tests for tool_results conversion (PR #49)
+    # ==================================================================================
+    
+    def test_conversion_preserves_images(self):
+        """
+        What it does: Verifies that images field is preserved when converting tool_results.
+        Purpose: Ensure images=msg.images is set correctly in converted message.
+        """
+        print("Setup: Message with images and orphaned tool_results...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Here's an image and tool result",
+                images=[{"media_type": "image/jpeg", "data": "image_data"}],
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_123",
+                    "content": "Tool output"
+                }]
+            )
+        ]
+        
+        print("Action: Processing messages...")
+        result, converted = ensure_assistant_before_tool_results(messages)
+        
+        print(f"Result: {result}")
+        print("Checking that images are preserved...")
+        assert result[0].images is not None
+        assert len(result[0].images) == 1
+        assert result[0].images[0]["media_type"] == "image/jpeg"
+        
+        print("Checking that tool_results are converted...")
+        assert result[0].tool_results is None
+        assert "[Tool Result" in result[0].content
+        
+        assert converted is True
+    
+    def test_conversion_appends_to_existing_content(self):
+        """
+        What it does: Verifies tool_results are appended with double newline.
+        Purpose: Ensure formatting: "original\\n\\n[Tool Result]\\ndata".
+        """
+        print("Setup: Message with content and orphaned tool_results...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Original content here",
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_abc",
+                    "content": "Tool data"
+                }]
+            )
+        ]
+        
+        print("Action: Processing messages...")
+        result, converted = ensure_assistant_before_tool_results(messages)
+        
+        print(f"Result content: '{result[0].content}'")
+        
+        print("Checking formatting...")
+        assert "Original content here" in result[0].content
+        assert "[Tool Result (call_abc)]" in result[0].content
+        assert "Tool data" in result[0].content
+        
+        # Check double newline separator
+        assert "\n\n" in result[0].content
+        
+        assert converted is True
+    
+    def test_conversion_handles_empty_original_content(self):
+        """
+        What it does: Verifies conversion works when original content is empty.
+        Purpose: Ensure that only tool_results text is used when content is empty.
+        """
+        print("Setup: Message with empty content and orphaned tool_results...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="",
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_xyz",
+                    "content": "Only tool result"
+                }]
+            )
+        ]
+        
+        print("Action: Processing messages...")
+        result, converted = ensure_assistant_before_tool_results(messages)
+        
+        print(f"Result content: '{result[0].content}'")
+        
+        print("Checking that only tool result text is present...")
+        assert "[Tool Result (call_xyz)]" in result[0].content
+        assert "Only tool result" in result[0].content
+        
+        # Should not have leading/trailing whitespace from empty original content
+        assert result[0].content.strip() == result[0].content
+        
+        assert converted is True
+    
+    def test_conversion_returns_correct_flag(self):
+        """
+        What it does: Verifies that converted_any_tool_results flag is returned correctly.
+        Purpose: Ensure return value accurately reflects whether conversion happened.
+        """
+        print("Setup: Two scenarios - with and without orphaned tool_results...")
+        
+        # Scenario 1: With orphaned tool_results (should return True)
+        messages_with_orphaned = [
+            UnifiedMessage(
+                role="user",
+                content="Test",
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_1", "content": "Result"}]
+            )
+        ]
+        
+        print("Action: Processing messages with orphaned tool_results...")
+        result1, converted1 = ensure_assistant_before_tool_results(messages_with_orphaned)
+        
+        print(f"Comparing converted flag: Expected True, Got {converted1}")
+        assert converted1 is True
+        
+        # Scenario 2: Without orphaned tool_results (should return False)
+        messages_without_orphaned = [
+            UnifiedMessage(role="user", content="Hello"),
+            UnifiedMessage(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "tool", "arguments": "{}"}}]
+            ),
+            UnifiedMessage(
+                role="user",
+                content="",
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_1", "content": "Result"}]
+            )
+        ]
+        
+        print("Action: Processing messages without orphaned tool_results...")
+        result2, converted2 = ensure_assistant_before_tool_results(messages_without_orphaned)
+        
+        print(f"Comparing converted flag: Expected False, Got {converted2}")
+        assert converted2 is False
+    
+    def test_normal_tool_results_unchanged(self):
+        """
+        What it does: Verifies that normal (non-orphaned) tool_results are NOT converted.
+        Purpose: CRITICAL - ensure 99% of cases (normal tool use) have zero change.
+        
+        This is the most important backward compatibility test. Normal tool_results
+        (with preceding assistant message with tool_calls) should pass through unchanged.
+        """
+        print("Setup: Normal conversation with valid tool_results...")
+        messages = [
+            UnifiedMessage(role="user", content="Call a tool"),
+            UnifiedMessage(
+                role="assistant",
+                content="",
+                tool_calls=[{
+                    "id": "call_valid",
+                    "type": "function",
+                    "function": {"name": "test_tool", "arguments": "{}"}
+                }]
+            ),
+            UnifiedMessage(
+                role="user",
+                content="",
+                tool_results=[{
+                    "type": "tool_result",
+                    "tool_use_id": "call_valid",
+                    "content": "Tool executed successfully"
+                }]
+            )
+        ]
+        
+        print("Action: Processing messages...")
+        result, converted = ensure_assistant_before_tool_results(messages)
+        
+        print(f"Result: {result}")
+        print(f"Comparing converted flag: Expected False, Got {converted}")
+        assert converted is False  # No conversion happened
+        
+        print("Checking that tool_results are preserved (NOT converted)...")
+        assert result[2].tool_results is not None  # Still has tool_results
+        assert len(result[2].tool_results) == 1
+        assert result[2].tool_results[0]["tool_use_id"] == "call_valid"
+        assert result[2].tool_results[0]["content"] == "Tool executed successfully"
+        
+        print("Checking that content is NOT modified...")
+        assert result[2].content == ""  # Original empty content preserved
+        assert "[Tool Result" not in result[2].content  # NOT converted to text
     
     def test_mixed_valid_and_orphaned_tool_results(self):
         """
@@ -3261,7 +3493,7 @@ class TestStripAllToolContent:
     from messages. It is used when no tools are defined in the request, because
     Kiro API rejects requests that have toolResults but no tools defined.
     
-    This is a critical function for handling clients like Cline/Roo that may
+    This is a critical function for handling clients like Cline/Roo/Cursor that may
     send tool-related content even when tools are not available.
     """
     

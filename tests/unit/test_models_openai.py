@@ -465,19 +465,46 @@ class TestTool:
         print(f"Comparing type: Expected 'function', Got '{tool.type}'")
         assert tool.type == "function"
     
-    def test_requires_function(self):
+    def test_function_is_optional_for_flat_format(self):
         """
-        What it does: Verifies that function is required.
-        Purpose: Ensure validation fails without function.
+        What it does: Verifies that function is optional (for flat format compatibility).
+        Purpose: Ensure flat format (Cursor-style) is supported without function field.
         """
-        print("Setup: Attempting to create Tool without function...")
+        print("Setup: Creating Tool with flat format (name, description, input_schema)...")
+        tool = Tool(
+            type="function",
+            name="test_tool",
+            description="A test tool",
+            input_schema={"type": "object", "properties": {}}
+        )
         
-        print("Action: Creating model (should raise ValidationError)...")
-        with pytest.raises(ValidationError) as exc_info:
-            Tool(type="function")
+        print(f"Result: {tool}")
+        print(f"Comparing name: Expected 'test_tool', Got '{tool.name}'")
+        assert tool.name == "test_tool"
         
-        print(f"ValidationError raised: {exc_info.value}")
-        assert "function" in str(exc_info.value)
+        print(f"Comparing function: Expected None, Got {tool.function}")
+        assert tool.function is None
+        
+        print(f"Comparing description: Expected 'A test tool', Got '{tool.description}'")
+        assert tool.description == "A test tool"
+    
+    def test_standard_format_still_works(self):
+        """
+        What it does: Verifies that standard OpenAI format still works.
+        Purpose: Ensure backward compatibility with standard format.
+        """
+        print("Setup: Creating Tool with standard OpenAI format (function field)...")
+        tool = Tool(
+            type="function",
+            function=ToolFunction(name="standard_tool", description="Standard")
+        )
+        
+        print(f"Result: {tool}")
+        print(f"Comparing function.name: Expected 'standard_tool', Got '{tool.function.name}'")
+        assert tool.function.name == "standard_tool"
+        
+        print(f"Comparing name: Expected None, Got {tool.name}")
+        assert tool.name is None
 
 
 # ==================================================================================================

@@ -886,7 +886,7 @@ def strip_all_tool_content(messages: List[UnifiedMessage]) -> Tuple[List[Unified
     
     had_tool_content = total_tool_calls_stripped > 0 or total_tool_results_stripped > 0
     
-    # Log summary once (DEBUG level - this is normal for clients like Cline/Roo)
+    # Log summary once (DEBUG level - this is normal for clients like Cline/Roo/Cursor)
     if had_tool_content:
         logger.debug(
             f"Converted tool content to text (no tools defined): "
@@ -901,26 +901,27 @@ def ensure_assistant_before_tool_results(messages: List[UnifiedMessage]) -> Tupl
     Ensures that messages with tool_results have a preceding assistant message with tool_calls.
     
     Kiro API requires that when toolResults are present, there must be a preceding
-    assistantResponseMessage with toolUses. Some clients (like Cline/Roo) may send
+    assistantResponseMessage with toolUses. Some clients (like Cline/Roo/Cursor) may send
     truncated conversations where the assistant message is missing.
     
     Since we don't know the original tool name and arguments when the assistant message
-    is missing, we cannot create a valid synthetic assistant message. Instead, we strip
-    the tool_results from such messages to avoid Kiro API rejection.
+    is missing, we cannot create a valid synthetic assistant message. Instead, we convert
+    the tool_results to text representation and append to the message content, preserving
+    the context for the model while avoiding Kiro API rejection.
     
     Args:
         messages: List of messages in unified format
     
     Returns:
         Tuple of:
-        - List of messages with orphaned tool_results stripped
-        - Boolean indicating whether any tool_results were stripped (used to skip thinking tag injection)
+        - List of messages with orphaned tool_results converted to text
+        - Boolean indicating whether any tool_results were converted (used to skip thinking tag injection)
     """
     if not messages:
         return [], False
     
     result = []
-    stripped_any_tool_results = False
+    converted_any_tool_results = False
     
     for msg in messages:
         # Check if this message has tool_results
@@ -935,27 +936,40 @@ def ensure_assistant_before_tool_results(messages: List[UnifiedMessage]) -> Tupl
             if not has_preceding_assistant:
                 # We cannot create a valid synthetic assistant message because we don't know
                 # the original tool name and arguments. Kiro API validates tool names.
-                # Strip the tool_results to avoid "Improperly formed request" error.
-                logger.warning(
-                    f"Stripping {len(msg.tool_results)} orphaned tool_results "
+                # Convert tool_results to text to preserve context for the model.
+                logger.debug(
+                    f"Converting {len(msg.tool_results)} orphaned tool_results to text "
                     f"(no preceding assistant message with tool_calls). "
                     f"Tool IDs: {[tr.get('tool_use_id', 'unknown') for tr in msg.tool_results]}"
                 )
                 
-                # Create a copy of the message without tool_results
+                # Convert tool_results to text representation
+                tool_results_text = tool_results_to_text(msg.tool_results)
+                
+                # Append to existing content
+                original_content = extract_text_content(msg.content) or ""
+                if original_content and tool_results_text:
+                    new_content = f"{original_content}\n\n{tool_results_text}"
+                elif tool_results_text:
+                    new_content = tool_results_text
+                else:
+                    new_content = original_content
+                
+                # Create a copy of the message with tool_results converted to text
                 cleaned_msg = UnifiedMessage(
                     role=msg.role,
-                    content=msg.content,
+                    content=new_content,
                     tool_calls=msg.tool_calls,
-                    tool_results=None  # Strip orphaned tool_results
+                    tool_results=None,  # Remove orphaned tool_results (now in text)
+                    images=msg.images
                 )
                 result.append(cleaned_msg)
-                stripped_any_tool_results = True
+                converted_any_tool_results = True
                 continue
         
         result.append(msg)
     
-    return result, stripped_any_tool_results
+    return result, converted_any_tool_results
 
 
 def merge_adjacent_messages(messages: List[UnifiedMessage]) -> List[UnifiedMessage]:
@@ -1179,11 +1193,11 @@ def build_kiro_payload(
     if not tools:
         messages_without_tools, had_tool_content = strip_all_tool_content(messages)
         messages_with_assistants = messages_without_tools
-        stripped_tool_results = had_tool_content
+        converted_tool_results = had_tool_content
     else:
         # Ensure assistant messages exist before tool_results (Kiro API requirement)
-        # Also returns flag if any tool_results were stripped (to skip thinking tag injection)
-        messages_with_assistants, stripped_tool_results = ensure_assistant_before_tool_results(messages)
+        # Also returns flag if any tool_results were converted (to skip thinking tag injection)
+        messages_with_assistants, converted_tool_results = ensure_assistant_before_tool_results(messages)
     
     # Merge adjacent messages with the same role
     merged_messages = merge_adjacent_messages(messages_with_assistants)

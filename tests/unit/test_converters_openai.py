@@ -459,6 +459,205 @@ class TestConvertOpenAIToolsToUnified:
         assert result[0].name == "tool1"
         assert result[1].name == "tool2"
         assert result[2].name == "tool3"
+    
+    # ==================================================================================
+    # Cursor IDE Flat Tool Format Tests (PR #49)
+    # ==================================================================================
+    
+    def test_converts_flat_format_tool(self):
+        """
+        What it does: Verifies conversion of flat format tool (Cursor-style).
+        Purpose: Ensure Cursor IDE flat format is supported.
+        
+        Cursor IDE sends tools in flat format:
+        {"type": "function", "name": "...", "description": "...", "input_schema": {...}}
+        instead of standard OpenAI nested format.
+        """
+        print("Setup: Flat format tool (Cursor-style)...")
+        tools = [Tool(
+            type="function",
+            name="cursor_tool",
+            description="A tool from Cursor IDE",
+            input_schema={"type": "object", "properties": {"param": {"type": "string"}}}
+        )]
+        
+        print("Action: Converting tools...")
+        result = convert_openai_tools_to_unified(tools)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 1, Got {len(result) if result else 0}")
+        assert result is not None
+        assert len(result) == 1
+        
+        print(f"Comparing name: Expected 'cursor_tool', Got '{result[0].name}'")
+        assert result[0].name == "cursor_tool"
+        
+        print(f"Comparing description: Expected 'A tool from Cursor IDE', Got '{result[0].description}'")
+        assert result[0].description == "A tool from Cursor IDE"
+        
+        print(f"Comparing input_schema: Got {result[0].input_schema}")
+        assert result[0].input_schema == {"type": "object", "properties": {"param": {"type": "string"}}}
+    
+    def test_converts_mixed_format_tools(self):
+        """
+        What it does: Verifies conversion of mixed format tools.
+        Purpose: Ensure both standard and flat format can coexist in same request.
+        
+        This simulates a scenario where some tools are in standard OpenAI format
+        and some are in Cursor flat format (though unlikely in practice).
+        """
+        print("Setup: Mixed format tools...")
+        tools = [
+            # Standard OpenAI format
+            Tool(
+                type="function",
+                function=ToolFunction(
+                    name="standard_tool",
+                    description="Standard format",
+                    parameters={"type": "object"}
+                )
+            ),
+            # Cursor flat format
+            Tool(
+                type="function",
+                name="flat_tool",
+                description="Flat format",
+                input_schema={"type": "object"}
+            )
+        ]
+        
+        print("Action: Converting tools...")
+        result = convert_openai_tools_to_unified(tools)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 2, Got {len(result)}")
+        assert len(result) == 2
+        
+        print("Checking standard format tool...")
+        assert result[0].name == "standard_tool"
+        assert result[0].description == "Standard format"
+        
+        print("Checking flat format tool...")
+        assert result[1].name == "flat_tool"
+        assert result[1].description == "Flat format"
+    
+    def test_standard_format_takes_priority(self):
+        """
+        What it does: Verifies that standard format takes priority over flat format.
+        Purpose: Ensure function field is used when both formats are present (edge case).
+        
+        This is an edge case where a tool has BOTH function and name fields.
+        The standard format (function) should take priority.
+        """
+        print("Setup: Tool with BOTH formats (edge case)...")
+        tools = [Tool(
+            type="function",
+            # Standard format
+            function=ToolFunction(
+                name="standard_name",
+                description="Standard description",
+                parameters={"type": "object", "properties": {"a": {"type": "string"}}}
+            ),
+            # Flat format (should be ignored)
+            name="flat_name",
+            description="Flat description",
+            input_schema={"type": "object", "properties": {"b": {"type": "string"}}}
+        )]
+        
+        print("Action: Converting tools...")
+        result = convert_openai_tools_to_unified(tools)
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        
+        print("Checking that standard format was used (not flat)...")
+        print(f"Comparing name: Expected 'standard_name', Got '{result[0].name}'")
+        assert result[0].name == "standard_name"
+        
+        print(f"Comparing description: Expected 'Standard description', Got '{result[0].description}'")
+        assert result[0].description == "Standard description"
+        
+        print(f"Comparing input_schema: Got {result[0].input_schema}")
+        assert result[0].input_schema == {"type": "object", "properties": {"a": {"type": "string"}}}
+    
+    def test_skips_invalid_tools(self):
+        """
+        What it does: Verifies that tools without function OR name are skipped.
+        Purpose: Ensure invalid tools don't crash the conversion.
+        
+        This tests the error handling when a tool has neither function nor name field.
+        """
+        print("Setup: Invalid tool (no function, no name)...")
+        tools = [
+            # Valid tool
+            Tool(
+                type="function",
+                function=ToolFunction(name="valid_tool", description="Valid")
+            ),
+            # Invalid tool (neither function nor name)
+            Tool(type="function"),
+            # Another valid tool
+            Tool(
+                type="function",
+                name="another_valid",
+                description="Also valid",
+                input_schema={}
+            )
+        ]
+        
+        print("Action: Converting tools...")
+        result = convert_openai_tools_to_unified(tools)
+        
+        print(f"Result: {result}")
+        print(f"Comparing count: Expected 2 (invalid skipped), Got {len(result)}")
+        assert len(result) == 2
+        
+        print("Checking that only valid tools were converted...")
+        assert result[0].name == "valid_tool"
+        assert result[1].name == "another_valid"
+    
+    def test_backward_compat_standard_openai_tools(self):
+        """
+        What it does: Verifies that standard OpenAI format is not broken.
+        Purpose: Regression test for existing clients (non-Cursor).
+        
+        This is a critical backward compatibility test. After adding support for
+        Cursor's flat format, we must ensure standard OpenAI format still works.
+        """
+        print("Setup: Standard OpenAI tools (regression test)...")
+        tools = [
+            Tool(
+                type="function",
+                function=ToolFunction(
+                    name="get_weather",
+                    description="Get weather for a location",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "location": {"type": "string", "description": "City name"}
+                        },
+                        "required": ["location"]
+                    }
+                )
+            )
+        ]
+        
+        print("Action: Converting tools...")
+        result = convert_openai_tools_to_unified(tools)
+        
+        print(f"Result: {result}")
+        assert result is not None
+        assert len(result) == 1
+        
+        print(f"Comparing name: Expected 'get_weather', Got '{result[0].name}'")
+        assert result[0].name == "get_weather"
+        
+        print(f"Comparing description: Expected 'Get weather for a location', Got '{result[0].description}'")
+        assert result[0].description == "Get weather for a location"
+        
+        print(f"Comparing input_schema: Got {result[0].input_schema}")
+        assert result[0].input_schema["required"] == ["location"]
+        assert result[0].input_schema["properties"]["location"]["type"] == "string"
 
 
 # ==================================================================================================
