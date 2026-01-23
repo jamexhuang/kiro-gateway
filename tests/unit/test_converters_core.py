@@ -164,6 +164,116 @@ class TestExtractTextContent:
         
         print(f"Comparing result: Expected '', Got '{result}'")
         assert result == ""
+    
+    def test_extracts_from_pydantic_text_content_block(self):
+        """
+        What it does: Verifies extraction from Pydantic TextContentBlock objects.
+        Purpose: Ensure Pydantic models are handled correctly (Issue #46/#50 fix).
+        
+        This is the critical test for Issue #46/#50 - the original bug was that
+        Pydantic TextContentBlock objects weren't being handled, causing MCP tool
+        results to return "(empty result)" instead of actual data.
+        """
+        from kiro.models_anthropic import TextContentBlock
+        
+        print("Setup: Pydantic TextContentBlock...")
+        content = [
+            TextContentBlock(type="text", text="Hello from MCP")
+        ]
+        
+        print("Action: Extracting text...")
+        result = extract_text_content(content)
+        
+        print(f"Result: '{result}'")
+        print(f"Comparing result: Expected 'Hello from MCP', Got '{result}'")
+        assert result == "Hello from MCP"
+    
+    def test_extracts_from_multiple_pydantic_text_blocks(self):
+        """
+        What it does: Verifies extraction from multiple Pydantic TextContentBlock objects.
+        Purpose: Ensure multiple Pydantic models are concatenated correctly.
+        """
+        from kiro.models_anthropic import TextContentBlock
+        
+        print("Setup: Multiple Pydantic TextContentBlocks...")
+        content = [
+            TextContentBlock(type="text", text="Part 1"),
+            TextContentBlock(type="text", text=" Part 2"),
+            TextContentBlock(type="text", text=" Part 3")
+        ]
+        
+        print("Action: Extracting text...")
+        result = extract_text_content(content)
+        
+        print(f"Result: '{result}'")
+        print(f"Comparing result: Expected 'Part 1 Part 2 Part 3', Got '{result}'")
+        assert result == "Part 1 Part 2 Part 3"
+    
+    def test_extracts_from_mixed_dict_and_pydantic(self):
+        """
+        What it does: Verifies extraction from mixed dict and Pydantic content.
+        Purpose: Ensure dict and Pydantic models can coexist in the same list.
+        
+        This simulates real-world scenarios where some content is parsed as dict
+        and some as Pydantic models.
+        """
+        from kiro.models_anthropic import TextContentBlock
+        
+        print("Setup: Mixed dict and Pydantic content...")
+        content = [
+            {"type": "text", "text": "Dict text"},
+            TextContentBlock(type="text", text=" Pydantic text"),
+            " String text"
+        ]
+        
+        print("Action: Extracting text...")
+        result = extract_text_content(content)
+        
+        print(f"Result: '{result}'")
+        print(f"Comparing result: Expected 'Dict text Pydantic text String text', Got '{result}'")
+        assert result == "Dict text Pydantic text String text"
+    
+    def test_handles_pydantic_with_empty_text(self):
+        """
+        What it does: Verifies handling of Pydantic TextContentBlock with empty text.
+        Purpose: Ensure empty text in Pydantic models doesn't cause errors.
+        """
+        from kiro.models_anthropic import TextContentBlock
+        
+        print("Setup: Pydantic TextContentBlock with empty text...")
+        content = [
+            TextContentBlock(type="text", text="")
+        ]
+        
+        print("Action: Extracting text...")
+        result = extract_text_content(content)
+        
+        print(f"Result: '{result}'")
+        print(f"Comparing result: Expected '', Got '{result}'")
+        assert result == ""
+    
+    def test_extracts_text_ignoring_other_pydantic_types(self):
+        """
+        What it does: Verifies that only text-containing Pydantic models are extracted.
+        Purpose: Ensure non-text Pydantic models (like ToolUseContentBlock) are ignored.
+        
+        This simulates MCP tool results that contain both text and tool_use blocks.
+        """
+        from kiro.models_anthropic import TextContentBlock, ToolUseContentBlock
+        
+        print("Setup: Mixed Pydantic content with text and tool_use...")
+        content = [
+            TextContentBlock(type="text", text="Before tool"),
+            ToolUseContentBlock(type="tool_use", id="call_123", name="test_tool", input={}),
+            TextContentBlock(type="text", text="After tool")
+        ]
+        
+        print("Action: Extracting text...")
+        result = extract_text_content(content)
+        
+        print(f"Result: '{result}'")
+        print(f"Comparing result: Expected 'Before toolAfter tool', Got '{result}'")
+        assert result == "Before toolAfter tool"
 
 
 # ==================================================================================================

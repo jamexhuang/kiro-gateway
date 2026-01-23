@@ -140,6 +140,9 @@ def extract_text_content(content: Any) -> str:
                     text_parts.append(item.get("text", ""))
                 elif "text" in item:
                     text_parts.append(item["text"])
+            elif hasattr(item, "text"):
+                # Handle Pydantic models like TextContentBlock
+                text_parts.append(getattr(item, "text", ""))
             elif isinstance(item, str):
                 text_parts.append(item)
         return "".join(text_parts)
