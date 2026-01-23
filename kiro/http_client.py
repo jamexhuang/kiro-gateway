@@ -40,6 +40,7 @@ from loguru import logger
 from kiro.config import MAX_RETRIES, BASE_RETRY_DELAY, FIRST_TOKEN_MAX_RETRIES, STREAMING_READ_TIMEOUT
 from kiro.auth import KiroAuthManager
 from kiro.utils import get_kiro_headers
+from kiro.network_errors import classify_network_error, get_short_error_message, NetworkErrorInfo
 
 
 class KiroHttpClient:
@@ -202,6 +203,7 @@ class KiroHttpClient:
         
         client = await self._get_client(stream=stream)
         last_error = None
+        last_error_info: Optional[NetworkErrorInfo] = None
         
         for attempt in range(max_retries):
             try:
@@ -248,50 +250,72 @@ class KiroHttpClient:
                 
             except httpx.TimeoutException as e:
                 last_error = e
-                # Determine timeout type for logging
-                timeout_type = type(e).__name__
                 
-                if stream:
-                    # For streaming this could be:
-                    # - ConnectTimeout: TCP connection issue
-                    # - ReadTimeout: server not responding (STREAMING_READ_TIMEOUT)
-                    if isinstance(e, httpx.ConnectTimeout):
-                        logger.warning(
-                            f"[{timeout_type}] Connection timeout (attempt {attempt + 1}/{max_retries})"
-                        )
-                    elif isinstance(e, httpx.ReadTimeout):
-                        logger.warning(
-                            f"[{timeout_type}] Read timeout after {STREAMING_READ_TIMEOUT}s - "
-                            f"server stopped responding (attempt {attempt + 1}/{max_retries})"
-                        )
-                    else:
-                        logger.warning(
-                            f"[{timeout_type}] Timeout during streaming (attempt {attempt + 1}/{max_retries})"
-                        )
-                else:
+                # Classify timeout error for user-friendly messaging
+                error_info = classify_network_error(e)
+                last_error_info = error_info
+                
+                # Log with user-friendly message
+                short_msg = get_short_error_message(error_info)
+                
+                if error_info.is_retryable and attempt < max_retries - 1:
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
-                    logger.warning(
-                        f"[{timeout_type}] Request timeout, waiting {delay}s (attempt {attempt + 1}/{max_retries})"
-                    )
+                    logger.warning(f"{short_msg} - waiting {delay}s (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(delay)
+                else:
+                    logger.error(f"{short_msg} - no more retries (attempt {attempt + 1}/{max_retries})")
+                    if not error_info.is_retryable:
+                        break  # Don't retry non-retryable errors
                 
             except httpx.RequestError as e:
                 last_error = e
-                delay = BASE_RETRY_DELAY * (2 ** attempt)
-                logger.warning(f"Request error: {e}, waiting {delay}s (attempt {attempt + 1}/{max_retries})")
-                await asyncio.sleep(delay)
+                
+                # Classify the error for user-friendly messaging
+                error_info = classify_network_error(e)
+                last_error_info = error_info
+                
+                # Log with user-friendly message
+                short_msg = get_short_error_message(error_info)
+                
+                if error_info.is_retryable and attempt < max_retries - 1:
+                    delay = BASE_RETRY_DELAY * (2 ** attempt)
+                    logger.warning(f"{short_msg} - waiting {delay}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"{short_msg} - no more retries (attempt {attempt + 1}/{max_retries})")
+                    if not error_info.is_retryable:
+                        break  # Don't retry non-retryable errors
         
-        # All attempts exhausted
-        if stream:
+        # All attempts exhausted - provide detailed, user-friendly error message
+        if last_error_info:
+            # Use classified error information
+            error_message = last_error_info.user_message
+            
+            # Add troubleshooting steps
+            if last_error_info.troubleshooting_steps:
+                error_message += "\n\nTroubleshooting:\n"
+                for i, step in enumerate(last_error_info.troubleshooting_steps, 1):
+                    error_message += f"{i}. {step}\n"
+            
+            # Add technical details for debugging
+            error_message += f"\nTechnical details: {last_error_info.technical_details}"
+            
             raise HTTPException(
-                status_code=504,
-                detail=f"Streaming failed after {max_retries} attempts. Last error: {type(last_error).__name__}"
+                status_code=last_error_info.suggested_http_code,
+                detail=error_message.strip()
             )
         else:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Failed to complete request after {max_retries} attempts: {last_error}"
-            )
+            # Fallback if no error was captured (shouldn't happen)
+            if stream:
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"Streaming failed after {max_retries} attempts. Unknown error."
+                )
+            else:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Request failed after {max_retries} attempts. Unknown error."
+                )
     
     async def __aenter__(self) -> "KiroHttpClient":
         """Async context manager support."""

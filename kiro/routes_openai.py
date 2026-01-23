@@ -351,7 +351,7 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
     except HTTPException as e:
         await http_client.close()
         # Log access log for HTTP error
-        logger.warning(f"HTTP {e.status_code} - POST /v1/chat/completions - {e.detail}")
+        logger.error(f"HTTP {e.status_code} - POST /v1/chat/completions - {e.detail}")
         # Flush debug logs on HTTP error ("errors" mode)
         if debug_logger:
             debug_logger.flush_on_error(e.status_code, str(e.detail))

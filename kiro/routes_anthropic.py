@@ -332,7 +332,7 @@ async def messages(
     
     except HTTPException as e:
         await http_client.close()
-        logger.warning(f"HTTP {e.status_code} - POST /v1/messages - {e.detail}")
+        logger.error(f"HTTP {e.status_code} - POST /v1/messages - {e.detail}")
         if debug_logger:
             debug_logger.flush_on_error(e.status_code, str(e.detail))
         raise

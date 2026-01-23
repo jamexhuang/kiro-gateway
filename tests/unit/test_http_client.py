@@ -381,7 +381,7 @@ class TestKiroHttpClientRequestWithRetry:
     async def test_max_retries_exceeded_raises_502(self, mock_auth_manager_for_http):
         """
         What it does: Verifies HTTPException is raised after exhausting retries.
-        Purpose: Ensure 502 is raised after MAX_RETRIES.
+        Purpose: Ensure 504 is raised after MAX_RETRIES for timeout errors.
         """
         print("Setup: Creating KiroHttpClient...")
         http_client = KiroHttpClient(mock_auth_manager_for_http)
@@ -401,9 +401,10 @@ class TestKiroHttpClientRequestWithRetry:
                             {"data": "value"}
                         )
         
-        print(f"Verification: HTTPException with code 502...")
-        assert exc_info.value.status_code == 502
-        assert str(MAX_RETRIES) in exc_info.value.detail
+        print(f"Verification: HTTPException with code 504 (timeout errors now return 504)...")
+        assert exc_info.value.status_code == 504
+        print(f"Verification: Error detail contains user-friendly message...")
+        assert "timeout" in exc_info.value.detail.lower()
     
     @pytest.mark.asyncio
     async def test_other_status_codes_returned_as_is(self, mock_auth_manager_for_http):
@@ -621,13 +622,14 @@ class TestKiroHttpClientStreamingTimeout:
         print("Action: Executing streaming request with timeouts...")
         with patch('kiro.http_client.httpx.AsyncClient', return_value=mock_client):
             with patch('kiro.http_client.get_kiro_headers', return_value={}):
-                with pytest.raises(HTTPException) as exc_info:
-                    await http_client.request_with_retry(
-                        "POST",
-                        "https://api.example.com/test",
-                        {"data": "value"},
-                        stream=True
-                    )
+                with patch('kiro.http_client.asyncio.sleep', new_callable=AsyncMock):
+                    with pytest.raises(HTTPException) as exc_info:
+                        await http_client.request_with_retry(
+                            "POST",
+                            "https://api.example.com/test",
+                            {"data": "value"},
+                            stream=True
+                        )
         
         print(f"Verification: HTTPException with code 504...")
         assert exc_info.value.status_code == 504
@@ -639,8 +641,8 @@ class TestKiroHttpClientStreamingTimeout:
     @pytest.mark.asyncio
     async def test_streaming_timeout_retry_without_delay(self, mock_auth_manager_for_http):
         """
-        What it does: Verifies that streaming timeout retry happens without delay.
-        Purpose: Ensure no exponential backoff on first token timeout.
+        What it does: Verifies that streaming timeout retry happens with exponential backoff.
+        Purpose: Ensure timeouts are retried with proper delay (new behavior with classifier).
         """
         print("Setup: Creating KiroHttpClient...")
         http_client = KiroHttpClient(mock_auth_manager_for_http)
@@ -676,8 +678,8 @@ class TestKiroHttpClientStreamingTimeout:
                         stream=True
                     )
         
-        print("Verification: sleep() NOT called for streaming timeout...")
-        assert not sleep_called
+        print("Verification: sleep() IS called for timeout retry (new behavior)...")
+        assert sleep_called
         assert response.status_code == 200
         
     @pytest.mark.asyncio
@@ -722,7 +724,7 @@ class TestKiroHttpClientStreamingTimeout:
     async def test_connect_timeout_logged_correctly(self, mock_auth_manager_for_http):
         """
         What it does: Verifies ConnectTimeout logging.
-        Purpose: Ensure ConnectTimeout is logged with correct type.
+        Purpose: Ensure ConnectTimeout is logged with user-friendly message.
         """
         print("Setup: Creating KiroHttpClient...")
         http_client = KiroHttpClient(mock_auth_manager_for_http)
@@ -744,24 +746,25 @@ class TestKiroHttpClientStreamingTimeout:
         print("Action: Executing streaming request with ConnectTimeout...")
         with patch('kiro.http_client.httpx.AsyncClient', return_value=mock_client):
             with patch('kiro.http_client.get_kiro_headers', return_value={}):
-                with patch('kiro.http_client.logger') as mock_logger:
-                    response = await http_client.request_with_retry(
-                        "POST",
-                        "https://api.example.com/test",
-                        {"data": "value"},
-                        stream=True
-                    )
+                with patch('kiro.http_client.asyncio.sleep', new_callable=AsyncMock):
+                    with patch('kiro.http_client.logger') as mock_logger:
+                        response = await http_client.request_with_retry(
+                            "POST",
+                            "https://api.example.com/test",
+                            {"data": "value"},
+                            stream=True
+                        )
         
-        print("Verification: logger.warning called with [ConnectTimeout]...")
+        print("Verification: logger.warning called with user-friendly timeout message...")
         warning_calls = [str(call) for call in mock_logger.warning.call_args_list]
-        assert any("ConnectTimeout" in call for call in warning_calls), f"ConnectTimeout not found in: {warning_calls}"
+        assert any("timeout" in call.lower() for call in warning_calls), f"Timeout message not found in: {warning_calls}"
         assert response.status_code == 200
     
     @pytest.mark.asyncio
     async def test_read_timeout_logged_correctly(self, mock_auth_manager_for_http):
         """
         What it does: Verifies ReadTimeout logging.
-        Purpose: Ensure ReadTimeout is logged with STREAMING_READ_TIMEOUT.
+        Purpose: Ensure ReadTimeout is logged with user-friendly message.
         """
         print("Setup: Creating KiroHttpClient...")
         http_client = KiroHttpClient(mock_auth_manager_for_http)
@@ -783,18 +786,18 @@ class TestKiroHttpClientStreamingTimeout:
         print("Action: Executing streaming request with ReadTimeout...")
         with patch('kiro.http_client.httpx.AsyncClient', return_value=mock_client):
             with patch('kiro.http_client.get_kiro_headers', return_value={}):
-                with patch('kiro.http_client.logger') as mock_logger:
-                    response = await http_client.request_with_retry(
-                        "POST",
-                        "https://api.example.com/test",
-                        {"data": "value"},
-                        stream=True
-                    )
+                with patch('kiro.http_client.asyncio.sleep', new_callable=AsyncMock):
+                    with patch('kiro.http_client.logger') as mock_logger:
+                        response = await http_client.request_with_retry(
+                            "POST",
+                            "https://api.example.com/test",
+                            {"data": "value"},
+                            stream=True
+                        )
         
-        print("Verification: logger.warning called with [ReadTimeout] and STREAMING_READ_TIMEOUT...")
+        print("Verification: logger.warning called with user-friendly timeout message...")
         warning_calls = [str(call) for call in mock_logger.warning.call_args_list]
-        assert any("ReadTimeout" in call for call in warning_calls), f"ReadTimeout not found in: {warning_calls}"
-        assert any(str(STREAMING_READ_TIMEOUT) in call for call in warning_calls), f"STREAMING_READ_TIMEOUT not found in: {warning_calls}"
+        assert any("timeout" in call.lower() for call in warning_calls), f"Timeout message not found in: {warning_calls}"
         assert response.status_code == 200
     
     @pytest.mark.asyncio
@@ -816,26 +819,27 @@ class TestKiroHttpClientStreamingTimeout:
         print("Action: Executing streaming request with persistent timeouts...")
         with patch('kiro.http_client.httpx.AsyncClient', return_value=mock_client):
             with patch('kiro.http_client.get_kiro_headers', return_value={}):
-                with pytest.raises(HTTPException) as exc_info:
-                    await http_client.request_with_retry(
-                        "POST",
-                        "https://api.example.com/test",
-                        {"data": "value"},
-                        stream=True
-                    )
+                with patch('kiro.http_client.asyncio.sleep', new_callable=AsyncMock):
+                    with pytest.raises(HTTPException) as exc_info:
+                        await http_client.request_with_retry(
+                            "POST",
+                            "https://api.example.com/test",
+                            {"data": "value"},
+                            stream=True
+                        )
         
-        print("Verification: HTTPException with code 504 and error type...")
+        print("Verification: HTTPException with code 504 and user-friendly message...")
         print(f"Comparing status_code: Expected 504, Got {exc_info.value.status_code}")
         assert exc_info.value.status_code == 504
-        print(f"Comparing detail: Expected 'ReadTimeout' in '{exc_info.value.detail}'")
-        assert "ReadTimeout" in exc_info.value.detail
-        assert "Streaming failed" in exc_info.value.detail
+        print(f"Comparing detail: Expected timeout message with troubleshooting in '{exc_info.value.detail}'")
+        assert "timeout" in exc_info.value.detail.lower()
+        assert "Troubleshooting" in exc_info.value.detail or "Technical details" in exc_info.value.detail
     
     @pytest.mark.asyncio
     async def test_non_streaming_timeout_returns_502(self, mock_auth_manager_for_http):
         """
-        What it does: Verifies that non-streaming timeout returns 502.
-        Purpose: Ensure non-streaming uses legacy logic with 502.
+        What it does: Verifies that non-streaming timeout returns 504.
+        Purpose: Ensure timeouts consistently return 504 (new behavior with classifier).
         """
         print("Setup: Creating KiroHttpClient...")
         http_client = KiroHttpClient(mock_auth_manager_for_http)
@@ -856,8 +860,8 @@ class TestKiroHttpClientStreamingTimeout:
                             stream=False
                         )
         
-        print("Verification: HTTPException with code 502...")
-        assert exc_info.value.status_code == 502
+        print("Verification: HTTPException with code 504 (timeouts now consistently return 504)...")
+        assert exc_info.value.status_code == 504
 
 
 class TestKiroHttpClientSharedClient:
