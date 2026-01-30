@@ -11,3 +11,4 @@ Thank you to all the contributors who have helped improve this project!
 - [@cniu6](https://github.com/cniu6) — Image content block support inspiration (#26)
 - [@somehow-paul](https://github.com/somehow-paul) — Enterprise Kiro IDE support (#45, #48), Cursor IDE compatibility design (#49)
 - [@bhaskoro-muthohar](https://github.com/bhaskoro-muthohar) — Root cause analysis and solution for MCP tool results bug (#46, #50)
+- [@saaj](https://github.com/saaj) — Regional endpoint fix for eu-central-1 and other non-us-east-1 regions (#58)
