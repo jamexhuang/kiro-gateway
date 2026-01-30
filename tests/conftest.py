@@ -85,8 +85,14 @@ def mock_kiro_token_response(valid_kiro_token):
 
 @pytest.fixture
 def valid_proxy_api_key():
-    """Returns a valid proxy API key (from config)."""
-    return "changeme_proxy_secret"
+    """
+    Returns the actual PROXY_API_KEY that the application is using.
+    
+    This reads the value from kiro.config, which was loaded when the app
+    was imported. This ensures tests use the same key the app validates against.
+    """
+    from kiro.config import PROXY_API_KEY
+    return PROXY_API_KEY
 
 
 @pytest.fixture
