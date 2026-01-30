@@ -781,9 +781,10 @@ class TestBuildKiroPayload:
             messages=[ChatMessage(role="user", content="")]
         )
 
-        print("Action: Building payload (with fake reasoning disabled)...")
+        print("Action: Building payload (with fake reasoning and truncation recovery disabled)...")
         with patch('kiro.converters_core.FAKE_REASONING_ENABLED', False):
-            result = build_kiro_payload(request, "conv-123", "")
+            with patch('kiro.config.TRUNCATION_RECOVERY', False):
+                result = build_kiro_payload(request, "conv-123", "")
 
         print(f"Result: {result}")
         current_content = result["conversationState"]["currentMessage"]["userInputMessage"]["content"]

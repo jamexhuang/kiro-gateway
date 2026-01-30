@@ -152,7 +152,102 @@ async def messages(
     # Note: prepare_new_request() and log_request_body() are now called by DebugLoggerMiddleware
     # This ensures debug logging works even for requests that fail Pydantic validation (422 errors)
     
-    # Generate conversation ID
+    # Check for truncation recovery opportunities
+    from kiro.truncation_state import get_tool_truncation, get_content_truncation
+    from kiro.truncation_recovery import generate_truncation_tool_result, generate_truncation_user_message
+    from kiro.models_anthropic import AnthropicMessage
+    
+    modified_messages = []
+    tool_results_modified = 0
+    content_notices_added = 0
+    
+    for msg in request_data.messages:
+        # Check if this is a user message with tool_result blocks
+        if msg.role == "user" and msg.content and isinstance(msg.content, list):
+            modified_content_blocks = []
+            has_modifications = False
+            
+            for block in msg.content:
+                # Handle both dict and Pydantic objects (ToolResultContentBlock)
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                    tool_use_id = block.get("tool_use_id")
+                    original_content = block.get("content", "")
+                elif hasattr(block, "type"):
+                    block_type = block.type
+                    tool_use_id = getattr(block, "tool_use_id", None)
+                    original_content = getattr(block, "content", "")
+                else:
+                    modified_content_blocks.append(block)
+                    continue
+                
+                if block_type == "tool_result" and tool_use_id:
+                    truncation_info = get_tool_truncation(tool_use_id)
+                    if truncation_info:
+                        # Modify tool_result content to include truncation notice
+                        synthetic = generate_truncation_tool_result(
+                            tool_name=truncation_info.tool_name,
+                            tool_use_id=tool_use_id,
+                            truncation_info=truncation_info.truncation_info
+                        )
+                        # Prepend truncation notice to original content
+                        modified_content = f"{synthetic['content']}\n\n---\n\nOriginal tool result:\n{original_content}"
+                        
+                        # Create modified block (handle both dict and Pydantic)
+                        if isinstance(block, dict):
+                            modified_block = block.copy()
+                            modified_block["content"] = modified_content
+                        else:
+                            # Pydantic object - use model_copy
+                            modified_block = block.model_copy(update={"content": modified_content})
+                        
+                        modified_content_blocks.append(modified_block)
+                        tool_results_modified += 1
+                        has_modifications = True
+                        logger.debug(f"Modified tool_result for {tool_use_id} to include truncation notice")
+                        continue
+                
+                modified_content_blocks.append(block)
+            
+            # Create NEW AnthropicMessage object if modifications were made (Pydantic immutability)
+            if has_modifications:
+                modified_msg = msg.model_copy(update={"content": modified_content_blocks})
+                modified_messages.append(modified_msg)
+                continue  # Skip normal append since we already added modified version
+        
+        # Check if this is an assistant message with truncated content
+        if msg.role == "assistant" and msg.content:
+            # Extract text content for hash check
+            text_content = ""
+            if isinstance(msg.content, str):
+                text_content = msg.content
+            elif isinstance(msg.content, list):
+                for block in msg.content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_content += block.get("text", "")
+            
+            if text_content:
+                truncation_info = get_content_truncation(text_content)
+                if truncation_info:
+                    # Add this message first
+                    modified_messages.append(msg)
+                    # Then add synthetic user message about truncation
+                    synthetic_user_msg = AnthropicMessage(
+                        role="user",
+                        content=[{"type": "text", "text": generate_truncation_user_message()}]
+                    )
+                    modified_messages.append(synthetic_user_msg)
+                    content_notices_added += 1
+                    logger.debug(f"Added truncation notice after assistant message (hash: {truncation_info.message_hash})")
+                    continue  # Skip normal append since we already added it
+        
+        modified_messages.append(msg)
+    
+    if tool_results_modified > 0 or content_notices_added > 0:
+        request_data.messages = modified_messages
+        logger.info(f"Truncation recovery: modified {tool_results_modified} tool_result(s), added {content_notices_added} content notice(s)")
+    
+    # Generate conversation ID for Kiro API (random UUID, not used for tracking)
     conversation_id = generate_conversation_id()
     
     # Build payload for Kiro

@@ -104,7 +104,8 @@ async def stream_kiro_to_anthropic(
     model_cache: "ModelInfoCache",
     auth_manager: "KiroAuthManager",
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
-    request_messages: Optional[list] = None
+    request_messages: Optional[list] = None,
+    conversation_id: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Generator for converting Kiro stream to Anthropic SSE format.
@@ -119,6 +120,7 @@ async def stream_kiro_to_anthropic(
         auth_manager: Authentication manager
         first_token_timeout: First token wait timeout (seconds)
         request_messages: Original request messages (for token counting)
+        conversation_id: Stable conversation ID for truncation recovery (optional)
     
     Yields:
         Strings in Anthropic SSE format
@@ -150,6 +152,9 @@ async def stream_kiro_to_anthropic(
     
     # Track context usage for token calculation
     context_usage_percentage: Optional[float] = None
+    
+    # Track truncated tool calls for recovery
+    truncated_tools: List[Dict[str, Any]] = []
     
     try:
         # Send message_start event
@@ -297,6 +302,14 @@ async def stream_kiro_to_anthropic(
                 tool_name = tool.get("function", {}).get("name", "") or tool.get("name", "")
                 tool_input = tool.get("function", {}).get("arguments", {}) or tool.get("input", {})
                 
+                # Check if this tool was truncated
+                if tool.get('_truncation_detected'):
+                    truncated_tools.append({
+                        "id": tool_id,
+                        "name": tool_name,
+                        "truncation_info": tool.get('_truncation_info', {})
+                    })
+                
                 # Parse arguments if string
                 if isinstance(tool_input, str):
                     try:
@@ -342,6 +355,9 @@ async def stream_kiro_to_anthropic(
             
             elif event.type == "context_usage" and event.context_usage_percentage is not None:
                 context_usage_percentage = event.context_usage_percentage
+        
+        # Track completion signals for truncation detection
+        stream_completed_normally = context_usage_percentage is not None
         
         # Check for bracket-style tool calls in full content
         bracket_tool_calls = parse_bracket_tool_calls(full_content)
@@ -423,6 +439,21 @@ async def stream_kiro_to_anthropic(
                 "index": text_block_index
             })
         
+        # Detect content truncation (missing completion signals)
+        content_was_truncated = (
+            not stream_completed_normally and
+            len(full_content) > 0 and
+            not tool_blocks  # Don't confuse with tool call truncation
+        )
+        
+        if content_was_truncated:
+            from kiro.config import TRUNCATION_RECOVERY
+            logger.error(
+                f"Content truncated by Kiro API: stream ended without completion signals, "
+                f"length={len(full_content)} chars. "
+                f"{'Model will be notified automatically about truncation.' if TRUNCATION_RECOVERY else 'Set TRUNCATION_RECOVERY=true in .env to auto-notify model about truncation.'}"
+            )
+        
         # Calculate output tokens
         output_tokens = count_tokens(full_content + full_thinking_content)
         
@@ -452,6 +483,30 @@ async def stream_kiro_to_anthropic(
         yield format_sse_event("message_stop", {
             "type": "message_stop"
         })
+        
+        # Save truncation info for recovery (tracked by stable identifiers)
+        from kiro.truncation_recovery import should_inject_recovery
+        from kiro.truncation_state import save_tool_truncation, save_content_truncation
+        
+        if should_inject_recovery():
+            # Save tool truncations (tracked by tool_call_id)
+            if truncated_tools:
+                for truncated_tool in truncated_tools:
+                    save_tool_truncation(
+                        tool_call_id=truncated_tool["id"],
+                        tool_name=truncated_tool["name"],
+                        truncation_info=truncated_tool["truncation_info"]
+                    )
+            
+            # Save content truncation (tracked by content hash)
+            if content_was_truncated:
+                save_content_truncation(full_content)
+            
+            if truncated_tools or content_was_truncated:
+                logger.info(
+                    f"Truncation detected: {len(truncated_tools)} tool(s), "
+                    f"content={content_was_truncated}. Will be handled when client sends next request."
+                )
         
         logger.debug(
             f"[Anthropic Streaming] Completed: "

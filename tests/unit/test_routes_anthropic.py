@@ -1082,3 +1082,510 @@ class TestAnthropicHTTPClientSelection:
         assert call_args[1]['shared_client'] is not None, \
             "Non-streaming should use shared client"
         print("✅ Anthropic non-streaming correctly uses shared client")
+
+
+# =============================================================================
+# Tests for Truncation Recovery message modification (Issue #56)
+# =============================================================================
+
+class TestTruncationRecoveryMessageModification:
+    """
+    Tests for Truncation Recovery System message modification in routes_anthropic.
+    
+    Verifies that tool_result blocks are modified when truncation info exists in cache.
+    Part of Truncation Recovery System (Issue #56).
+    """
+    
+    @staticmethod
+    def _get_block_value(block, key, default=""):
+        """Helper to get value from dict or Pydantic object."""
+        if isinstance(block, dict):
+            return block.get(key, default)
+        else:
+            return getattr(block, key, default)
+    
+    def test_modifies_tool_result_dict_with_truncation_notice(self):
+        """
+        What it does: Verifies tool_result content block is modified when truncation info exists.
+        Purpose: Ensure truncation notice is prepended to tool_result.
+        """
+        print("Setup: Saving truncation info to cache...")
+        from kiro.truncation_state import save_tool_truncation
+        from kiro.models_anthropic import AnthropicMessage
+        
+        tool_use_id = "tooluse_test_dict"
+        save_tool_truncation(tool_use_id, "write_to_file", {"size_bytes": 5000, "reason": "test"})
+        
+        print("Setup: Creating request with tool_result...")
+        messages = [
+            AnthropicMessage(
+                role="user",
+                content=[
+                    {"type": "tool_result", "tool_use_id": tool_use_id, "content": "Missing parameter error"}
+                ]
+            )
+        ]
+        
+        print("Action: Processing messages through truncation recovery logic...")
+        from kiro.truncation_recovery import should_inject_recovery, generate_truncation_tool_result
+        from kiro.truncation_state import get_tool_truncation
+        
+        modified_messages = []
+        for msg in messages:
+            if msg.role == "user" and msg.content and isinstance(msg.content, list):
+                modified_content_blocks = []
+                has_modifications = False
+                
+                for block in msg.content:
+                    block_type = self._get_block_value(block, "type")
+                    block_tool_use_id = self._get_block_value(block, "tool_use_id")
+                    original_content = self._get_block_value(block, "content", "")
+                    
+                    if block_type == "tool_result" and block_tool_use_id and should_inject_recovery():
+                        truncation_info = get_tool_truncation(block_tool_use_id)
+                        if truncation_info:
+                            print(f"Found truncation info for {block_tool_use_id}")
+                            synthetic = generate_truncation_tool_result(
+                                truncation_info.tool_name,
+                                truncation_info.tool_call_id,
+                                truncation_info.truncation_info
+                            )
+                            modified_content = f"{synthetic['content']}\n\n---\n\nOriginal tool result:\n{original_content}"
+                            
+                            if isinstance(block, dict):
+                                modified_block = block.copy()
+                                modified_block["content"] = modified_content
+                            else:
+                                modified_block = block.model_copy(update={"content": modified_content})
+                            
+                            modified_content_blocks.append(modified_block)
+                            has_modifications = True
+                            continue
+                    
+                    modified_content_blocks.append(block)
+                
+                if has_modifications:
+                    modified_msg = msg.model_copy(update={"content": modified_content_blocks})
+                    modified_messages.append(modified_msg)
+                    continue
+            
+            modified_messages.append(msg)
+        
+        print("Checking: Modified message content...")
+        modified_msg = modified_messages[0]
+        modified_block = modified_msg.content[0]
+        content = self._get_block_value(modified_block, "content")
+        print(f"Content: {content[:100]}...")
+        
+        assert "[API Limitation]" in content
+        assert "Missing parameter error" in content
+        assert "---" in content
+    
+    def test_modifies_tool_result_pydantic_with_truncation_notice(self):
+        """
+        What it does: Verifies tool_result content block (Pydantic) is modified when truncation info exists.
+        Purpose: Ensure truncation notice works with Pydantic ToolResultContentBlock.
+        """
+        print("Setup: Saving truncation info to cache...")
+        from kiro.truncation_state import save_tool_truncation
+        from kiro.models_anthropic import AnthropicMessage, ToolResultContentBlock
+        
+        tool_use_id = "tooluse_test_pydantic"
+        save_tool_truncation(tool_use_id, "write_to_file", {"size_bytes": 5000, "reason": "test"})
+        
+        print("Setup: Creating request with tool_result (Pydantic format)...")
+        tool_result_block = ToolResultContentBlock(
+            type="tool_result",
+            tool_use_id=tool_use_id,
+            content="Missing parameter error"
+        )
+        
+        messages = [
+            AnthropicMessage(role="user", content=[tool_result_block])
+        ]
+        
+        print("Action: Processing messages through truncation recovery logic...")
+        from kiro.truncation_recovery import should_inject_recovery, generate_truncation_tool_result
+        from kiro.truncation_state import get_tool_truncation
+        
+        modified_messages = []
+        for msg in messages:
+            if msg.role == "user" and msg.content and isinstance(msg.content, list):
+                modified_content_blocks = []
+                has_modifications = False
+                
+                for block in msg.content:
+                    block_type = self._get_block_value(block, "type")
+                    block_tool_use_id = self._get_block_value(block, "tool_use_id")
+                    original_content = self._get_block_value(block, "content", "")
+                    
+                    if block_type == "tool_result" and block_tool_use_id and should_inject_recovery():
+                        truncation_info = get_tool_truncation(block_tool_use_id)
+                        if truncation_info:
+                            print(f"Found truncation info for {block_tool_use_id}")
+                            synthetic = generate_truncation_tool_result(
+                                truncation_info.tool_name,
+                                truncation_info.tool_call_id,
+                                truncation_info.truncation_info
+                            )
+                            modified_content = f"{synthetic['content']}\n\n---\n\nOriginal tool result:\n{original_content}"
+                            
+                            if isinstance(block, dict):
+                                modified_block = block.copy()
+                                modified_block["content"] = modified_content
+                            else:
+                                modified_block = block.model_copy(update={"content": modified_content})
+                            
+                            modified_content_blocks.append(modified_block)
+                            has_modifications = True
+                            continue
+                    
+                    modified_content_blocks.append(block)
+                
+                if has_modifications:
+                    modified_msg = msg.model_copy(update={"content": modified_content_blocks})
+                    modified_messages.append(modified_msg)
+                    continue
+            
+            modified_messages.append(msg)
+        
+        print("Checking: Modified message content...")
+        modified_msg = modified_messages[0]
+        modified_block = modified_msg.content[0]
+        content = self._get_block_value(modified_block, "content")
+        print(f"Content: {content[:100]}...")
+        
+        assert "[API Limitation]" in content
+        assert "Missing parameter error" in content
+        assert "---" in content
+    
+    def test_mixed_content_blocks_only_tool_result_modified(self):
+        """
+        What it does: Verifies only tool_result blocks are modified, text blocks unchanged.
+        Purpose: Ensure selective modification of content blocks.
+        """
+        print("Setup: Saving truncation info to cache...")
+        from kiro.truncation_state import save_tool_truncation
+        from kiro.models_anthropic import AnthropicMessage
+        
+        tool_use_id = "tooluse_test_mixed"
+        save_tool_truncation(tool_use_id, "write_to_file", {"size_bytes": 5000, "reason": "test"})
+        
+        print("Setup: Creating request with mixed content blocks...")
+        messages = [
+            AnthropicMessage(
+                role="user",
+                content=[
+                    {"type": "text", "text": "Here's the result:"},
+                    {"type": "tool_result", "tool_use_id": tool_use_id, "content": "Error"}
+                ]
+            )
+        ]
+        
+        print("Action: Processing messages through truncation recovery logic...")
+        from kiro.truncation_recovery import should_inject_recovery, generate_truncation_tool_result
+        from kiro.truncation_state import get_tool_truncation
+        
+        modified_messages = []
+        for msg in messages:
+            if msg.role == "user" and msg.content and isinstance(msg.content, list):
+                modified_content_blocks = []
+                has_modifications = False
+                
+                for block in msg.content:
+                    block_type = self._get_block_value(block, "type")
+                    block_tool_use_id = self._get_block_value(block, "tool_use_id")
+                    original_content = self._get_block_value(block, "content", "")
+                    
+                    if block_type == "tool_result" and block_tool_use_id and should_inject_recovery():
+                        truncation_info = get_tool_truncation(block_tool_use_id)
+                        if truncation_info:
+                            synthetic = generate_truncation_tool_result(
+                                truncation_info.tool_name,
+                                truncation_info.tool_call_id,
+                                truncation_info.truncation_info
+                            )
+                            modified_content = f"{synthetic['content']}\n\n---\n\nOriginal tool result:\n{original_content}"
+                            
+                            if isinstance(block, dict):
+                                modified_block = block.copy()
+                                modified_block["content"] = modified_content
+                            else:
+                                modified_block = block.model_copy(update={"content": modified_content})
+                            
+                            modified_content_blocks.append(modified_block)
+                            has_modifications = True
+                            continue
+                    
+                    modified_content_blocks.append(block)
+                
+                if has_modifications:
+                    modified_msg = msg.model_copy(update={"content": modified_content_blocks})
+                    modified_messages.append(modified_msg)
+                    continue
+            
+            modified_messages.append(msg)
+        
+        print("Checking: Text block unchanged...")
+        modified_msg = modified_messages[0]
+        text_block = modified_msg.content[0]
+        assert self._get_block_value(text_block, "type") == "text"
+        assert self._get_block_value(text_block, "text") == "Here's the result:"
+        
+        print("Checking: Tool_result block modified...")
+        tool_result_block = modified_msg.content[1]
+        assert self._get_block_value(tool_result_block, "type") == "tool_result"
+        tool_content = self._get_block_value(tool_result_block, "content")
+        assert "[API Limitation]" in tool_content
+        assert "Error" in tool_content
+        
+        print("Checking: Order preserved...")
+        assert len(modified_msg.content) == 2
+    
+    def test_no_modification_when_no_truncation(self):
+        """
+        What it does: Verifies messages are not modified when no truncation info exists.
+        Purpose: Ensure normal messages pass through unchanged.
+        """
+        print("Setup: Creating request without truncation info in cache...")
+        from kiro.models_anthropic import AnthropicMessage
+        
+        messages = [
+            AnthropicMessage(
+                role="user",
+                content=[
+                    {"type": "tool_result", "tool_use_id": "tooluse_nonexistent", "content": "Success"}
+                ]
+            )
+        ]
+        
+        print("Action: Processing messages...")
+        from kiro.truncation_recovery import should_inject_recovery
+        from kiro.truncation_state import get_tool_truncation
+        
+        modified_messages = []
+        tool_results_modified = 0
+        
+        for msg in messages:
+            if msg.role == "user" and msg.content and isinstance(msg.content, list):
+                modified_content_blocks = []
+                has_modifications = False
+                
+                for block in msg.content:
+                    block_type = self._get_block_value(block, "type")
+                    block_tool_use_id = self._get_block_value(block, "tool_use_id")
+                    
+                    if block_type == "tool_result" and block_tool_use_id and should_inject_recovery():
+                        truncation_info = get_tool_truncation(block_tool_use_id)
+                        if truncation_info:
+                            tool_results_modified += 1
+                            modified_content_blocks.append(block)
+                        else:
+                            modified_content_blocks.append(block)
+                    else:
+                        modified_content_blocks.append(block)
+                
+                if has_modifications:
+                    modified_msg = msg.model_copy(update={"content": modified_content_blocks})
+                    modified_messages.append(modified_msg)
+                    continue
+            
+            modified_messages.append(msg)
+        
+        print(f"Checking: tool_results_modified count...")
+        assert tool_results_modified == 0
+        
+        print("Checking: Message content unchanged...")
+        content = self._get_block_value(modified_messages[0].content[0], "content")
+        assert content == "Success"
+    
+    def test_pydantic_immutability_new_object_created(self):
+        """
+        What it does: Verifies new AnthropicMessage object is created, not modified in-place.
+        Purpose: Ensure Pydantic immutability is respected.
+        """
+        print("Setup: Saving truncation info and creating message...")
+        from kiro.truncation_state import save_tool_truncation
+        from kiro.models_anthropic import AnthropicMessage
+        
+        tool_use_id = "test_immutable_anthropic"
+        save_tool_truncation(tool_use_id, "tool", {"size_bytes": 1000, "reason": "test truncation"})
+        
+        original_msg = AnthropicMessage(
+            role="user",
+            content=[
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": "original"}
+            ]
+        )
+        original_content = self._get_block_value(original_msg.content[0], "content")
+        
+        print("Action: Processing message...")
+        from kiro.truncation_recovery import should_inject_recovery, generate_truncation_tool_result
+        from kiro.truncation_state import get_tool_truncation
+        
+        if original_msg.role == "user" and original_msg.content and isinstance(original_msg.content, list):
+            modified_content_blocks = []
+            has_modifications = False
+            
+            for block in original_msg.content:
+                block_type = self._get_block_value(block, "type")
+                block_tool_use_id = self._get_block_value(block, "tool_use_id")
+                original_block_content = self._get_block_value(block, "content", "")
+                
+                if block_type == "tool_result" and block_tool_use_id and should_inject_recovery():
+                    truncation_info = get_tool_truncation(block_tool_use_id)
+                    if truncation_info:
+                        synthetic = generate_truncation_tool_result(
+                            truncation_info.tool_name,
+                            truncation_info.tool_call_id,
+                            truncation_info.truncation_info
+                        )
+                        modified_content = f"{synthetic['content']}\n\n---\n\nOriginal tool result:\n{original_block_content}"
+                        
+                        if isinstance(block, dict):
+                            modified_block = block.copy()
+                            modified_block["content"] = modified_content
+                        else:
+                            modified_block = block.model_copy(update={"content": modified_content})
+                        
+                        modified_content_blocks.append(modified_block)
+                        has_modifications = True
+                        continue
+                
+                modified_content_blocks.append(block)
+            
+            if has_modifications:
+                modified_msg = original_msg.model_copy(update={"content": modified_content_blocks})
+        
+        print("Checking: Original message unchanged...")
+        assert self._get_block_value(original_msg.content[0], "content") == original_content
+        
+        print("Checking: New object created...")
+        assert modified_msg is not original_msg
+        
+        print("Checking: Content modified in new object...")
+        modified_content = self._get_block_value(modified_msg.content[0], "content")
+        assert modified_content != original_content
+        assert "[API Limitation]" in modified_content
+
+
+# =============================================================================
+# Tests for Content Truncation Recovery (Issue #56)
+# =============================================================================
+
+class TestContentTruncationRecovery:
+    """
+    Tests for content truncation recovery (synthetic user message) in Anthropic routes.
+    
+    Verifies that synthetic user message is added after truncated assistant message.
+    Part of Truncation Recovery System (Issue #56).
+    """
+    
+    @staticmethod
+    def _get_block_value(block, key, default=""):
+        """Helper to get value from dict or Pydantic object."""
+        if isinstance(block, dict):
+            return block.get(key, default)
+        else:
+            return getattr(block, key, default)
+    
+    def test_adds_synthetic_user_message_after_truncated_assistant(self):
+        """
+        What it does: Verifies synthetic user message is added after truncated assistant message.
+        Purpose: Ensure content truncation recovery works for Anthropic API (Test Case C.2).
+        """
+        print("Setup: Saving content truncation info...")
+        from kiro.truncation_state import save_content_truncation
+        from kiro.models_anthropic import AnthropicMessage
+        
+        # For Anthropic, content can be string or list of blocks
+        truncated_content_text = "This is a very long response that was cut off mid-sentence"
+        save_content_truncation(truncated_content_text)
+        
+        print("Setup: Creating request with truncated assistant message...")
+        messages = [
+            AnthropicMessage(role="assistant", content=[{"type": "text", "text": truncated_content_text}])
+        ]
+        
+        print("Action: Processing messages through content truncation recovery...")
+        from kiro.truncation_recovery import should_inject_recovery, generate_truncation_user_message
+        from kiro.truncation_state import get_content_truncation
+        
+        modified_messages = []
+        for msg in messages:
+            if msg.role == "assistant" and msg.content:
+                # Extract text content for hash check
+                text_content = ""
+                if isinstance(msg.content, str):
+                    text_content = msg.content
+                elif isinstance(msg.content, list):
+                    for block in msg.content:
+                        if self._get_block_value(block, "type") == "text":
+                            text_content += self._get_block_value(block, "text", "")
+                
+                if text_content:
+                    truncation_info = get_content_truncation(text_content)
+                    if truncation_info:
+                        print(f"Found content truncation for hash: {truncation_info.message_hash}")
+                        # Add original message first
+                        modified_messages.append(msg)
+                        # Then add synthetic user message
+                        synthetic_user_msg = AnthropicMessage(
+                            role="user",
+                            content=[{"type": "text", "text": generate_truncation_user_message()}]
+                        )
+                        modified_messages.append(synthetic_user_msg)
+                        continue
+            modified_messages.append(msg)
+        
+        print("Checking: Two messages in result...")
+        assert len(modified_messages) == 2
+        
+        print("Checking: First message is original assistant message...")
+        assert modified_messages[0].role == "assistant"
+        
+        print("Checking: Second message is synthetic user message...")
+        assert modified_messages[1].role == "user"
+        synthetic_text = self._get_block_value(modified_messages[1].content[0], "text")
+        assert "[System Notice]" in synthetic_text
+        assert "truncated" in synthetic_text.lower()
+    
+    def test_no_synthetic_message_when_no_content_truncation(self):
+        """
+        What it does: Verifies no synthetic message is added for normal assistant message.
+        Purpose: Ensure false positives don't occur.
+        """
+        print("Setup: Creating normal assistant message (no truncation)...")
+        from kiro.models_anthropic import AnthropicMessage
+        
+        messages = [
+            AnthropicMessage(role="assistant", content=[{"type": "text", "text": "This is a complete response."}])
+        ]
+        
+        print("Action: Processing messages...")
+        from kiro.truncation_state import get_content_truncation
+        
+        modified_messages = []
+        for msg in messages:
+            if msg.role == "assistant" and msg.content:
+                text_content = ""
+                if isinstance(msg.content, str):
+                    text_content = msg.content
+                elif isinstance(msg.content, list):
+                    for block in msg.content:
+                        if self._get_block_value(block, "type") == "text":
+                            text_content += self._get_block_value(block, "text", "")
+                
+                if text_content:
+                    truncation_info = get_content_truncation(text_content)
+                    if truncation_info:
+                        # Would add synthetic message here
+                        pass
+            modified_messages.append(msg)
+        
+        print("Checking: Only one message in result...")
+        assert len(modified_messages) == 1
+        
+        print("Checking: Message unchanged...")
+        text = self._get_block_value(modified_messages[0].content[0], "text")
+        assert text == "This is a complete response."

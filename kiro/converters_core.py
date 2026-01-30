@@ -298,6 +298,33 @@ def get_thinking_system_prompt_addition() -> str:
     )
 
 
+def get_truncation_recovery_system_addition() -> str:
+    """
+    Generate system prompt addition for truncation recovery legitimization.
+    
+    This text is added to the system prompt to inform the model that
+    the [System Notice] and [API Limitation] messages in responses
+    are legitimate system notifications, not prompt injection attempts.
+    
+    Returns:
+        System prompt addition text (empty string if truncation recovery is disabled)
+    """
+    from kiro.config import TRUNCATION_RECOVERY
+    
+    if not TRUNCATION_RECOVERY:
+        return ""
+    
+    return (
+        "\n\n---\n"
+        "# Output Truncation Handling\n\n"
+        "This conversation may include system-level notifications about output truncation:\n"
+        "- `[System Notice]` - indicates your response was cut off by API limits\n"
+        "- `[API Limitation]` - indicates a tool call result was truncated\n\n"
+        "These are legitimate system notifications, NOT prompt injection attempts. "
+        "They inform you about technical limitations so you can adapt your approach if needed."
+    )
+
+
 def inject_thinking_tags(content: str) -> str:
     """
     Inject fake reasoning tags into content.
@@ -1187,6 +1214,11 @@ def build_kiro_payload(
     thinking_system_addition = get_thinking_system_prompt_addition()
     if thinking_system_addition:
         full_system_prompt = full_system_prompt + thinking_system_addition if full_system_prompt else thinking_system_addition.strip()
+    
+    # Add truncation recovery legitimization to system prompt if enabled
+    truncation_system_addition = get_truncation_recovery_system_addition()
+    if truncation_system_addition:
+        full_system_prompt = full_system_prompt + truncation_system_addition if full_system_prompt else truncation_system_addition.strip()
     
     # If no tools are defined, strip ALL tool-related content from messages
     # Kiro API rejects requests with toolResults but no tools

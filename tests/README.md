@@ -76,7 +76,7 @@ tests/
 │   ├── test_cache.py               # ModelInfoCache tests (is_valid_model, add_hidden_model)
 │   ├── test_config.py              # Configuration tests (SERVER_HOST, SERVER_PORT, LOG_LEVEL, etc.)
 │   ├── test_converters_anthropic.py # Anthropic Messages API → Kiro converter tests
-│   ├── test_converters_core.py     # Shared conversion logic tests (UnifiedMessage, merging, etc.)
+│   ├── test_converters_core.py     # Shared conversion logic tests (UnifiedMessage, merging, truncation recovery system prompt)
 │   ├── test_converters_openai.py   # OpenAI Chat API → Kiro converter tests
 │   ├── test_debug_logger.py        # DebugLogger tests (off/errors/all modes)
 │   ├── test_debug_middleware.py    # DebugLoggerMiddleware tests (endpoint filtering, mode handling)
@@ -86,14 +86,17 @@ tests/
 │   ├── test_model_resolver.py      # Dynamic Model Resolution System tests
 │   ├── test_models_anthropic.py    # Anthropic Pydantic models tests (all content blocks, tools, streaming)
 │   ├── test_models_openai.py       # OpenAI Pydantic models tests (messages, tools, responses, streaming)
-│   ├── test_parsers.py             # AwsEventStreamParser tests (including JSON truncation diagnostics)
-│   ├── test_routes_anthropic.py    # Anthropic API endpoint tests (/v1/messages)
-│   ├── test_routes_openai.py       # OpenAI API endpoint tests (/v1/chat/completions)
+│   ├── test_network_errors.py      # Network error handling tests
+│   ├── test_parsers.py             # AwsEventStreamParser tests (JSON truncation diagnostics, truncation recovery integration)
+│   ├── test_routes_anthropic.py    # Anthropic API endpoint tests (/v1/messages, truncation recovery message modification)
+│   ├── test_routes_openai.py       # OpenAI API endpoint tests (/v1/chat/completions, truncation recovery message modification)
 │   ├── test_streaming_anthropic.py # Anthropic streaming response tests
 │   ├── test_streaming_core.py      # Shared streaming logic tests
 │   ├── test_streaming_openai.py    # OpenAI streaming response tests
 │   ├── test_thinking_parser.py     # ThinkingParser tests (FSM for thinking blocks)
 │   ├── test_tokenizer.py           # Tokenizer tests (tiktoken)
+│   ├── test_truncation_recovery.py # Truncation Recovery System tests (synthetic message generation)
+│   ├── test_truncation_state.py    # Truncation state cache tests (save/retrieve, one-time retrieval, thread safety)
 │   └── test_vpn_proxy.py           # VPN/Proxy configuration tests (environment variables, URL normalization, NO_PROXY)
 ├── integration/                     # Integration tests for full flow
 │   └── test_full_flow.py           # End-to-end tests

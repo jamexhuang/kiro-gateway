@@ -1223,3 +1223,137 @@ class TestDiagnoseJsonTruncation:
         
         print(f"Result: {result}")
         assert result["is_truncated"] is True
+
+
+# =============================================================================
+# Tests for Truncation Recovery System integration (Issue #56)
+# =============================================================================
+
+class TestTruncationRecoveryIntegration:
+    """
+    Tests for Truncation Recovery System integration in parsers.
+    
+    Verifies that tool calls are marked with truncation flags when JSON is truncated.
+    Part of Truncation Recovery System (Issue #56).
+    """
+    
+    def test_tool_call_marked_with_truncation_flags(self, aws_event_parser):
+        """
+        What it does: Verifies tool call is marked with _truncation_detected and _truncation_info.
+        Purpose: Ensure truncation detection marks tool calls for recovery system.
+        """
+        print("Setup: Creating tool call with truncated JSON arguments...")
+        aws_event_parser.current_tool_call = {
+            "id": "tooluse_truncated",
+            "type": "function",
+            "function": {
+                "name": "write_to_file",
+                "arguments": '{"filePath": "/path/to/file.md", "content": "This is a very long content that was cut off'
+            }
+        }
+        
+        print("Action: Finalizing tool call (should detect truncation)...")
+        aws_event_parser._finalize_tool_call()
+        
+        print("Checking: Tool call was added to list...")
+        assert len(aws_event_parser.tool_calls) == 1
+        
+        tool_call = aws_event_parser.tool_calls[0]
+        print(f"Tool call: {tool_call}")
+        
+        print("Checking: _truncation_detected flag is set...")
+        assert tool_call.get("_truncation_detected") is True
+        
+        print("Checking: _truncation_info is present...")
+        assert "_truncation_info" in tool_call
+        
+        truncation_info = tool_call["_truncation_info"]
+        print(f"Truncation info: {truncation_info}")
+        
+        print("Checking: truncation_info has required fields...")
+        assert truncation_info["is_truncated"] is True
+        assert "size_bytes" in truncation_info
+        assert truncation_info["size_bytes"] > 0
+        assert "reason" in truncation_info
+        assert len(truncation_info["reason"]) > 0
+    
+    def test_valid_tool_call_not_marked_with_truncation(self, aws_event_parser):
+        """
+        What it does: Verifies valid tool call is NOT marked with truncation flags.
+        Purpose: Ensure false positives don't occur.
+        """
+        print("Setup: Creating tool call with valid JSON arguments...")
+        aws_event_parser.current_tool_call = {
+            "id": "tooluse_valid",
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "arguments": '{"location": "Moscow", "units": "celsius"}'
+            }
+        }
+        
+        print("Action: Finalizing tool call...")
+        aws_event_parser._finalize_tool_call()
+        
+        print("Checking: Tool call was added to list...")
+        assert len(aws_event_parser.tool_calls) == 1
+        
+        tool_call = aws_event_parser.tool_calls[0]
+        print(f"Tool call: {tool_call}")
+        
+        print("Checking: _truncation_detected flag is NOT set...")
+        assert tool_call.get("_truncation_detected") is not True
+        
+        print("Checking: _truncation_info is NOT present...")
+        assert "_truncation_info" not in tool_call
+    
+    def test_multiple_tool_calls_with_mixed_truncation(self, aws_event_parser):
+        """
+        What it does: Verifies multiple tool calls are marked independently.
+        Purpose: Ensure truncation detection works correctly for multiple tool calls.
+        """
+        print("Setup: Creating first tool call (valid)...")
+        aws_event_parser.current_tool_call = {
+            "id": "tooluse_1",
+            "type": "function",
+            "function": {
+                "name": "func1",
+                "arguments": '{"param": "value"}'
+            }
+        }
+        aws_event_parser._finalize_tool_call()
+        
+        print("Setup: Creating second tool call (truncated)...")
+        aws_event_parser.current_tool_call = {
+            "id": "tooluse_2",
+            "type": "function",
+            "function": {
+                "name": "func2",
+                "arguments": '{"param": "incomplete'
+            }
+        }
+        aws_event_parser._finalize_tool_call()
+        
+        print("Setup: Creating third tool call (valid)...")
+        aws_event_parser.current_tool_call = {
+            "id": "tooluse_3",
+            "type": "function",
+            "function": {
+                "name": "func3",
+                "arguments": '{"param": "complete"}'
+            }
+        }
+        aws_event_parser._finalize_tool_call()
+        
+        print("Checking: All tool calls were added...")
+        assert len(aws_event_parser.tool_calls) == 3
+        
+        print("Checking: First tool call NOT marked as truncated...")
+        assert aws_event_parser.tool_calls[0].get("_truncation_detected") is not True
+        
+        print("Checking: Second tool call IS marked as truncated...")
+        assert aws_event_parser.tool_calls[1].get("_truncation_detected") is True
+        assert "_truncation_info" in aws_event_parser.tool_calls[1]
+        
+        print("Checking: Third tool call NOT marked as truncated...")
+        assert aws_event_parser.tool_calls[2].get("_truncation_detected") is not True

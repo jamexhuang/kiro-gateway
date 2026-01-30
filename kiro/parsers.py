@@ -415,13 +415,20 @@ class AwsEventStreamParser:
                     truncation_info = self._diagnose_json_truncation(args)
                     
                     if truncation_info["is_truncated"]:
-                        # This is likely an upstream issue - Kiro API truncated the stream
-                        logger.warning(
-                            f"Tool '{tool_name}' arguments appear truncated "
-                            f"({truncation_info['size_bytes']} bytes received, {truncation_info['reason']}). "
-                            f"This is NOT a Kiro Gateway bug — the stream was cut off before complete data arrived. "
-                            f"Large tool call arguments (like writing big files) may trigger this limitation in Kiro API. "
-                            f"Preview: {args[:100]}..."
+                        # Mark for recovery system
+                        self.current_tool_call['_truncation_detected'] = True
+                        self.current_tool_call['_truncation_info'] = truncation_info
+                        
+                        # Check if recovery is enabled
+                        from kiro.config import TRUNCATION_RECOVERY
+                        tool_id = self.current_tool_call.get('id', 'unknown')
+                        
+                        # Clear error message: this is Kiro API's fault, not ours
+                        logger.error(
+                            f"Tool call truncated by Kiro API: "
+                            f"tool='{tool_name}', id={tool_id}, size={truncation_info['size_bytes']} bytes, "
+                            f"reason={truncation_info['reason']}. "
+                            f"{'Model will be notified automatically about truncation.' if TRUNCATION_RECOVERY else 'Set TRUNCATION_RECOVERY=true in .env to auto-notify model about truncation.'}"
                         )
                     else:
                         # Regular JSON parse error

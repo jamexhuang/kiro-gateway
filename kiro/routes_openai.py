@@ -177,7 +177,59 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
     # Note: prepare_new_request() and log_request_body() are now called by DebugLoggerMiddleware
     # This ensures debug logging works even for requests that fail Pydantic validation (422 errors)
     
-    # Generate conversation ID
+    # Check for truncation recovery opportunities
+    from kiro.truncation_state import get_tool_truncation, get_content_truncation
+    from kiro.truncation_recovery import generate_truncation_tool_result, generate_truncation_user_message
+    from kiro.models_openai import ChatMessage
+    
+    modified_messages = []
+    tool_results_modified = 0
+    content_notices_added = 0
+    
+    for msg in request_data.messages:
+        # Check if this is a tool_result for a truncated tool call
+        if msg.role == "tool" and msg.tool_call_id:
+            truncation_info = get_tool_truncation(msg.tool_call_id)
+            if truncation_info:
+                # Modify tool_result content to include truncation notice
+                synthetic = generate_truncation_tool_result(
+                    tool_name=truncation_info.tool_name,
+                    tool_use_id=msg.tool_call_id,
+                    truncation_info=truncation_info.truncation_info
+                )
+                # Prepend truncation notice to original content
+                modified_content = f"{synthetic['content']}\n\n---\n\nOriginal tool result:\n{msg.content}"
+                
+                # Create NEW ChatMessage object (Pydantic immutability)
+                modified_msg = msg.model_copy(update={"content": modified_content})
+                modified_messages.append(modified_msg)
+                tool_results_modified += 1
+                logger.debug(f"Modified tool_result for {msg.tool_call_id} to include truncation notice")
+                continue  # Skip normal append since we already added modified version
+        
+        # Check if this is an assistant message with truncated content
+        if msg.role == "assistant" and msg.content and isinstance(msg.content, str):
+            truncation_info = get_content_truncation(msg.content)
+            if truncation_info:
+                # Add this message first
+                modified_messages.append(msg)
+                # Then add synthetic user message about truncation
+                synthetic_user_msg = ChatMessage(
+                    role="user",
+                    content=generate_truncation_user_message()
+                )
+                modified_messages.append(synthetic_user_msg)
+                content_notices_added += 1
+                logger.debug(f"Added truncation notice after assistant message (hash: {truncation_info.message_hash})")
+                continue  # Skip normal append since we already added it
+        
+        modified_messages.append(msg)
+    
+    if tool_results_modified > 0 or content_notices_added > 0:
+        request_data.messages = modified_messages
+        logger.info(f"Truncation recovery: modified {tool_results_modified} tool_result(s), added {content_notices_added} content notice(s)")
+    
+    # Generate conversation ID for Kiro API (random UUID, not used for tracking)
     conversation_id = generate_conversation_id()
     
     # Build payload for Kiro

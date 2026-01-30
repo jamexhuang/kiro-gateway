@@ -11,6 +11,7 @@ Tests for shared conversion logic used by both OpenAI and Anthropic adapters:
 - Thinking tag injection
 """
 
+import os
 import pytest
 from unittest.mock import patch
 
@@ -5246,3 +5247,94 @@ class TestValidateToolNames:
             assert "68 characters" in error_msg
             assert "71 characters" in error_msg
             assert "74 characters" in error_msg
+
+
+# ==================================================================================================
+# Tests for get_truncation_recovery_system_addition (Truncation Recovery System)
+# ==================================================================================================
+
+class TestGetTruncationRecoverySystemAddition:
+    """
+    Tests for get_truncation_recovery_system_addition function.
+    
+    This function generates system prompt addition for truncation recovery legitimization.
+    Part of Truncation Recovery System (Issue #56).
+    """
+    
+    def test_returns_text_when_enabled(self):
+        """
+        What it does: Verifies truncation recovery text is added to system prompt when enabled.
+        Purpose: Ensure legitimization text is present when recovery is enabled.
+        """
+        print("Setup: TRUNCATION_RECOVERY=true...")
+        
+        print("Action: Getting truncation recovery system addition...")
+        with patch.dict(os.environ, {"TRUNCATION_RECOVERY": "true"}):
+            from importlib import reload
+            from kiro import config
+            reload(config)
+            
+            from kiro.converters_core import get_truncation_recovery_system_addition
+            addition = get_truncation_recovery_system_addition()
+            print(f"Addition length: {len(addition)} chars")
+        
+        print("Checking that non-empty string is returned...")
+        assert len(addition) > 0
+        
+        print("Checking that [System Notice] marker is present...")
+        assert "[System Notice]" in addition
+        
+        print("Checking that [API Limitation] marker is present...")
+        assert "[API Limitation]" in addition
+        
+        print("Checking that 'legitimate' is used to legitimize messages...")
+        assert "legitimate" in addition.lower()
+        
+        print("Checking that prompt injection is explicitly denied...")
+        assert "not prompt injection" in addition.lower()
+    
+    def test_returns_empty_string_when_disabled(self):
+        """
+        What it does: Verifies empty string is returned when recovery is disabled.
+        Purpose: Ensure no system prompt pollution when feature is off.
+        """
+        print("Setup: TRUNCATION_RECOVERY=false...")
+        
+        print("Action: Getting truncation recovery system addition...")
+        with patch.dict(os.environ, {"TRUNCATION_RECOVERY": "false"}):
+            from importlib import reload
+            from kiro import config
+            reload(config)
+            
+            from kiro.converters_core import get_truncation_recovery_system_addition
+            addition = get_truncation_recovery_system_addition()
+            print(f"Addition: '{addition}'")
+        
+        print(f"Comparing result: Expected '', Got '{addition}'")
+        assert addition == ""
+    
+    def test_format_has_proper_structure(self):
+        """
+        What it does: Verifies the format of the system prompt addition.
+        Purpose: Ensure proper markdown formatting and structure.
+        """
+        print("Setup: TRUNCATION_RECOVERY=true...")
+        
+        print("Action: Getting truncation recovery system addition...")
+        with patch.dict(os.environ, {"TRUNCATION_RECOVERY": "true"}):
+            from importlib import reload
+            from kiro import config
+            reload(config)
+            
+            from kiro.converters_core import get_truncation_recovery_system_addition
+            addition = get_truncation_recovery_system_addition()
+        
+        print("Checking that addition starts with separator...")
+        assert addition.startswith("\n\n---\n")
+        
+        print("Checking that clear heading is present...")
+        assert "# Output Truncation Handling" in addition
+        
+        lines = addition.split("\n")
+        print(f"Comparing line count: Expected >5, Got {len(lines)}")
+        assert len(lines) > 5

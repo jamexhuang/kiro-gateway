@@ -25,8 +25,9 @@ and other common utilities.
 """
 
 import hashlib
+import json
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Dict, Any
 
 from loguru import logger
 
@@ -97,14 +98,68 @@ def generate_completion_id() -> str:
     return f"chatcmpl-{uuid.uuid4().hex}"
 
 
-def generate_conversation_id() -> str:
+def generate_conversation_id(messages: List[Dict[str, Any]] = None) -> str:
     """
-    Generates a unique ID for conversation.
+    Generates a stable conversation ID based on message history.
+    
+    For truncation recovery, we need a stable ID that persists across requests
+    in the same conversation. This is generated from a hash of key messages.
+    
+    If no messages provided, falls back to random UUID (for backward compatibility).
+    
+    Args:
+        messages: List of messages in the conversation (optional)
     
     Returns:
-        UUID in string format
+        Stable conversation ID (16-char hex) or random UUID
+    
+    Example:
+        >>> messages = [
+        ...     {"role": "user", "content": "Hello"},
+        ...     {"role": "assistant", "content": "Hi there!"}
+        ... ]
+        >>> conv_id = generate_conversation_id(messages)
+        >>> # Same messages will always produce same ID
     """
-    return str(uuid.uuid4())
+    if not messages:
+        # Fallback to random UUID for backward compatibility
+        return str(uuid.uuid4())
+    
+    # Use first 3 messages + last message for stability
+    # This ensures the ID stays the same as conversation grows,
+    # but changes if the conversation history is different
+    if len(messages) <= 3:
+        key_messages = messages
+    else:
+        key_messages = messages[:3] + [messages[-1]]
+    
+    # Extract role and first 100 chars of content for hashing
+    # This makes the hash stable even if content has minor formatting differences
+    simplified_messages = []
+    for msg in key_messages:
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        
+        # Handle different content formats (string, list, dict)
+        if isinstance(content, str):
+            content_str = content[:100]
+        elif isinstance(content, list):
+            # For Anthropic-style content blocks
+            content_str = json.dumps(content, sort_keys=True)[:100]
+        else:
+            content_str = str(content)[:100]
+        
+        simplified_messages.append({
+            "role": role,
+            "content": content_str
+        })
+    
+    # Generate stable hash
+    content_json = json.dumps(simplified_messages, sort_keys=True)
+    hash_digest = hashlib.sha256(content_json.encode()).hexdigest()
+    
+    # Return first 16 chars for readability (still 64 bits of entropy)
+    return hash_digest[:16]
 
 
 def generate_tool_call_id() -> str:

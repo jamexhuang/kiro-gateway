@@ -77,7 +77,8 @@ async def stream_kiro_to_openai_internal(
     auth_manager: "KiroAuthManager",
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
-    request_tools: Optional[list] = None
+    request_tools: Optional[list] = None,
+    conversation_id: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Internal generator for converting Kiro stream to OpenAI format.
@@ -97,6 +98,8 @@ async def stream_kiro_to_openai_internal(
         first_token_timeout: First token wait timeout (seconds)
         request_messages: Original request messages (for fallback token counting)
         request_tools: Original request tools (for fallback token counting)
+        conversation_id: Stable conversation ID for truncation recovery (optional)
+        conversation_id: Stable conversation ID for truncation recovery (optional)
     
     Yields:
         Strings in SSE format: "data: {...}\\n\\n" or "data: [DONE]\\n\\n"
@@ -191,10 +194,30 @@ async def stream_kiro_to_openai_internal(
             elif event.type == "context_usage" and event.context_usage_percentage is not None:
                 context_usage_percentage = event.context_usage_percentage
         
+        # Track completion signals for truncation detection
+        received_usage = metering_data is not None
+        received_context_usage = context_usage_percentage is not None
+        stream_completed_normally = received_usage or received_context_usage
+        
         # Check bracket-style tool calls in full content
         bracket_tool_calls = parse_bracket_tool_calls(full_content)
         all_tool_calls = tool_calls_from_stream + bracket_tool_calls
         all_tool_calls = deduplicate_tool_calls(all_tool_calls)
+        
+        # Detect content truncation (missing completion signals)
+        content_was_truncated = (
+            not stream_completed_normally and
+            len(full_content) > 0 and
+            not all_tool_calls  # Don't confuse with tool call truncation
+        )
+        
+        if content_was_truncated:
+            from kiro.config import TRUNCATION_RECOVERY
+            logger.error(
+                f"Content truncated by Kiro API: stream ended without completion signals, "
+                f"length={len(full_content)} chars. "
+                f"{'Model will be notified automatically about truncation.' if TRUNCATION_RECOVERY else 'Set TRUNCATION_RECOVERY=true in .env to auto-notify model about truncation.'}"
+            )
         
         # Determine finish_reason
         finish_reason = "tool_calls" if all_tool_calls else "stop"
@@ -259,6 +282,32 @@ async def stream_kiro_to_openai_internal(
                 }]
             }
             yield f"data: {json.dumps(tool_calls_chunk, ensure_ascii=False)}\n\n"
+        
+        # Save truncation info for recovery (tracked by stable identifiers)
+        from kiro.truncation_recovery import should_inject_recovery
+        from kiro.truncation_state import save_tool_truncation, save_content_truncation
+        
+        if should_inject_recovery():
+            # Save tool truncations (tracked by tool_call_id)
+            truncated_count = 0
+            for tc in all_tool_calls:
+                if tc.get('_truncation_detected'):
+                    save_tool_truncation(
+                        tool_call_id=tc['id'],
+                        tool_name=tc['function']['name'],
+                        truncation_info=tc['_truncation_info']
+                    )
+                    truncated_count += 1
+            
+            # Save content truncation (tracked by content hash)
+            if content_was_truncated:
+                save_content_truncation(full_content)
+            
+            if truncated_count > 0 or content_was_truncated:
+                logger.info(
+                    f"Truncation detected: {truncated_count} tool(s), "
+                    f"content={content_was_truncated}. Will be handled when client sends next request."
+                )
         
         # Final chunk with usage
         final_chunk = {

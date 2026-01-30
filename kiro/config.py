@@ -298,6 +298,18 @@ DEFAULT_MAX_INPUT_TOKENS: int = 200000
 TOOL_DESCRIPTION_MAX_LENGTH: int = int(os.getenv("TOOL_DESCRIPTION_MAX_LENGTH", "10000"))
 
 # ==================================================================================================
+# Truncation Recovery Settings
+# ==================================================================================================
+
+# Enable automatic truncation recovery (synthetic message injection)
+# When enabled, gateway will inject synthetic messages ONLY when truncation is detected:
+# - For tool calls: synthetic tool_result with error message
+# - For content: synthetic user message notifying about truncation
+# This helps the model understand and adapt to Kiro API limitations
+# Default: true (enabled)
+TRUNCATION_RECOVERY: bool = os.getenv("TRUNCATION_RECOVERY", "true").lower() in ("true", "1", "yes")
+
+# ==================================================================================================
 # Logging Settings
 # ==================================================================================================
 
@@ -468,7 +480,7 @@ FAKE_REASONING_INITIAL_BUFFER_SIZE: int = int(os.getenv("FAKE_REASONING_INITIAL_
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "2.1"
+APP_VERSION: str = "2.2-dev.1"
 APP_TITLE: str = "Kiro Gateway"
 APP_DESCRIPTION: str = "Proxy gateway for Kiro API (Amazon Q Developer / AWS CodeWhisperer). OpenAI and Anthropic compatible. Made by @jwadow"
 
