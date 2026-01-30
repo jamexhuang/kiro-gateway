@@ -208,6 +208,7 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
     # For streaming: use per-request client to avoid CLOSE_WAIT leak on VPN disconnect (issue #54)
     # For non-streaming: use shared client for connection pooling
     url = f"{auth_manager.api_host}/generateAssistantResponse"
+    logger.debug(f"Kiro API URL: {url}")
     
     if request_data.stream:
         # Streaming mode: per-request client prevents orphaned connections

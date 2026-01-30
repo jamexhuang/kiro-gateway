@@ -166,6 +166,9 @@ class KiroAuthManager:
         self._api_host = get_kiro_api_host(region)
         self._q_host = get_kiro_q_host(region)
         
+        # Log initialized endpoints for diagnostics (helps with DNS issues like #58)
+        logger.info(f"Auth manager initialized: region={region}, api_host={self._api_host}, q_host={self._q_host}")
+        
         # Fingerprint for User-Agent
         self._fingerprint = get_machine_fingerprint()
         
@@ -344,6 +347,7 @@ class KiroAuthManager:
                 self._refresh_url = get_kiro_refresh_url(self._region)
                 self._api_host = get_kiro_api_host(self._region)
                 self._q_host = get_kiro_q_host(self._region)
+                logger.info(f"Region updated from credentials file: region={self._region}, api_host={self._api_host}, q_host={self._q_host}")
             
             # Load clientIdHash and device registration for Enterprise Kiro IDE
             if 'clientIdHash' in data:

@@ -368,9 +368,12 @@ async def lifespan(app: FastAPI):
         if app.state.auth_manager.auth_type == AuthType.KIRO_DESKTOP and app.state.auth_manager.profile_arn:
             params["profileArn"] = app.state.auth_manager.profile_arn
         
+        list_models_url = f"{app.state.auth_manager.q_host}/ListAvailableModels"
+        logger.debug(f"Fetching models from: {list_models_url}")
+        
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(
-                f"{app.state.auth_manager.q_host}/ListAvailableModels",
+                list_models_url,
                 headers=headers,
                 params=params
             )
