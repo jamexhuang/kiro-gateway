@@ -109,7 +109,7 @@ kiro-gateway/
 │   ├── ru/                    # Russian version
 │   └── en/                    # English version
 │
-└── debug_logs/                # Debug logs (generated when DEBUG_LAST_REQUEST=true)
+└── debug_logs/                # Debug logs (generated when DEBUG_MODE=all or DEBUG_MODE=errors)
 ```
 
 ### Organization Principle: Shared Core + Thin Adapters
@@ -157,7 +157,7 @@ Centralized storage of all settings:
 | `MODEL_CACHE_TTL` | Model cache TTL | 3600 sec (1 hour) |
 | `DEFAULT_MAX_INPUT_TOKENS` | Default max input tokens | 200000 |
 | `TOOL_DESCRIPTION_MAX_LENGTH` | Max tool description length | 10000 characters |
-| `DEBUG_LAST_REQUEST` | Enable debug logging | `false` |
+| `DEBUG_MODE` | Debug logging mode | `off` (off/errors/all) |
 | `DEBUG_DIR` | Debug logs directory | `debug_logs` |
 | `APP_VERSION` | Application version | `0.0.0` |
 
@@ -400,7 +400,7 @@ Supports async context manager (`async with`).
 
 **Class:** `DebugLogger` (singleton)
 
-**Activation:** `DEBUG_LAST_REQUEST=true` in `.env`
+**Activation:** `DEBUG_MODE=all` or `DEBUG_MODE=errors` in `.env`
 
 **Methods:**
 | Method | Description |
@@ -633,7 +633,7 @@ KIRO_REGION="us-east-1"
 KIRO_CREDS_FILE="~/.aws/sso/cache/kiro-auth-token.json"
 
 # Debug
-DEBUG_LAST_REQUEST="false"
+DEBUG_MODE="off"  # off/errors/all
 DEBUG_DIR="debug_logs"
 
 # Limits
@@ -725,7 +725,7 @@ data: [DONE]
 
 ### Debugging
 
-When `DEBUG_LAST_REQUEST=true`, all requests and responses are logged in `debug_logs/`:
+When `DEBUG_MODE=all` or `DEBUG_MODE=errors`, all requests and responses are logged in `debug_logs/`:
 - `request_body.json` — incoming request
 - `kiro_request_body.json` — request to Kiro API
 - `response_stream_raw.txt` — raw stream from Kiro

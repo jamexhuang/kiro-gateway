@@ -17,7 +17,7 @@ __pycache__/
 dist/
 build/
 
-# Debug logs (generated when DEBUG_LAST_REQUEST=true)
+# Debug logs (generated when DEBUG_MODE is enabled)
 debug_logs*/
 debug*.json
 

@@ -346,86 +346,19 @@ FIRST_TOKEN_MAX_RETRIES: int = int(os.getenv("FIRST_TOKEN_MAX_RETRIES", "3"))
 # Debug Settings
 # ==================================================================================================
 
-# Legacy option (deprecated, will be removed in future releases)
-# Use DEBUG_MODE instead
-_DEBUG_LAST_REQUEST_RAW: str = os.getenv("DEBUG_LAST_REQUEST", "").lower()
-DEBUG_LAST_REQUEST: bool = _DEBUG_LAST_REQUEST_RAW in ("true", "1", "yes")
-
 # Debug logging mode:
 # - off: disabled (default)
 # - errors: save logs only for failed requests (4xx, 5xx)
 # - all: save logs for every request (overwrites on each request)
 _DEBUG_MODE_RAW: str = os.getenv("DEBUG_MODE", "").lower()
 
-# Priority logic:
-# 1. If DEBUG_MODE is explicitly set → use it
-# 2. If DEBUG_MODE is not set but DEBUG_LAST_REQUEST=true → mode "all" (backward compatibility)
-# 3. Otherwise → mode "off"
 if _DEBUG_MODE_RAW in ("off", "errors", "all"):
     DEBUG_MODE: str = _DEBUG_MODE_RAW
-elif DEBUG_LAST_REQUEST:
-    DEBUG_MODE: str = "all"
 else:
     DEBUG_MODE: str = "off"
 
 # Directory for debug log files
 DEBUG_DIR: str = os.getenv("DEBUG_DIR", "debug_logs")
-
-
-def _warn_deprecated_debug_setting():
-    """
-    Print warning if deprecated DEBUG_LAST_REQUEST is used.
-    Called at application startup.
-    """
-    if _DEBUG_LAST_REQUEST_RAW and not _DEBUG_MODE_RAW:
-        import sys
-        # ANSI escape codes: yellow text
-        YELLOW = "\033[93m"
-        RESET = "\033[0m"
-        
-        warning_text = f"""
-{YELLOW}⚠️  DEPRECATED: DEBUG_LAST_REQUEST will be removed in future releases.
-    Please use DEBUG_MODE instead:
-      - DEBUG_MODE=off     (disabled, default)
-      - DEBUG_MODE=errors  (save logs only for failed requests)
-      - DEBUG_MODE=all     (save logs for every request)
-    
-    DEBUG_LAST_REQUEST=true is equivalent to DEBUG_MODE=all
-    See .env.example for more details.{RESET}
-"""
-        print(warning_text, file=sys.stderr)
-
-
-def _warn_timeout_configuration():
-    """
-    Print warning if timeout configuration is suboptimal.
-    Called at application startup.
-    
-    FIRST_TOKEN_TIMEOUT should be less than STREAMING_READ_TIMEOUT:
-    - FIRST_TOKEN_TIMEOUT: time to wait for model to START responding
-    - STREAMING_READ_TIMEOUT: time to wait BETWEEN chunks during streaming
-    """
-    if FIRST_TOKEN_TIMEOUT >= STREAMING_READ_TIMEOUT:
-        import sys
-        YELLOW = "\033[93m"
-        RESET = "\033[0m"
-        
-        warning_text = f"""
-{YELLOW}⚠️  WARNING: Suboptimal timeout configuration detected.
-    
-    FIRST_TOKEN_TIMEOUT ({FIRST_TOKEN_TIMEOUT}s) >= STREAMING_READ_TIMEOUT ({STREAMING_READ_TIMEOUT}s)
-    
-    These timeouts serve different purposes:
-      - FIRST_TOKEN_TIMEOUT: time to wait for model to START responding (default: 15s)
-      - STREAMING_READ_TIMEOUT: time to wait BETWEEN chunks during streaming (default: 300s)
-    
-    Recommendation: FIRST_TOKEN_TIMEOUT should be LESS than STREAMING_READ_TIMEOUT.
-    
-    Example configuration:
-      FIRST_TOKEN_TIMEOUT=15
-      STREAMING_READ_TIMEOUT=300{RESET}
-"""
-        print(warning_text, file=sys.stderr)
 
 # ==================================================================================================
 # Fake Reasoning Settings (Extended Thinking via Tag Injection)

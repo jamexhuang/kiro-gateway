@@ -109,7 +109,7 @@ kiro-gateway/
 │   ├── ru/                    # Русская версия
 │   └── en/                    # Английская версия
 │
-└── debug_logs/                # Отладочные логи (генерируются при DEBUG_LAST_REQUEST=true)
+└── debug_logs/                # Отладочные логи (генерируются при DEBUG_MODE=all или DEBUG_MODE=errors)
 ```
 
 ### Принцип организации: Общее ядро + тонкие адаптеры
@@ -157,7 +157,7 @@ kiro-gateway/
 | `MODEL_CACHE_TTL` | TTL кэша моделей | 3600 сек (1 час) |
 | `DEFAULT_MAX_INPUT_TOKENS` | Макс. input токенов по умолчанию | 200000 |
 | `TOOL_DESCRIPTION_MAX_LENGTH` | Макс. длина описания tool | 10000 символов |
-| `DEBUG_LAST_REQUEST` | Включить отладочное логирование | `false` |
+| `DEBUG_MODE` | Режим отладочного логирования | `off` (off/errors/all) |
 | `DEBUG_DIR` | Директория для debug логов | `debug_logs` |
 | `APP_VERSION` | Версия приложения | `0.0.0` |
 
@@ -400,7 +400,7 @@ OpenAI messages преобразуются в Kiro conversationState:
 
 **Класс:** `DebugLogger` (синглтон)
 
-**Активация:** `DEBUG_LAST_REQUEST=true` в `.env`
+**Активация:** `DEBUG_MODE=all` или `DEBUG_MODE=errors` в `.env`
 
 **Методы:**
 | Метод | Описание |
@@ -633,7 +633,7 @@ KIRO_REGION="us-east-1"
 KIRO_CREDS_FILE="~/.aws/sso/cache/kiro-auth-token.json"
 
 # Отладка
-DEBUG_LAST_REQUEST="false"
+DEBUG_MODE="off"  # off/errors/all
 DEBUG_DIR="debug_logs"
 
 # Лимиты
@@ -725,7 +725,7 @@ data: [DONE]
 
 ### Отладка
 
-При `DEBUG_LAST_REQUEST=true` все запросы и ответы логируются в `debug_logs/`:
+При `DEBUG_MODE=all` или `DEBUG_MODE=errors` все запросы и ответы логируются в `debug_logs/`:
 - `request_body.json` — входящий запрос
 - `kiro_request_body.json` — запрос к Kiro API
 - `response_stream_raw.txt` — сырой поток от Kiro
