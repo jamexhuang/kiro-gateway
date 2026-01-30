@@ -59,6 +59,10 @@
 
 ## 🚀 クイックスタート
 
+**デプロイ方法を選択してください:**
+- 🐍 **ネイティブ Python** - 完全な制御、簡単なデバッグ
+- 🐳 **Docker** - 隔離された環境、簡単なデプロイ → [Docker へジャンプ](#-docker-deployment)
+
 ### 前提条件
 
 - Python 3.10+
@@ -241,6 +245,118 @@ PROXY_API_KEY="my-super-secret-password-123"
 
 リフレッシュトークンを手動で抽出する必要がある場合（例：デバッグ用）、Kiro IDE のトラフィックをインターセプトできます：
 - 以下へのリクエストを探す：`prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
+
+</details>
+
+---
+
+## 🐳 Docker Deployment
+
+> **Docker ベースのデプロイ。** ネイティブ Python を希望しますか？ 上記の [クイックスタート](#-クイックスタート) を参照してください。
+
+### クイックスタート
+
+```bash
+# 1. クローンと設定
+git clone https://github.com/Jwadow/kiro-gateway.git
+cd kiro-gateway
+cp .env.example .env
+# .env を認証情報で編集
+
+# 2. docker-compose で実行
+docker-compose up -d
+
+# 3. ステータスを確認
+docker-compose logs -f
+curl http://localhost:8000/health
+```
+
+### Docker Run (Compose なし)
+
+<details>
+<summary>🔹 環境変数を使用</summary>
+
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  -e REFRESH_TOKEN="your_refresh_token" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 認証情報ファイルを使用</summary>
+
+**Linux/macOS:**
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -v ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro \
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+**Windows (PowerShell):**
+```powershell
+docker run -d `
+  -p 8000:8000 `
+  -v ${HOME}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro `
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json `
+  -e PROXY_API_KEY="my-super-secret-password-123" `
+  --name kiro-gateway `
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 .env ファイルを使用</summary>
+
+```bash
+docker run -d -p 8000:8000 --env-file .env --name kiro-gateway ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+### Docker Compose 設定
+
+`docker-compose.yml` を編集し、お使いの OS のボリュームマウントをコメント解除します：
+
+```yaml
+volumes:
+  # Kiro IDE 認証情報（OS を選択）
+  - ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro              # Linux/macOS
+  # - ${USERPROFILE}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro  # Windows
+  
+  # kiro-cli データベース（OS を選択）
+  - ~/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Linux/macOS
+  # - ${USERPROFILE}/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Windows
+  
+  # デバッグログ（オプション）
+  - ./debug_logs:/app/debug_logs
+```
+
+### 管理コマンド
+
+```bash
+docker-compose logs -f      # ログを表示
+docker-compose restart      # 再起動
+docker-compose down         # 停止
+docker-compose pull && docker-compose up -d  # 更新
+```
+
+<details>
+<summary>🔧 ソースからビルド</summary>
+
+```bash
+docker build -t kiro-gateway .
+docker run -d -p 8000:8000 --env-file .env kiro-gateway
+```
 
 </details>
 

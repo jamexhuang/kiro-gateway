@@ -59,6 +59,10 @@
 
 ## 🚀 빠른 시작
 
+**배포 방법을 선택하세요:**
+- 🐍 **네이티브 Python** - 완전한 제어, 쉬운 디버깅
+- 🐳 **Docker** - 격리된 환경, 쉬운 배포 → [Docker로 이동](#-docker-deployment)
+
 ### 사전 요구 사항
 
 - Python 3.10+
@@ -241,6 +245,118 @@ PROXY_API_KEY="my-super-secret-password-123"
 
 리프레시 토큰을 수동으로 추출해야 하는 경우 (예: 디버깅용), Kiro IDE 트래픽을 가로챌 수 있습니다:
 - 다음으로의 요청 찾기: `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
+
+</details>
+
+---
+
+## 🐳 Docker Deployment
+
+> **Docker 기반 배포.** 네이티브 Python을 선호하시나요? 위의 [빠른 시작](#-빠른-시작)을 참조하세요.
+
+### 빠른 시작
+
+```bash
+# 1. 클론 및 설정
+git clone https://github.com/Jwadow/kiro-gateway.git
+cd kiro-gateway
+cp .env.example .env
+# .env를 자격 증명으로 편집
+
+# 2. docker-compose로 실행
+docker-compose up -d
+
+# 3. 상태 확인
+docker-compose logs -f
+curl http://localhost:8000/health
+```
+
+### Docker Run (Compose 없음)
+
+<details>
+<summary>🔹 환경 변수 사용</summary>
+
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  -e REFRESH_TOKEN="your_refresh_token" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 자격 증명 파일 사용</summary>
+
+**Linux/macOS:**
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -v ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro \
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+**Windows (PowerShell):**
+```powershell
+docker run -d `
+  -p 8000:8000 `
+  -v ${HOME}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro `
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json `
+  -e PROXY_API_KEY="my-super-secret-password-123" `
+  --name kiro-gateway `
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 .env 파일 사용</summary>
+
+```bash
+docker run -d -p 8000:8000 --env-file .env --name kiro-gateway ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+### Docker Compose 설정
+
+`docker-compose.yml`을 편집하고 OS에 맞는 볼륨 마운트를 주석 해제하세요:
+
+```yaml
+volumes:
+  # Kiro IDE 자격 증명 (OS 선택)
+  - ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro              # Linux/macOS
+  # - ${USERPROFILE}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro  # Windows
+  
+  # kiro-cli 데이터베이스 (OS 선택)
+  - ~/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Linux/macOS
+  # - ${USERPROFILE}/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Windows
+  
+  # 디버그 로그 (선택 사항)
+  - ./debug_logs:/app/debug_logs
+```
+
+### 관리 명령어
+
+```bash
+docker-compose logs -f      # 로그 보기
+docker-compose restart      # 재시작
+docker-compose down         # 중지
+docker-compose pull && docker-compose up -d  # 업데이트
+```
+
+<details>
+<summary>🔧 소스에서 빌드</summary>
+
+```bash
+docker build -t kiro-gateway .
+docker run -d -p 8000:8000 --env-file .env kiro-gateway
+```
 
 </details>
 

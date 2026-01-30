@@ -59,6 +59,10 @@
 
 ## 🚀 快速开始
 
+**选择您的部署方法：**
+- 🐍 **原生 Python** - 完全控制，轻松调试
+- 🐳 **Docker** - 隔离环境，轻松部署 → [跳转到 Docker](#-docker-deployment)
+
 ### 前置要求
 
 - Python 3.10+
@@ -241,6 +245,118 @@ PROXY_API_KEY="my-super-secret-password-123"
 
 如果您需要手动提取 refresh token（例如用于调试），您可以拦截 Kiro IDE 流量：
 - 查找发往以下地址的请求：`prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
+
+</details>
+
+---
+
+## 🐳 Docker Deployment
+
+> **基于 Docker 的部署。** 更喜欢原生 Python？请参阅上面的 [快速开始](#-快速开始)。
+
+### 快速开始
+
+```bash
+# 1. 克隆并配置
+git clone https://github.com/Jwadow/kiro-gateway.git
+cd kiro-gateway
+cp .env.example .env
+# 使用您的凭据编辑 .env
+
+# 2. 使用 docker-compose 运行
+docker-compose up -d
+
+# 3. 检查状态
+docker-compose logs -f
+curl http://localhost:8000/health
+```
+
+### Docker Run（不使用 Compose）
+
+<details>
+<summary>🔹 使用环境变量</summary>
+
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  -e REFRESH_TOKEN="your_refresh_token" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 使用凭据文件</summary>
+
+**Linux/macOS:**
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -v ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro \
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+**Windows (PowerShell):**
+```powershell
+docker run -d `
+  -p 8000:8000 `
+  -v ${HOME}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro `
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json `
+  -e PROXY_API_KEY="my-super-secret-password-123" `
+  --name kiro-gateway `
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 使用 .env 文件</summary>
+
+```bash
+docker run -d -p 8000:8000 --env-file .env --name kiro-gateway ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+### Docker Compose 配置
+
+编辑 `docker-compose.yml` 并为您的操作系统取消注释卷挂载：
+
+```yaml
+volumes:
+  # Kiro IDE 凭据（选择您的操作系统）
+  - ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro              # Linux/macOS
+  # - ${USERPROFILE}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro  # Windows
+  
+  # kiro-cli 数据库（选择您的操作系统）
+  - ~/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Linux/macOS
+  # - ${USERPROFILE}/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Windows
+  
+  # 调试日志（可选）
+  - ./debug_logs:/app/debug_logs
+```
+
+### 管理命令
+
+```bash
+docker-compose logs -f      # 查看日志
+docker-compose restart      # 重启
+docker-compose down         # 停止
+docker-compose pull && docker-compose up -d  # 更新
+```
+
+<details>
+<summary>🔧 从源代码构建</summary>
+
+```bash
+docker build -t kiro-gateway .
+docker run -d -p 8000:8000 --env-file .env kiro-gateway
+```
 
 </details>
 

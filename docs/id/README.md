@@ -59,6 +59,10 @@ Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 
 ## 🚀 Mulai Cepat
 
+**Pilih metode deployment Anda:**
+- 🐍 **Python Nativo** - Kontrol penuh, debugging mudah
+- 🐳 **Docker** - Lingkungan terisolasi, deployment mudah → [lompat ke Docker](#-docker-deployment)
+
 ### Prasyarat
 
 - Python 3.10+
@@ -241,6 +245,118 @@ Kedua format kunci didukung untuk kompatibilitas dengan versi kiro-cli yang berb
 
 Jika Anda perlu mengekstrak refresh token secara manual (misalnya, untuk debugging), Anda dapat mencegat traffic Kiro IDE:
 - Cari request ke: `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
+
+</details>
+
+---
+
+## 🐳 Docker Deployment
+
+> **Deployment berbasis Docker.** Lebih suka Python nativo? Lihat [Mulai Cepat](#-mulai-cepat) di atas.
+
+### Mulai Cepat
+
+```bash
+# 1. Clone dan konfigurasi
+git clone https://github.com/Jwadow/kiro-gateway.git
+cd kiro-gateway
+cp .env.example .env
+# Edit .env dengan kredensial Anda
+
+# 2. Jalankan dengan docker-compose
+docker-compose up -d
+
+# 3. Periksa status
+docker-compose logs -f
+curl http://localhost:8000/health
+```
+
+### Docker Run (Tanpa Compose)
+
+<details>
+<summary>🔹 Menggunakan Variabel Lingkungan</summary>
+
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  -e REFRESH_TOKEN="your_refresh_token" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 Menggunakan File Kredensial</summary>
+
+**Linux/macOS:**
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -v ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro \
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+**Windows (PowerShell):**
+```powershell
+docker run -d `
+  -p 8000:8000 `
+  -v ${HOME}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro `
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json `
+  -e PROXY_API_KEY="my-super-secret-password-123" `
+  --name kiro-gateway `
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 Menggunakan File .env</summary>
+
+```bash
+docker run -d -p 8000:8000 --env-file .env --name kiro-gateway ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+### Konfigurasi Docker Compose
+
+Edit `docker-compose.yml` dan uncomment volume mounts untuk OS Anda:
+
+```yaml
+volumes:
+  # Kredensial Kiro IDE (pilih OS Anda)
+  - ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro              # Linux/macOS
+  # - ${USERPROFILE}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro  # Windows
+  
+  # Database kiro-cli (pilih OS Anda)
+  - ~/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Linux/macOS
+  # - ${USERPROFILE}/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Windows
+  
+  # Debug logs (opsional)
+  - ./debug_logs:/app/debug_logs
+```
+
+### Perintah Manajemen
+
+```bash
+docker-compose logs -f      # Lihat logs
+docker-compose restart      # Restart
+docker-compose down         # Stop
+docker-compose pull && docker-compose up -d  # Update
+```
+
+<details>
+<summary>🔧 Build dari Source</summary>
+
+```bash
+docker build -t kiro-gateway .
+docker run -d -p 8000:8000 --env-file .env kiro-gateway
+```
 
 </details>
 

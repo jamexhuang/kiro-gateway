@@ -59,6 +59,10 @@
 
 ## 🚀 Быстрый старт
 
+**Выберите метод развертывания:**
+- 🐍 **Нативный Python** - Полный контроль, легкая отладка
+- 🐳 **Docker** - Изолированная среда, простое развертывание → [перейти к Docker](#-docker-deployment)
+
 ### Предварительные требования
 
 - Python 3.10+
@@ -241,6 +245,118 @@ PROXY_API_KEY="my-super-secret-password-123"
 
 Если вам нужно вручную извлечь refresh token (например, для отладки), вы можете перехватить трафик Kiro IDE:
 - Ищите запросы к: `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
+
+</details>
+
+---
+
+## 🐳 Docker Deployment
+
+> **Docker-развертывание.** Предпочитаете нативный Python? Смотрите [Быстрый старт](#-быстрый-старт) выше.
+
+### Быстрый старт
+
+```bash
+# 1. Клонируйте и настройте
+git clone https://github.com/Jwadow/kiro-gateway.git
+cd kiro-gateway
+cp .env.example .env
+# Отредактируйте .env с вашими учётными данными
+
+# 2. Запустите с docker-compose
+docker-compose up -d
+
+# 3. Проверьте статус
+docker-compose logs -f
+curl http://localhost:8000/health
+```
+
+### Docker Run (без Compose)
+
+<details>
+<summary>🔹 Использование переменных окружения</summary>
+
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  -e REFRESH_TOKEN="your_refresh_token" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 Использование файла с учётными данными</summary>
+
+**Linux/macOS:**
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -v ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro \
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+**Windows (PowerShell):**
+```powershell
+docker run -d `
+  -p 8000:8000 `
+  -v ${HOME}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro `
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json `
+  -e PROXY_API_KEY="my-super-secret-password-123" `
+  --name kiro-gateway `
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 Использование файла .env</summary>
+
+```bash
+docker run -d -p 8000:8000 --env-file .env --name kiro-gateway ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+### Конфигурация Docker Compose
+
+Отредактируйте `docker-compose.yml` и раскомментируйте монтирования томов для вашей ОС:
+
+```yaml
+volumes:
+  # Учётные данные Kiro IDE (выберите вашу ОС)
+  - ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro              # Linux/macOS
+  # - ${USERPROFILE}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro  # Windows
+  
+  # База данных kiro-cli (выберите вашу ОС)
+  - ~/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Linux/macOS
+  # - ${USERPROFILE}/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Windows
+  
+  # Логи отладки (опционально)
+  - ./debug_logs:/app/debug_logs
+```
+
+### Команды управления
+
+```bash
+docker-compose logs -f      # Просмотр логов
+docker-compose restart      # Перезапуск
+docker-compose down         # Остановка
+docker-compose pull && docker-compose up -d  # Обновление
+```
+
+<details>
+<summary>🔧 Сборка из исходников</summary>
+
+```bash
+docker build -t kiro-gateway .
+docker run -d -p 8000:8000 --env-file .env kiro-gateway
+```
 
 </details>
 

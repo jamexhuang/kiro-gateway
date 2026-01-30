@@ -59,6 +59,10 @@ Feito com ❤️ por [@Jwadow](https://github.com/jwadow)
 
 ## 🚀 Início Rápido
 
+**Escolha seu método de implantação:**
+- 🐍 **Python Nativo** - Controle total, depuração fácil
+- 🐳 **Docker** - Ambiente isolado, implantação fácil → [ir para Docker](#-docker-deployment)
+
 ### Pré-requisitos
 
 - Python 3.10+
@@ -241,6 +245,118 @@ Ambos os formatos de chave são suportados para compatibilidade com diferentes v
 
 Se você precisar extrair manualmente o refresh token (por exemplo, para depuração), você pode interceptar o tráfego do Kiro IDE:
 - Procure por requisições para: `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
+
+</details>
+
+---
+
+## 🐳 Docker Deployment
+
+> **Implantação baseada em Docker.** Prefere Python nativo? Veja [Início Rápido](#-início-rápido) acima.
+
+### Início Rápido
+
+```bash
+# 1. Clone e configure
+git clone https://github.com/Jwadow/kiro-gateway.git
+cd kiro-gateway
+cp .env.example .env
+# Edite .env com suas credenciais
+
+# 2. Execute com docker-compose
+docker-compose up -d
+
+# 3. Verifique o status
+docker-compose logs -f
+curl http://localhost:8000/health
+```
+
+### Docker Run (Sem Compose)
+
+<details>
+<summary>🔹 Usando Variáveis de Ambiente</summary>
+
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  -e REFRESH_TOKEN="your_refresh_token" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 Usando Arquivo de Credenciais</summary>
+
+**Linux/macOS:**
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -v ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro \
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+**Windows (PowerShell):**
+```powershell
+docker run -d `
+  -p 8000:8000 `
+  -v ${HOME}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro `
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json `
+  -e PROXY_API_KEY="my-super-secret-password-123" `
+  --name kiro-gateway `
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 Usando Arquivo .env</summary>
+
+```bash
+docker run -d -p 8000:8000 --env-file .env --name kiro-gateway ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+### Configuração do Docker Compose
+
+Edite `docker-compose.yml` e descomente os volumes para seu SO:
+
+```yaml
+volumes:
+  # Credenciais do Kiro IDE (escolha seu SO)
+  - ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro              # Linux/macOS
+  # - ${USERPROFILE}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro  # Windows
+  
+  # Banco de dados kiro-cli (escolha seu SO)
+  - ~/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Linux/macOS
+  # - ${USERPROFILE}/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Windows
+  
+  # Logs de depuração (opcional)
+  - ./debug_logs:/app/debug_logs
+```
+
+### Comandos de Gerenciamento
+
+```bash
+docker-compose logs -f      # Ver logs
+docker-compose restart      # Reiniciar
+docker-compose down         # Parar
+docker-compose pull && docker-compose up -d  # Atualizar
+```
+
+<details>
+<summary>🔧 Compilar do Código-Fonte</summary>
+
+```bash
+docker build -t kiro-gateway .
+docker run -d -p 8000:8000 --env-file .env kiro-gateway
+```
 
 </details>
 
