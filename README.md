@@ -59,6 +59,10 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 
 ## 🚀 Quick Start
 
+**Choose your deployment method:**
+- 🐍 **Native Python** - Full control, easy debugging
+- 🐳 **Docker** - Isolated environment, easy deployment → [jump to Docker](#-docker-deployment)
+
 ### Prerequisites
 
 - Python 3.10+
@@ -90,137 +94,6 @@ python main.py --port 9000
 ```
 
 The server will be available at `http://localhost:8000`
-
----
-
-## 🐳 Docker Deployment
-
-### Quick Start with Docker
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/Jwadow/kiro-gateway.git
-cd kiro-gateway
-
-# 2. Configure credentials (copy and edit .env)
-cp .env.example .env
-# Edit .env with your credentials
-
-# 3. Run with docker-compose (recommended)
-docker-compose up -d
-
-# 4. Check logs
-docker-compose logs -f
-
-# 5. Test the server
-curl http://localhost:8000/health
-```
-
-### Docker Run Examples
-
-<details>
-<summary>🔹 Using Environment Variables</summary>
-
-```bash
-docker run -d \
-  -p 8000:8000 \
-  -e PROXY_API_KEY="my-super-secret-password-123" \
-  -e REFRESH_TOKEN="your_refresh_token" \
-  -e PROFILE_ARN="arn:aws:codewhisperer:us-east-1:..." \
-  --name kiro-gateway \
-  ghcr.io/jwadow/kiro-gateway:latest
-```
-
-</details>
-
-<details>
-<summary>🔹 Using Credentials File (Kiro IDE)</summary>
-
-```bash
-docker run -d \
-  -p 8000:8000 \
-  -v ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro \
-  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json \
-  -e PROXY_API_KEY="my-super-secret-password-123" \
-  --name kiro-gateway \
-  ghcr.io/jwadow/kiro-gateway:latest
-```
-
-</details>
-
-<details>
-<summary>🔹 Using kiro-cli Database</summary>
-
-```bash
-docker run -d \
-  -p 8000:8000 \
-  -v ~/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro \
-  -e KIRO_CLI_DB_FILE=/home/kiro/.local/share/kiro-cli/data.sqlite3 \
-  -e PROXY_API_KEY="my-super-secret-password-123" \
-  --name kiro-gateway \
-  ghcr.io/jwadow/kiro-gateway:latest
-```
-
-</details>
-
-<details>
-<summary>🔹 Using .env File</summary>
-
-```bash
-docker run -d \
-  -p 8000:8000 \
-  --env-file .env \
-  --name kiro-gateway \
-  ghcr.io/jwadow/kiro-gateway:latest
-```
-
-</details>
-
-### Docker Compose Configuration
-
-The `docker-compose.yml` file supports all authentication methods. Uncomment the volume mounts you need:
-
-```yaml
-volumes:
-  # For Kiro IDE credentials
-  - ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro
-  
-  # For kiro-cli database
-  - ~/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro
-  
-  # For debug logs
-  - ./debug_logs:/app/debug_logs
-```
-
-### Building from Source
-
-```bash
-# Build image
-docker build -t kiro-gateway .
-
-# Run your custom image
-docker run -d -p 8000:8000 --env-file .env kiro-gateway
-```
-
-### Docker Management
-
-```bash
-# View logs
-docker-compose logs -f
-
-# Restart service
-docker-compose restart
-
-# Stop service
-docker-compose down
-
-# Update to latest version
-docker-compose pull
-docker-compose up -d
-
-# Check container health
-docker ps
-```
 
 ---
 
@@ -372,6 +245,118 @@ Both key formats are supported for compatibility with different kiro-cli version
 
 If you need to manually extract the refresh token (e.g., for debugging), you can intercept Kiro IDE traffic:
 - Look for requests to: `prod.us-east-1.auth.desktop.kiro.dev/refreshToken`
+
+</details>
+
+---
+
+## 🐳 Docker Deployment
+
+> **Docker-based deployment.** Prefer native Python? See [Quick Start](#-quick-start) above.
+
+### Quick Start
+
+```bash
+# 1. Clone and configure
+git clone https://github.com/Jwadow/kiro-gateway.git
+cd kiro-gateway
+cp .env.example .env
+# Edit .env with your credentials
+
+# 2. Run with docker-compose
+docker-compose up -d
+
+# 3. Check status
+docker-compose logs -f
+curl http://localhost:8000/health
+```
+
+### Docker Run (Without Compose)
+
+<details>
+<summary>🔹 Using Environment Variables</summary>
+
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  -e REFRESH_TOKEN="your_refresh_token" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 Using Credentials File</summary>
+
+**Linux/macOS:**
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -v ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro \
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json \
+  -e PROXY_API_KEY="my-super-secret-password-123" \
+  --name kiro-gateway \
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+**Windows (PowerShell):**
+```powershell
+docker run -d `
+  -p 8000:8000 `
+  -v ${HOME}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro `
+  -e KIRO_CREDS_FILE=/home/kiro/.aws/sso/cache/kiro-auth-token.json `
+  -e PROXY_API_KEY="my-super-secret-password-123" `
+  --name kiro-gateway `
+  ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+<details>
+<summary>🔹 Using .env File</summary>
+
+```bash
+docker run -d -p 8000:8000 --env-file .env --name kiro-gateway ghcr.io/jwadow/kiro-gateway:latest
+```
+
+</details>
+
+### Docker Compose Configuration
+
+Edit `docker-compose.yml` and uncomment volume mounts for your OS:
+
+```yaml
+volumes:
+  # Kiro IDE credentials (choose your OS)
+  - ~/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro              # Linux/macOS
+  # - ${USERPROFILE}/.aws/sso/cache:/home/kiro/.aws/sso/cache:ro  # Windows
+  
+  # kiro-cli database (choose your OS)
+  - ~/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Linux/macOS
+  # - ${USERPROFILE}/.local/share/kiro-cli:/home/kiro/.local/share/kiro-cli:ro  # Windows
+  
+  # Debug logs (optional)
+  - ./debug_logs:/app/debug_logs
+```
+
+### Management Commands
+
+```bash
+docker-compose logs -f      # View logs
+docker-compose restart      # Restart
+docker-compose down         # Stop
+docker-compose pull && docker-compose up -d  # Update
+```
+
+<details>
+<summary>🔧 Building from Source</summary>
+
+```bash
+docker build -t kiro-gateway .
+docker run -d -p 8000:8000 --env-file .env kiro-gateway
+```
 
 </details>
 

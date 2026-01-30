@@ -54,6 +54,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write  # For uploading Trivy scan results
     
     steps:
       - name: Checkout code
@@ -93,6 +94,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: kiro-gateway:test
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'  # Don't fail build, just report
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()  # Upload even if previous step fails
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'docker-image'
+      
       - name: Test Docker image
         run: |
           # Start container with test credentials
@@ -114,13 +131,32 @@ jobs:
           echo "Container logs:"
           docker logs kiro-gateway-test
           
-          # Test health endpoint
+          # Test 1: Health endpoint (no auth required)
           echo "Testing health endpoint..."
           curl -f http://localhost:8000/health || exit 1
           
-          # Test root endpoint
+          # Test 2: Root endpoint (no auth required)
           echo "Testing root endpoint..."
           curl -f http://localhost:8000/ || exit 1
+          
+          # Test 3: Models endpoint with authentication
+          echo "Testing models endpoint with auth..."
+          curl -f -H "Authorization: Bearer test-key-123" \
+            http://localhost:8000/v1/models || exit 1
+          
+          # Test 4: Verify container hasn't restarted
+          RESTARTS=$(docker inspect -f '{{.RestartCount}}' kiro-gateway-test)
+          echo "Container restart count: $RESTARTS"
+          if [ "$RESTARTS" -ne 0 ]; then
+            echo "ERROR: Container restarted $RESTARTS times"
+            exit 1
+          fi
+          
+          # Test 5: Check for errors in logs
+          echo "Checking logs for errors..."
+          if docker logs kiro-gateway-test 2>&1 | grep -i "error" | grep -v "ERROR.*404"; then
+            echo "WARNING: Found errors in logs (non-404)"
+          fi
           
           # Cleanup
           docker stop kiro-gateway-test
@@ -131,6 +167,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          platforms: linux/amd64,linux/arm64  # Multi-arch support (x86_64 and ARM64)
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

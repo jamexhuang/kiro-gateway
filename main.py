@@ -297,16 +297,6 @@ def validate_configuration() -> None:
     # Note: Credential loading details are logged by KiroAuthManager
 
 
-# Run configuration validation on import
-validate_configuration()
-
-# Warn about deprecated DEBUG_LAST_REQUEST if used
-_warn_deprecated_debug_setting()
-
-# Warn about suboptimal timeout configuration
-_warn_timeout_configuration()
-
-
 # --- Lifespan Manager ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -635,6 +625,15 @@ def print_startup_banner(host: str, port: int) -> None:
 # --- Entry Point ---
 if __name__ == "__main__":
     import uvicorn
+    
+    # Run configuration validation before starting server
+    validate_configuration()
+    
+    # Warn about deprecated DEBUG_LAST_REQUEST if used
+    _warn_deprecated_debug_setting()
+    
+    # Warn about suboptimal timeout configuration
+    _warn_timeout_configuration()
     
     # Parse CLI arguments
     args = parse_cli_args()
