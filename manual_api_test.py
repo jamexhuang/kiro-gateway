@@ -25,7 +25,7 @@ import uuid
 from pathlib import Path
 from enum import Enum
 
-import requests
+import httpx
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -245,7 +245,7 @@ def refresh_auth_token_kiro_desktop():
     }
     
     try:
-        response = requests.post(KIRO_DESKTOP_TOKEN_URL, json=payload, headers=headers)
+        response = httpx.post(KIRO_DESKTOP_TOKEN_URL, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         
@@ -261,7 +261,7 @@ def refresh_auth_token_kiro_desktop():
         HEADERS['Authorization'] = f"Bearer {AUTH_TOKEN}"
         return True
         
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         logger.error(f"Error refreshing token via Kiro Desktop Auth: {e}")
         if hasattr(e, 'response') and e.response:
             logger.error(f"Server response: {e.response.status_code} {e.response.text}")
@@ -297,7 +297,7 @@ def refresh_auth_token_aws_sso_oidc():
                  f"client_id={CLIENT_ID[:8] if CLIENT_ID else 'None'}...")
     
     try:
-        response = requests.post(oidc_url, data=data, headers=headers)
+        response = httpx.post(oidc_url, data=data, headers=headers)
         
         # Log response details for debugging (especially on errors)
         if response.status_code != 200:
@@ -328,7 +328,7 @@ def refresh_auth_token_aws_sso_oidc():
         HEADERS['Authorization'] = f"Bearer {AUTH_TOKEN}"
         return True
         
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         logger.error(f"Error refreshing token via AWS SSO OIDC: {e}")
         if hasattr(e, 'response') and e.response is not None:
             logger.error(f"Server response: {e.response.status_code} {e.response.text}")
@@ -342,7 +342,7 @@ def get_profile_arn():
     url = f"{KIRO_API_HOST}/ListAvailableProfiles"
     
     try:
-        response = requests.get(url, headers=HEADERS)
+        response = httpx.get(url, headers=HEADERS)
         response.raise_for_status()
         data = response.json()
         
@@ -355,7 +355,7 @@ def get_profile_arn():
         else:
             logger.warning("No profiles found")
             return False
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         logger.error(f"ListAvailableProfiles failed: {e}")
         if hasattr(e, 'response') and e.response is not None:
             logger.error(f"Server response: {e.response.status_code} {e.response.text}")
@@ -372,14 +372,14 @@ def test_get_models():
     }
 
     try:
-        response = requests.get(url, headers=HEADERS, params=params)
+        response = httpx.get(url, headers=HEADERS, params=params)
         response.raise_for_status()
 
         logger.info(f"Response status: {response.status_code}")
         logger.debug(f"Response (JSON):\n{json.dumps(response.json(), indent=2, ensure_ascii=False)}")
         logger.success("ListAvailableModels test COMPLETED SUCCESSFULLY")
         return True
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         logger.error(f"ListAvailableModels test failed: {e}")
         return False
 
@@ -415,12 +415,12 @@ def test_generate_content():
         payload["profileArn"] = PROFILE_ARN
 
     try:
-        with requests.post(url, headers=HEADERS, json=payload, stream=True) as response:
+        with httpx.stream("POST", url, headers=HEADERS, json=payload) as response:
             response.raise_for_status()
             logger.info(f"Response status: {response.status_code}")
             logger.info("Streaming response:")
 
-            for chunk in response.iter_content(chunk_size=1024):
+            for chunk in response.iter_bytes(chunk_size=1024):
                 if chunk:
                     # Try to decode and find JSON
                     chunk_str = chunk.decode('utf-8', errors='ignore')
@@ -428,7 +428,7 @@ def test_generate_content():
 
         logger.success("generateAssistantResponse test COMPLETED")
         return True
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         logger.error(f"generateAssistantResponse test failed: {e}")
         return False
 
