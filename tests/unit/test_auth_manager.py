@@ -483,9 +483,9 @@ class TestKiroAuthManagerProperties:
             region="us-east-1"
         )
         
-        print("Verification: api_host contains codewhisperer and region...")
+        print("Verification: api_host contains q.{region}.amazonaws.com pattern...")
         print(f"api_host: {manager.api_host}")
-        assert "codewhisperer" in manager.api_host
+        assert "q.us-east-1.amazonaws.com" in manager.api_host
         assert "us-east-1" in manager.api_host
     
     def test_fingerprint_property(self):
