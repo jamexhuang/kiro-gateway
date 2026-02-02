@@ -322,16 +322,17 @@ async def messages(
             
             await http_client.close()
             error_text = error_content.decode('utf-8', errors='replace')
-            logger.error(f"Error from Kiro API: {response.status_code} - {error_text}")
             
             # Try to parse JSON response from Kiro to extract error message
             error_message = error_text
             try:
                 error_json = json.loads(error_text)
-                if "message" in error_json:
-                    error_message = error_json["message"]
-                    if "reason" in error_json:
-                        error_message = f"{error_message} (reason: {error_json['reason']})"
+                # Enhance Kiro API errors with user-friendly messages
+                from kiro.kiro_errors import enhance_kiro_error
+                error_info = enhance_kiro_error(error_json)
+                error_message = error_info.user_message
+                # Log original error for debugging
+                logger.debug(f"Original Kiro error: {error_info.original_message} (reason: {error_info.reason})")
             except (json.JSONDecodeError, KeyError):
                 pass
             

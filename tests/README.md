@@ -82,6 +82,7 @@ tests/
 │   ├── test_debug_middleware.py    # DebugLoggerMiddleware tests (endpoint filtering, mode handling)
 │   ├── test_exceptions.py          # Exception handlers tests (validation_exception_handler, sanitize_validation_errors)
 │   ├── test_http_client.py         # KiroHttpClient tests
+│   ├── test_kiro_errors.py         # Kiro API error enhancement tests (CONTENT_LENGTH_EXCEEDS_THRESHOLD, unknown errors)
 │   ├── test_main_cli.py            # CLI argument parsing tests (--host, --port)
 │   ├── test_model_resolver.py      # Dynamic Model Resolution System tests
 │   ├── test_models_anthropic.py    # Anthropic Pydantic models tests (all content blocks, tools, streaming)
