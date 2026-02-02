@@ -91,6 +91,47 @@ class TestEnhanceKiroErrorContentLength:
         assert "CONTENT_LENGTH_EXCEEDS_THRESHOLD" not in error_info.user_message
 
 
+class TestEnhanceKiroErrorMonthlyLimit:
+    """Tests for MONTHLY_REQUEST_COUNT error enhancement."""
+    
+    def test_monthly_limit_error_enhanced_successfully(self):
+        """
+        What it does: Verifies MONTHLY_REQUEST_COUNT is enhanced with user-friendly message.
+        Purpose: Ensure monthly quota error is clear and actionable.
+        """
+        print("Setup: Creating error JSON with MONTHLY_REQUEST_COUNT...")
+        error_json = {
+            "message": "You have reached the limit.",
+            "reason": "MONTHLY_REQUEST_COUNT"
+        }
+        
+        print("Action: Enhancing error...")
+        error_info = enhance_kiro_error(error_json)
+        
+        print("Verification: User message is enhanced...")
+        assert error_info.user_message == "Monthly request limit exceeded. Account has reached its monthly quota."
+        assert error_info.reason == "MONTHLY_REQUEST_COUNT"
+        assert error_info.original_message == "You have reached the limit."
+    
+    def test_monthly_limit_error_no_reason_suffix(self):
+        """
+        What it does: Verifies enhanced message doesn't include (reason: ...) suffix.
+        Purpose: Ensure clean, user-friendly message without technical codes.
+        """
+        print("Setup: Creating error JSON...")
+        error_json = {
+            "message": "You have reached the limit.",
+            "reason": "MONTHLY_REQUEST_COUNT"
+        }
+        
+        print("Action: Enhancing error...")
+        error_info = enhance_kiro_error(error_json)
+        
+        print("Verification: No (reason: ...) in user message...")
+        assert "(reason:" not in error_info.user_message
+        assert "MONTHLY_REQUEST_COUNT" not in error_info.user_message
+
+
 class TestEnhanceKiroErrorUnknown:
     """Tests for unknown error handling."""
     

@@ -105,6 +105,10 @@ def enhance_kiro_error(error_json: Dict[str, Any]) -> KiroErrorInfo:
         # Context limit exceeded - conversation is too long
         user_message = "Model context limit reached. Conversation size exceeds model capacity."
     
+    elif reason == "MONTHLY_REQUEST_COUNT":
+        # Monthly request limit exceeded - account quota exhausted
+        user_message = "Monthly request limit exceeded. Account has reached its monthly quota."
+    
     # Future error enhancements can be added here:
     # elif reason == "RATE_LIMIT_EXCEEDED":
     #     user_message = "Rate limit exceeded. Too many requests in a short time."
