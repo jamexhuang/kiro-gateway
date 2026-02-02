@@ -351,6 +351,7 @@ def inject_thinking_tags(content: str) -> str:
         "- Think about edge cases, potential issues, and what could go wrong\n"
         "- Challenge your initial assumptions\n"
         "- Verify your reasoning before reaching a conclusion\n\n"
+        "After completing your thinking, respond in the same language the user is using in their messages, or in the language specified in their settings if available.\n\n"
         "Take the time you need. Quality of thought matters more than speed."
     )
     
