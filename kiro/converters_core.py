@@ -1084,6 +1084,56 @@ def merge_adjacent_messages(messages: List[UnifiedMessage]) -> List[UnifiedMessa
     return merged
 
 
+def ensure_first_message_is_user(messages: List[UnifiedMessage]) -> List[UnifiedMessage]:
+    """
+    Ensures that the first message in the conversation is from user role.
+    
+    Kiro API requires conversations to start with a user message. If the first
+    message is from assistant (or any other non-user role), we prepend a minimal
+    synthetic user message.
+    
+    This matches LiteLLM behavior for Anthropic API compatibility and fixes
+    issue #60 where conversations starting with assistant messages cause
+    "Improperly formed request" errors.
+    
+    Args:
+        messages: List of messages in unified format
+    
+    Returns:
+        List of messages with guaranteed user-first order
+    
+    Example:
+        >>> messages = [
+        ...     UnifiedMessage(role="assistant", content="Hello"),
+        ...     UnifiedMessage(role="user", content="Hi")
+        ... ]
+        >>> result = ensure_first_message_is_user(messages)
+        >>> result[0].role
+        'user'
+        >>> result[0].content
+        '.'
+    """
+    if not messages:
+        return messages
+    
+    if messages[0].role != "user":
+        logger.debug(
+            f"First message is '{messages[0].role}', prepending synthetic user message "
+            f"(Kiro API requires conversations to start with user)"
+        )
+        
+        # Create minimal synthetic user message (matches LiteLLM behavior)
+        # Using "." as minimal valid content to avoid disrupting conversation context
+        synthetic_user = UnifiedMessage(
+            role="user",
+            content="."
+        )
+        
+        return [synthetic_user] + messages
+    
+    return messages
+
+
 # ==================================================================================================
 # Kiro History Building
 # ==================================================================================================
@@ -1234,6 +1284,9 @@ def build_kiro_payload(
     
     # Merge adjacent messages with the same role
     merged_messages = merge_adjacent_messages(messages_with_assistants)
+    
+    # Ensure first message is from user (Kiro API requirement, fixes issue #60)
+    merged_messages = ensure_first_message_is_user(merged_messages)
     
     if not merged_messages:
         raise ValueError("No messages to send")
