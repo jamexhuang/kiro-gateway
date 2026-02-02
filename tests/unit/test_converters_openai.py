@@ -16,6 +16,7 @@ from kiro.converters_openai import (
     build_kiro_payload,
     convert_openai_messages_to_unified,
     convert_openai_tools_to_unified,
+    _extract_images_from_tool_message,
 )
 from kiro.models_openai import ChatMessage, ChatCompletionRequest, Tool, ToolFunction
 
@@ -1361,3 +1362,254 @@ class TestBuildKiroPayloadToolCallsIntegration:
         print("Checking that tool in context has reference description...")
         tools_context = result["conversationState"]["currentMessage"]["userInputMessage"]["userInputMessageContext"]["tools"]
         assert "[Full documentation in system prompt" in tools_context[0]["toolSpecification"]["description"]
+
+
+# ==================================================================================================
+# Tests for _extract_images_from_tool_message (MCP screenshot support)
+# ==================================================================================================
+
+class TestExtractImagesFromToolMessage:
+    """Tests for _extract_images_from_tool_message function."""
+
+    def test_extracts_single_image_from_tool_message(self):
+        """
+        What it does: Verifies extraction of a single image from tool message content.
+        Purpose: Ensure images in OpenAI tool messages are properly extracted (MCP support).
+        """
+        print("Setup: Tool message with single image...")
+        content = [
+            {"type": "text", "text": "Screenshot captured"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="}
+            }
+        ]
+
+        print("Action: Extracting images from tool message...")
+        result = _extract_images_from_tool_message(content)
+
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["media_type"] == "image/png"
+        assert result[0]["data"] == "iVBORw0KGgoAAAANSUhEUg=="
+
+    def test_extracts_multiple_images_from_tool_message(self):
+        """
+        What it does: Verifies extraction of multiple images from tool message.
+        Purpose: Ensure all images are extracted from a single tool message.
+        """
+        print("Setup: Tool message with multiple images...")
+        content = [
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,png_data"}
+            },
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/jpeg;base64,jpeg_data"}
+            }
+        ]
+
+        print("Action: Extracting images from tool message...")
+        result = _extract_images_from_tool_message(content)
+
+        print(f"Result: {result}")
+        assert len(result) == 2
+        assert result[0]["media_type"] == "image/png"
+        assert result[0]["data"] == "png_data"
+        assert result[1]["media_type"] == "image/jpeg"
+        assert result[1]["data"] == "jpeg_data"
+
+    def test_returns_empty_for_text_only_tool_message(self):
+        """
+        What it does: Verifies empty list returned when tool message has no images.
+        Purpose: Ensure text-only tool messages don't produce spurious images.
+        """
+        print("Setup: Tool message with text only...")
+        content = [
+            {"type": "text", "text": "Operation completed successfully"}
+        ]
+
+        print("Action: Extracting images from tool message...")
+        result = _extract_images_from_tool_message(content)
+
+        print(f"Result: {result}")
+        assert result == []
+
+    def test_returns_empty_for_string_content(self):
+        """
+        What it does: Verifies empty list returned for string content.
+        Purpose: Ensure string content doesn't cause errors.
+        """
+        print("Setup: String content...")
+        content = "Just a string result"
+
+        print("Action: Extracting images from tool message...")
+        result = _extract_images_from_tool_message(content)
+
+        print(f"Result: {result}")
+        assert result == []
+
+    def test_returns_empty_for_none_content(self):
+        """
+        What it does: Verifies empty list returned for None content.
+        Purpose: Ensure None content doesn't cause errors.
+        """
+        print("Setup: None content...")
+        content = None
+
+        print("Action: Extracting images from tool message...")
+        result = _extract_images_from_tool_message(content)
+
+        print(f"Result: {result}")
+        assert result == []
+
+    def test_extracts_images_mixed_with_text(self):
+        """
+        What it does: Verifies images are extracted when mixed with text content.
+        Purpose: Ensure images are found even when text blocks are present.
+        """
+        print("Setup: Tool message with text and image...")
+        content = [
+            {"type": "text", "text": "Screenshot captured"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,screenshot_data"}
+            },
+            {"type": "text", "text": "Analysis complete"}
+        ]
+
+        print("Action: Extracting images from tool message...")
+        result = _extract_images_from_tool_message(content)
+
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert result[0]["data"] == "screenshot_data"
+
+
+class TestConvertOpenAIMessagesWithToolImages:
+    """Tests for convert_openai_messages_to_unified with tool message images."""
+
+    def test_extracts_images_from_tool_messages(self):
+        """
+        What it does: Verifies images are extracted from tool messages and added to unified message.
+        Purpose: Ensure tool message images are properly converted to unified format.
+        """
+        print("Setup: Messages with tool message containing image...")
+        messages = [
+            ChatMessage(role="user", content="Take a screenshot"),
+            ChatMessage(
+                role="assistant",
+                content="Taking screenshot",
+                tool_calls=[{
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "screenshot", "arguments": "{}"}
+                }]
+            ),
+            ChatMessage(
+                role="tool",
+                tool_call_id="call_123",
+                content=[
+                    {"type": "text", "text": "Screenshot captured"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,test_image"}
+                    }
+                ]
+            )
+        ]
+
+        print("Action: Converting messages...")
+        system_prompt, unified = convert_openai_messages_to_unified(messages)
+
+        print(f"Unified messages: {len(unified)}")
+        print(f"Last message images: {unified[-1].images}")
+        
+        # Tool messages are converted to user messages with tool_results
+        assert len(unified) == 3
+        assert unified[-1].role == "user"
+        assert unified[-1].tool_results is not None
+        assert len(unified[-1].tool_results) == 1
+        
+        # Images should be present
+        assert unified[-1].images is not None
+        assert len(unified[-1].images) == 1
+        assert unified[-1].images[0]["data"] == "test_image"
+
+    def test_merges_images_from_multiple_tool_messages(self):
+        """
+        What it does: Verifies images from multiple tool messages are merged.
+        Purpose: Ensure all tool message images are collected into one user message.
+        """
+        print("Setup: Multiple tool messages with images...")
+        messages = [
+            ChatMessage(
+                role="tool",
+                tool_call_id="call_1",
+                content=[
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,image1"}}
+                ]
+            ),
+            ChatMessage(
+                role="tool",
+                tool_call_id="call_2",
+                content=[
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,image2"}}
+                ]
+            )
+        ]
+
+        print("Action: Converting messages...")
+        system_prompt, unified = convert_openai_messages_to_unified(messages)
+
+        print(f"Unified messages: {len(unified)}")
+        print(f"Images count: {len(unified[0].images) if unified[0].images else 0}")
+        
+        # All tool messages should be merged into one user message
+        assert len(unified) == 1
+        assert unified[0].role == "user"
+        
+        # Both images should be present
+        assert unified[0].images is not None
+        assert len(unified[0].images) == 2
+        assert unified[0].images[0]["data"] == "image1"
+        assert unified[0].images[1]["data"] == "image2"
+
+    def test_handles_tool_message_with_text_and_image(self):
+        """
+        What it does: Verifies tool message with both text and image is handled correctly.
+        Purpose: Ensure both text and images are extracted from tool messages.
+        """
+        print("Setup: Tool message with text and image...")
+        messages = [
+            ChatMessage(
+                role="tool",
+                tool_call_id="call_123",
+                content=[
+                    {"type": "text", "text": "Screenshot captured successfully"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,screenshot_data"}
+                    }
+                ]
+            ),
+            ChatMessage(role="user", content="What do you see?")
+        ]
+
+        print("Action: Converting messages...")
+        system_prompt, unified = convert_openai_messages_to_unified(messages)
+
+        print(f"Unified messages: {len(unified)}")
+        
+        # First message is user with tool_results and images
+        assert unified[0].role == "user"
+        assert unified[0].tool_results is not None
+        assert "Screenshot captured successfully" in unified[0].tool_results[0]["content"]
+        assert unified[0].images is not None
+        assert len(unified[0].images) == 1
+        assert unified[0].images[0]["data"] == "screenshot_data"
+        
+        # Second message is regular user message
+        assert unified[1].role == "user"
+        assert unified[1].content == "What do you see?"

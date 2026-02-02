@@ -902,11 +902,13 @@ def strip_all_tool_content(messages: List[UnifiedMessage]) -> Tuple[List[Unified
             content = "\n\n".join(content_parts) if content_parts else "(empty)"
             
             # Create a copy of the message without tool content but with text representation
+            # IMPORTANT: Preserve images from the original message (e.g., screenshots from MCP tools)
             cleaned_msg = UnifiedMessage(
                 role=msg.role,
                 content=content,
                 tool_calls=None,
-                tool_results=None
+                tool_results=None,
+                images=msg.images
             )
             result.append(cleaned_msg)
         else:

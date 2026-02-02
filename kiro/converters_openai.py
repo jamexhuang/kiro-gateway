@@ -75,6 +75,41 @@ def _extract_tool_results_from_openai(content: Any) -> List[Dict[str, Any]]:
     return tool_results
 
 
+def _extract_images_from_tool_message(content: Any) -> List[Dict[str, Any]]:
+    """
+    Extracts images from OpenAI tool message content.
+    
+    Tool messages from MCP servers (e.g., browsermcp) can contain images
+    (screenshots) alongside text. This function extracts those images.
+    
+    Args:
+        content: Tool message content (can be string or list of content blocks)
+    
+    Returns:
+        List of images in unified format: [{"media_type": "image/jpeg", "data": "base64..."}]
+    
+    Example:
+        >>> content = [
+        ...     {"type": "text", "text": "Screenshot captured"},
+        ...     {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+        ... ]
+        >>> images = _extract_images_from_tool_message(content)
+        >>> len(images)
+        1
+    """
+    # If content is not a list, no images to extract
+    if not isinstance(content, list):
+        return []
+    
+    # Use core function to extract images from content list
+    images = extract_images_from_content(content)
+    
+    if images:
+        logger.debug(f"Extracted {len(images)} image(s) from tool message content")
+    
+    return images
+
+
 def _extract_tool_calls_from_openai(msg: ChatMessage) -> List[Dict[str, Any]]:
     """
     Extracts tool calls from OpenAI assistant message.
@@ -132,6 +167,7 @@ def convert_openai_messages_to_unified(messages: List[ChatMessage]) -> Tuple[str
     # Process tool messages - convert to user messages with tool_results
     processed = []
     pending_tool_results = []
+    pending_tool_images = []
     total_tool_calls = 0
     total_tool_results = 0
     total_images = 0
@@ -146,16 +182,24 @@ def convert_openai_messages_to_unified(messages: List[ChatMessage]) -> Tuple[str
             }
             pending_tool_results.append(tool_result)
             total_tool_results += 1
+            
+            # Extract images from tool message content (e.g., screenshots from MCP tools)
+            tool_images = _extract_images_from_tool_message(msg.content)
+            if tool_images:
+                pending_tool_images.extend(tool_images)
+                total_images += len(tool_images)
         else:
             # If there are accumulated tool results, create user message with them
             if pending_tool_results:
                 unified_msg = UnifiedMessage(
                     role="user",
                     content="",
-                    tool_results=pending_tool_results.copy()
+                    tool_results=pending_tool_results.copy(),
+                    images=pending_tool_images.copy() if pending_tool_images else None
                 )
                 processed.append(unified_msg)
                 pending_tool_results.clear()
+                pending_tool_images.clear()
             
             # Convert regular message
             tool_calls = None
@@ -189,7 +233,8 @@ def convert_openai_messages_to_unified(messages: List[ChatMessage]) -> Tuple[str
         unified_msg = UnifiedMessage(
             role="user",
             content="",
-            tool_results=pending_tool_results.copy()
+            tool_results=pending_tool_results.copy(),
+            images=pending_tool_images.copy() if pending_tool_images else None
         )
         processed.append(unified_msg)
     

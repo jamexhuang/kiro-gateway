@@ -4327,6 +4327,173 @@ class TestStripAllToolContent:
 
 
 # ==================================================================================================
+# Tests for strip_all_tool_content with images preservation (Issue #57 follow-up)
+# ==================================================================================================
+
+class TestStripAllToolContentPreservesImages:
+    """Tests that strip_all_tool_content preserves images field (Issue #57 follow-up)."""
+    
+    def test_preserves_images_when_stripping_tool_results(self):
+        """
+        What it does: Verifies images are preserved when tool_results are stripped.
+        Purpose: Ensure images from MCP tool messages aren't lost (critical bug fix).
+        """
+        print("Setup: Message with tool_results and images...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Screenshot result",
+                tool_results=[
+                    {"type": "tool_result", "tool_use_id": "call_123", "content": "Done"}
+                ],
+                images=[
+                    {"media_type": "image/png", "data": "screenshot_data"}
+                ]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_tools = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Images preserved: {result[0].images}")
+        
+        assert had_tools is True
+        assert result[0].tool_results is None  # Stripped
+        assert result[0].images is not None  # PRESERVED
+        assert len(result[0].images) == 1
+        assert result[0].images[0]["data"] == "screenshot_data"
+    
+    def test_preserves_images_when_stripping_tool_calls(self):
+        """
+        What it does: Verifies images are preserved when tool_calls are stripped.
+        Purpose: Ensure images aren't lost when assistant messages have tool_calls.
+        """
+        print("Setup: Message with tool_calls and images...")
+        messages = [
+            UnifiedMessage(
+                role="assistant",
+                content="Using tool",
+                tool_calls=[
+                    {"id": "call_456", "type": "function", "function": {"name": "test", "arguments": "{}"}}
+                ],
+                images=[
+                    {"media_type": "image/jpeg", "data": "image_data"}
+                ]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_tools = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Images preserved: {result[0].images}")
+        
+        assert had_tools is True
+        assert result[0].tool_calls is None  # Stripped
+        assert result[0].images is not None  # PRESERVED
+        assert len(result[0].images) == 1
+        assert result[0].images[0]["data"] == "image_data"
+    
+    def test_preserves_images_when_stripping_both_tool_calls_and_results(self):
+        """
+        What it does: Verifies images are preserved when both tool_calls and tool_results are stripped.
+        Purpose: Ensure images survive complete tool content removal.
+        """
+        print("Setup: Message with both tool_calls, tool_results and images...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Complex message",
+                tool_calls=[
+                    {"id": "call_1", "type": "function", "function": {"name": "tool1", "arguments": "{}"}}
+                ],
+                tool_results=[
+                    {"type": "tool_result", "tool_use_id": "call_1", "content": "Result"}
+                ],
+                images=[
+                    {"media_type": "image/png", "data": "complex_image"}
+                ]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_tools = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Images preserved: {result[0].images}")
+        
+        assert had_tools is True
+        assert result[0].tool_calls is None  # Stripped
+        assert result[0].tool_results is None  # Stripped
+        assert result[0].images is not None  # PRESERVED
+        assert len(result[0].images) == 1
+        assert result[0].images[0]["data"] == "complex_image"
+    
+    def test_preserves_none_images_when_stripping(self):
+        """
+        What it does: Verifies None images stay None when tool content is stripped.
+        Purpose: Ensure we don't create spurious images field.
+        """
+        print("Setup: Message with tool_results but no images...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Text only",
+                tool_results=[
+                    {"type": "tool_result", "tool_use_id": "call_789", "content": "Done"}
+                ],
+                images=None
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_tools = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Images field: {result[0].images}")
+        
+        assert had_tools is True
+        assert result[0].tool_results is None  # Stripped
+        assert result[0].images is None  # Still None (not created)
+    
+    def test_preserves_multiple_images_when_stripping(self):
+        """
+        What it does: Verifies multiple images are all preserved when stripping.
+        Purpose: Ensure all images survive, not just the first one.
+        """
+        print("Setup: Message with tool_results and multiple images...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="Multiple screenshots",
+                tool_results=[
+                    {"type": "tool_result", "tool_use_id": "call_multi", "content": "Done"}
+                ],
+                images=[
+                    {"media_type": "image/png", "data": "image1"},
+                    {"media_type": "image/jpeg", "data": "image2"},
+                    {"media_type": "image/webp", "data": "image3"}
+                ]
+            )
+        ]
+        
+        print("Action: Stripping tool content...")
+        result, had_tools = strip_all_tool_content(messages)
+        
+        print(f"Result: {result}")
+        print(f"Images count: {len(result[0].images)}")
+        
+        assert had_tools is True
+        assert result[0].tool_results is None  # Stripped
+        assert result[0].images is not None  # PRESERVED
+        assert len(result[0].images) == 3
+        assert result[0].images[0]["data"] == "image1"
+        assert result[0].images[1]["data"] == "image2"
+        assert result[0].images[2]["data"] == "image3"
+
+
+# ==================================================================================================
 # Tests for tool_calls_to_text
 # ==================================================================================================
 
