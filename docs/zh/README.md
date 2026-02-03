@@ -13,7 +13,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-支持开发-ff69b4)](#-支持项目)
 
-*通过 Claude Code、OpenCode、Cursor、Cline、Roo Code、Kilo Code、Obsidian、OpenAI SDK、LangChain、Continue 和其他兼容 OpenAI 或 Anthropic 的工具使用 Kiro 的 Claude 模型*
+*通过 Claude Code、OpenCode、Codex app、Cursor、Cline、Roo Code、Kilo Code、Obsidian、OpenAI SDK、LangChain、Continue 和其他兼容 OpenAI 或 Anthropic 的工具使用 Kiro 的 Claude 模型*
 
 [模型](#-支持的模型) • [功能](#-功能特性) • [快速开始](#-快速开始) • [配置](#%EF%B8%8F-配置) • [💖 支持](#-支持项目)
 

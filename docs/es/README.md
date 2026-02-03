@@ -13,7 +13,7 @@ Hecho con ❤️ por [@Jwadow](https://github.com/jwadow)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-Apoya_el_Desarrollo-ff69b4)](#-apoya-el-proyecto)
 
-*Usa modelos Claude de Kiro con Claude Code, OpenCode, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue y otras herramientas compatibles con OpenAI o Anthropic*
+*Usa modelos Claude de Kiro con Claude Code, OpenCode, Codex app, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue y otras herramientas compatibles con OpenAI o Anthropic*
 
 [Modelos](#-modelos-soportados) • [Características](#-características) • [Inicio Rápido](#-inicio-rápido) • [Configuración](#%EF%B8%8F-configuración) • [💖 Apoyar](#-apoya-el-proyecto)
 

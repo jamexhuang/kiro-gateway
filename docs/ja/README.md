@@ -13,7 +13,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-開発を支援-ff69b4)](#-プロジェクトを支援)
 
-*Kiro の Claude モデルを Claude Code、OpenCode、Cursor、Cline、Roo Code、Kilo Code、Obsidian、OpenAI SDK、LangChain、Continue などの OpenAI または Anthropic 互換ツールで使用*
+*Kiro の Claude モデルを Claude Code、OpenCode、Codex app、Cursor、Cline、Roo Code、Kilo Code、Obsidian、OpenAI SDK、LangChain、Continue などの OpenAI または Anthropic 互換ツールで使用*
 
 [モデル](#-対応モデル) • [機能](#-機能) • [クイックスタート](#-クイックスタート) • [設定](#%EF%B8%8F-設定) • [💖 サポート](#-プロジェクトを支援)
 

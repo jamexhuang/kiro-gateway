@@ -13,7 +13,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-Поддержать_разработку-ff69b4)](#-поддержать-проект)
 
-*Используйте модели Claude из Kiro с Claude Code, OpenCode, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue и другими инструментами, совместимыми с OpenAI или Anthropic*
+*Используйте модели Claude из Kiro с Claude Code, OpenCode, Codex app, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue и другими инструментами, совместимыми с OpenAI или Anthropic*
 
 [Модели](#-поддерживаемые-модели) • [Возможности](#-возможности) • [Быстрый старт](#-быстрый-старт) • [Конфигурация](#%EF%B8%8F-конфигурация) • [💖 Поддержать](#-поддержать-проект)
 

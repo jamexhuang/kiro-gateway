@@ -13,7 +13,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-개발_지원-ff69b4)](#-프로젝트-후원)
 
-*Kiro의 Claude 모델을 Claude Code, OpenCode, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue 및 기타 OpenAI 또는 Anthropic 호환 도구와 함께 사용*
+*Kiro의 Claude 모델을 Claude Code, OpenCode, Codex app, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue 및 기타 OpenAI 또는 Anthropic 호환 도구와 함께 사용*
 
 [모델](#-지원-모델) • [기능](#-기능) • [빠른-시작](#-빠른-시작) • [설정](#%EF%B8%8F-설정) • [💖 후원](#-프로젝트-후원)
 

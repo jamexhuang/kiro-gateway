@@ -13,7 +13,7 @@ Dibuat dengan ❤️ oleh [@Jwadow](https://github.com/jwadow)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-Dukung_Pengembangan-ff69b4)](#-dukung-proyek)
 
-*Gunakan model Claude dari Kiro dengan Claude Code, OpenCode, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue dan alat lain yang kompatibel dengan OpenAI atau Anthropic*
+*Gunakan model Claude dari Kiro dengan Claude Code, OpenCode, Codex app, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue dan alat lain yang kompatibel dengan OpenAI atau Anthropic*
 
 [Model](#-model-yang-didukung) • [Fitur](#-fitur) • [Mulai Cepat](#-mulai-cepat) • [Konfigurasi](#%EF%B8%8F-konfigurasi) • [💖 Dukung](#-dukung-proyek)
 
