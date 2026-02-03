@@ -1322,7 +1322,7 @@ class TestEnsureFirstMessageIsUser:
         
         print("Checking first message is synthetic user...")
         assert result[0].role == "user"
-        assert result[0].content == "."
+        assert result[0].content == "(empty)"
         
         print("Checking original messages are preserved...")
         assert result[1].role == "assistant"
@@ -1359,7 +1359,7 @@ class TestEnsureFirstMessageIsUser:
         print(f"Comparing length: Expected 2 (synthetic + original), Got {len(result)}")
         assert len(result) == 2
         assert result[0].role == "user"
-        assert result[0].content == "."
+        assert result[0].content == "(empty)"
         assert result[1].role == "assistant"
     
     def test_handles_assistant_user_assistant_sequence(self):
@@ -1380,7 +1380,7 @@ class TestEnsureFirstMessageIsUser:
         print(f"Comparing length: Expected 4 (synthetic + 3 original), Got {len(result)}")
         assert len(result) == 4
         assert result[0].role == "user"
-        assert result[0].content == "."
+        assert result[0].content == "(empty)"
         assert result[1].role == "assistant"
         assert result[2].role == "user"
         assert result[3].role == "assistant"
@@ -1409,7 +1409,7 @@ class TestEnsureFirstMessageIsUser:
         print("Checking synthetic user was prepended...")
         assert len(result) == 2
         assert result[0].role == "user"
-        assert result[0].content == "."
+        assert result[0].content == "(empty)"
         
         print("Checking tool_calls are preserved...")
         assert result[1].role == "assistant"
@@ -1443,7 +1443,7 @@ class TestEnsureFirstMessageIsUser:
     
     def test_uses_minimal_content_for_synthetic_message(self):
         """
-        What it does: Verifies synthetic message uses minimal content (".").
+        What it does: Verifies synthetic message uses minimal content ("(empty)").
         Purpose: Ensure minimal token usage and avoid disrupting conversation context.
         """
         print("Setup: Assistant-first conversation...")
@@ -1455,7 +1455,7 @@ class TestEnsureFirstMessageIsUser:
         result = ensure_first_message_is_user(messages)
         
         print("Checking synthetic message content...")
-        assert result[0].content == "."
+        assert result[0].content == "(empty)"
         print("✓ Synthetic message uses minimal content (matches LiteLLM behavior)")
 
 

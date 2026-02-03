@@ -1113,7 +1113,7 @@ def ensure_first_message_is_user(messages: List[UnifiedMessage]) -> List[Unified
         >>> result[0].role
         'user'
         >>> result[0].content
-        '.'
+        '(empty)'
     """
     if not messages:
         return messages
@@ -1125,10 +1125,10 @@ def ensure_first_message_is_user(messages: List[UnifiedMessage]) -> List[Unified
         )
         
         # Create minimal synthetic user message (matches LiteLLM behavior)
-        # Using "." as minimal valid content to avoid disrupting conversation context
+        # Using "(empty)" as minimal valid content to avoid disrupting conversation context
         synthetic_user = UnifiedMessage(
             role="user",
-            content="."
+            content="(empty)"
         )
         
         return [synthetic_user] + messages
