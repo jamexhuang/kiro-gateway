@@ -3260,19 +3260,24 @@ class TestBuildKiroHistory:
         assert "assistantResponseMessage" in result[0]
         assert result[0]["assistantResponseMessage"]["content"] == "Hi there"
     
-    def test_ignores_system_messages(self):
+    def test_converts_unknown_role_system_to_user(self):
         """
-        What it does: Verifies ignoring of system messages.
-        Purpose: Ensure system messages are not added to history.
+        What it does: Verifies system messages are converted to user via fallback.
+        Purpose: System messages should be extracted earlier, but if they reach
+                 build_kiro_history, fallback converts them to user to preserve content.
         """
-        print("Setup: System message...")
+        print("Setup: System message (edge case - should be extracted earlier)...")
         messages = [UnifiedMessage(role="system", content="You are helpful")]
         
         print("Action: Building history...")
         result = build_kiro_history(messages, "claude-sonnet-4")
         
-        print(f"Comparing length: Expected 0, Got {len(result)}")
-        assert len(result) == 0
+        print(f"Comparing length: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        print("Checking that system was converted to userInputMessage...")
+        assert "userInputMessage" in result[0]
+        print(f"Checking content: '{result[0]['userInputMessage']['content']}'")
+        assert result[0]["userInputMessage"]["content"] == "You are helpful"
     
     def test_builds_conversation_history(self):
         """
@@ -3671,6 +3676,94 @@ class TestBuildKiroHistory:
         assert len(images) == 1
         assert images[0]["format"] == "gif"
         assert images[0]["source"]["bytes"] == "gif_image_data"
+    
+    def test_converts_developer_role_to_user(self):
+        """
+        What it does: Verifies that 'developer' role is converted to user message.
+        Purpose: Fix for Issue #64 - Codex App uses 'developer' role which must be
+                 converted to 'user' to maintain Kiro API compatibility.
+        """
+        print("Setup: Message with 'developer' role (Codex App)...")
+        messages = [UnifiedMessage(role="developer", content="<permissions>sandbox enabled</permissions>")]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Comparing length: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        print("Checking that developer was converted to userInputMessage...")
+        assert "userInputMessage" in result[0]
+        print(f"Checking content: '{result[0]['userInputMessage']['content']}'")
+        assert result[0]["userInputMessage"]["content"] == "<permissions>sandbox enabled</permissions>"
+    
+    def test_converts_unknown_role_to_user(self):
+        """
+        What it does: Verifies that any unknown role is converted to user message.
+        Purpose: Universal fallback for future API roles - ensures Gateway doesn't break
+                 when new roles are added to OpenAI/Anthropic APIs.
+        """
+        print("Setup: Message with unknown role 'moderator'...")
+        messages = [UnifiedMessage(role="moderator", content="Content approved")]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Comparing length: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        print("Checking that unknown role was converted to userInputMessage...")
+        assert "userInputMessage" in result[0]
+        print(f"Checking content: '{result[0]['userInputMessage']['content']}'")
+        assert result[0]["userInputMessage"]["content"] == "Content approved"
+    
+    def test_converts_developer_role_with_tool_results(self):
+        """
+        What it does: Verifies that 'developer' role with tool_results is converted correctly.
+        Purpose: Ensure unknown roles preserve tool_results when converted to user messages.
+        """
+        print("Setup: Developer message with tool_results...")
+        messages = [
+            UnifiedMessage(
+                role="developer",
+                content="Context update",
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_123", "content": "Result"}]
+            )
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        assert "userInputMessage" in result[0]
+        user_msg = result[0]["userInputMessage"]
+        print("Checking that tool_results are preserved...")
+        assert "userInputMessageContext" in user_msg
+        assert "toolResults" in user_msg["userInputMessageContext"]
+    
+    def test_converts_developer_role_with_images(self):
+        """
+        What it does: Verifies that 'developer' role with images is converted correctly.
+        Purpose: Ensure unknown roles preserve images when converted to user messages.
+        """
+        print("Setup: Developer message with images...")
+        messages = [
+            UnifiedMessage(
+                role="developer",
+                content="Screenshot attached",
+                images=[{"media_type": "image/png", "data": "screenshot_data"}]
+            )
+        ]
+        
+        print("Action: Building history...")
+        result = build_kiro_history(messages, "claude-sonnet-4")
+        
+        print(f"Result: {result}")
+        assert len(result) == 1
+        user_msg = result[0]["userInputMessage"]
+        print("Checking that images are preserved...")
+        assert "images" in user_msg
+        assert len(user_msg["images"]) == 1
+        assert user_msg["images"][0]["format"] == "png"
 
 
 # ==================================================================================================

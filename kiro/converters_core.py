@@ -1147,6 +1147,9 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
     Kiro API expects alternating userInputMessage and assistantResponseMessage.
     This function converts unified format to Kiro format.
     
+    Unknown roles (e.g., 'developer' from OpenAI API) are automatically converted
+    to 'user' messages to maintain compatibility with Kiro API.
+    
     Args:
         messages: List of messages in unified format
         model_id: Internal Kiro model ID
@@ -1214,6 +1217,50 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
                 assistant_response["toolUses"] = tool_uses
             
             history.append({"assistantResponseMessage": assistant_response})
+        
+        else:
+            # Universal fallback for unknown roles (developer, future roles, etc.)
+            # Convert to user message to preserve content
+            logger.debug(f"Unknown role '{msg.role}' converted to 'user'")
+            
+            content = extract_text_content(msg.content)
+            
+            # Fallback for empty content - Kiro API requires non-empty content
+            if not content:
+                content = "(empty)"
+            
+            user_input = {
+                "content": content,
+                "modelId": model_id,
+                "origin": "AI_EDITOR",
+            }
+            
+            # Process images - extract from message or content
+            images = msg.images or extract_images_from_content(msg.content)
+            if images:
+                kiro_images = convert_images_to_kiro_format(images)
+                if kiro_images:
+                    user_input["images"] = kiro_images
+            
+            # Build userInputMessageContext for tools and toolResults only
+            user_input_context: Dict[str, Any] = {}
+            
+            # Process tool_results - convert to Kiro format if present
+            if msg.tool_results:
+                kiro_tool_results = convert_tool_results_to_kiro_format(msg.tool_results)
+                if kiro_tool_results:
+                    user_input_context["toolResults"] = kiro_tool_results
+            else:
+                # Try to extract from content (already in Kiro format)
+                tool_results = extract_tool_results_from_content(msg.content)
+                if tool_results:
+                    user_input_context["toolResults"] = tool_results
+            
+            # Add context if not empty (contains toolResults only, not images)
+            if user_input_context:
+                user_input["userInputMessageContext"] = user_input_context
+            
+            history.append({"userInputMessage": user_input})
     
     return history
 
