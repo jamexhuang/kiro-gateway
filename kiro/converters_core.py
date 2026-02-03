@@ -1136,6 +1136,118 @@ def ensure_first_message_is_user(messages: List[UnifiedMessage]) -> List[Unified
     return messages
 
 
+def normalize_message_roles(messages: List[UnifiedMessage]) -> List[UnifiedMessage]:
+    """
+    Normalizes unknown message roles to 'user'.
+    
+    Kiro API only supports 'user' and 'assistant' roles in history.
+    Any other role (e.g., 'developer', 'system') is converted to 'user'
+    to maintain compatibility.
+    
+    This normalization MUST happen before ensure_alternating_roles()
+    to ensure consecutive messages with unknown roles are properly detected
+    and synthetic assistant messages are inserted between them.
+    
+    Args:
+        messages: List of messages in unified format
+    
+    Returns:
+        List of messages with normalized roles
+    
+    Example:
+        >>> messages = [
+        ...     UnifiedMessage(role="developer", content="Context 1"),
+        ...     UnifiedMessage(role="developer", content="Context 2"),
+        ...     UnifiedMessage(role="user", content="Question")
+        ... ]
+        >>> result = normalize_message_roles(messages)
+        >>> [msg.role for msg in result]
+        ['user', 'user', 'user']
+    """
+    if not messages:
+        return messages
+    
+    normalized = []
+    converted_count = 0
+    
+    for msg in messages:
+        if msg.role not in ("user", "assistant"):
+            logger.debug(f"Normalizing role '{msg.role}' to 'user'")
+            normalized_msg = UnifiedMessage(
+                role="user",
+                content=msg.content,
+                tool_calls=msg.tool_calls,
+                tool_results=msg.tool_results,
+                images=msg.images
+            )
+            normalized.append(normalized_msg)
+            converted_count += 1
+        else:
+            normalized.append(msg)
+    
+    if converted_count > 0:
+        logger.debug(f"Normalized {converted_count} message(s) with unknown roles to 'user'")
+    
+    return normalized
+
+
+def ensure_alternating_roles(messages: List[UnifiedMessage]) -> List[UnifiedMessage]:
+    """
+    Ensures alternating user/assistant roles by inserting synthetic assistant messages.
+    
+    Kiro API requires alternating userInputMessage and assistantResponseMessage.
+    When consecutive user messages are detected, synthetic assistant messages
+    with "(empty)" placeholder are inserted between them to maintain alternation.
+    
+    This fixes multiple unknown roles (converted to user)
+    create consecutive userInputMessage entries that violate Kiro API requirements.
+    
+    Args:
+        messages: List of messages in unified format
+    
+    Returns:
+        List of messages with synthetic assistant messages inserted where needed
+    
+    Example:
+        >>> messages = [
+        ...     UnifiedMessage(role="user", content="First"),
+        ...     UnifiedMessage(role="user", content="Second"),
+        ...     UnifiedMessage(role="user", content="Third")
+        ... ]
+        >>> result = ensure_alternating_roles(messages)
+        >>> len(result)
+        5  # 3 user + 2 synthetic assistant
+        >>> result[1].role
+        'assistant'
+        >>> result[1].content
+        '(empty)'
+    """
+    if not messages or len(messages) < 2:
+        return messages
+    
+    result = [messages[0]]
+    synthetic_count = 0
+    
+    for msg in messages[1:]:
+        prev_role = result[-1].role
+        
+        # If both current and previous are user → insert synthetic assistant
+        if msg.role == "user" and prev_role == "user":
+            synthetic_assistant = UnifiedMessage(
+                role="assistant",
+                content="(empty)"  # Consistent with build_kiro_history() placeholder
+            )
+            result.append(synthetic_assistant)
+            synthetic_count += 1
+        
+        result.append(msg)
+    
+    if synthetic_count > 0:
+        logger.debug(f"Inserted {synthetic_count} synthetic assistant message(s) to ensure alternation")
+    
+    return result
+
+
 # ==================================================================================================
 # Kiro History Building
 # ==================================================================================================
@@ -1147,11 +1259,11 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
     Kiro API expects alternating userInputMessage and assistantResponseMessage.
     This function converts unified format to Kiro format.
     
-    Unknown roles (e.g., 'developer' from OpenAI API) are automatically converted
-    to 'user' messages to maintain compatibility with Kiro API.
+    All messages should have 'user' or 'assistant' roles at this point,
+    as unknown roles are normalized earlier in the pipeline by normalize_message_roles().
     
     Args:
-        messages: List of messages in unified format
+        messages: List of messages in unified format (with normalized roles)
         model_id: Internal Kiro model ID
     
     Returns:
@@ -1217,50 +1329,6 @@ def build_kiro_history(messages: List[UnifiedMessage], model_id: str) -> List[Di
                 assistant_response["toolUses"] = tool_uses
             
             history.append({"assistantResponseMessage": assistant_response})
-        
-        else:
-            # Universal fallback for unknown roles (developer, future roles, etc.)
-            # Convert to user message to preserve content
-            logger.debug(f"Unknown role '{msg.role}' converted to 'user'")
-            
-            content = extract_text_content(msg.content)
-            
-            # Fallback for empty content - Kiro API requires non-empty content
-            if not content:
-                content = "(empty)"
-            
-            user_input = {
-                "content": content,
-                "modelId": model_id,
-                "origin": "AI_EDITOR",
-            }
-            
-            # Process images - extract from message or content
-            images = msg.images or extract_images_from_content(msg.content)
-            if images:
-                kiro_images = convert_images_to_kiro_format(images)
-                if kiro_images:
-                    user_input["images"] = kiro_images
-            
-            # Build userInputMessageContext for tools and toolResults only
-            user_input_context: Dict[str, Any] = {}
-            
-            # Process tool_results - convert to Kiro format if present
-            if msg.tool_results:
-                kiro_tool_results = convert_tool_results_to_kiro_format(msg.tool_results)
-                if kiro_tool_results:
-                    user_input_context["toolResults"] = kiro_tool_results
-            else:
-                # Try to extract from content (already in Kiro format)
-                tool_results = extract_tool_results_from_content(msg.content)
-                if tool_results:
-                    user_input_context["toolResults"] = tool_results
-            
-            # Add context if not empty (contains toolResults only, not images)
-            if user_input_context:
-                user_input["userInputMessageContext"] = user_input_context
-            
-            history.append({"userInputMessage": user_input})
     
     return history
 
@@ -1336,6 +1404,15 @@ def build_kiro_payload(
     
     # Ensure first message is from user (Kiro API requirement, fixes issue #60)
     merged_messages = ensure_first_message_is_user(merged_messages)
+    
+    # Normalize unknown roles to 'user' (fixes issue #64)
+    # This must happen BEFORE ensure_alternating_roles() so that consecutive
+    # messages with unknown roles (e.g., 'developer') are properly detected
+    merged_messages = normalize_message_roles(merged_messages)
+    
+    # Ensure alternating user/assistant roles (fixes issue #64)
+    # Insert synthetic assistant messages between consecutive user messages
+    merged_messages = ensure_alternating_roles(merged_messages)
     
     if not merged_messages:
         raise ValueError("No messages to send")

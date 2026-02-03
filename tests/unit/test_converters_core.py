@@ -21,6 +21,8 @@ from kiro.converters_core import (
     convert_images_to_kiro_format,
     merge_adjacent_messages,
     ensure_first_message_is_user,
+    normalize_message_roles,
+    ensure_alternating_roles,
     ensure_assistant_before_tool_results,
     strip_all_tool_content,
     build_kiro_history,
@@ -1455,6 +1457,507 @@ class TestEnsureFirstMessageIsUser:
         print("Checking synthetic message content...")
         assert result[0].content == "."
         print("✓ Synthetic message uses minimal content (matches LiteLLM behavior)")
+
+
+# ==================================================================================================
+# Tests for normalize_message_roles
+# ==================================================================================================
+
+class TestNormalizeMessageRoles:
+    """
+    Tests for normalize_message_roles function.
+    
+    This function converts all unknown roles (developer, system, moderator, etc.)
+    to 'user' role to maintain Kiro API compatibility. This is part of the fix
+    for Issue #64 where Codex App sends 'developer' role messages.
+    """
+    
+    def test_converts_developer_role_to_user(self):
+        """
+        What it does: Verifies conversion of 'developer' role to 'user'.
+        Purpose: Fix for Issue #64 - Codex App uses 'developer' role which must be
+                 converted to 'user' to maintain Kiro API compatibility.
+        """
+        print("Setup: Message with 'developer' role (Codex App)...")
+        messages = [
+            UnifiedMessage(role="developer", content="<permissions>sandbox enabled</permissions>"),
+            UnifiedMessage(role="user", content="test")
+        ]
+        
+        print("Action: Normalizing roles...")
+        result = normalize_message_roles(messages)
+        
+        print(f"Comparing length: Expected 2, Got {len(result)}")
+        assert len(result) == 2
+        print("Checking that developer was converted to user...")
+        assert result[0].role == "user"
+        assert result[0].content == "<permissions>sandbox enabled</permissions>"
+        print("Checking that original user role is preserved...")
+        assert result[1].role == "user"
+    
+    def test_converts_multiple_unknown_roles_to_user(self):
+        """
+        What it does: Verifies conversion of multiple different unknown roles.
+        Purpose: Ensure all unknown roles (developer, system, moderator) are normalized.
+        """
+        print("Setup: Messages with multiple unknown roles...")
+        messages = [
+            UnifiedMessage(role="developer", content="Dev context"),
+            UnifiedMessage(role="system", content="System context"),
+            UnifiedMessage(role="moderator", content="Moderation note"),
+            UnifiedMessage(role="user", content="Question")
+        ]
+        
+        print("Action: Normalizing roles...")
+        result = normalize_message_roles(messages)
+        
+        print(f"Comparing length: Expected 4, Got {len(result)}")
+        assert len(result) == 4
+        print("Checking that all roles are now 'user'...")
+        assert all(msg.role == "user" for msg in result)
+        print("Checking that content is preserved...")
+        assert result[0].content == "Dev context"
+        assert result[1].content == "System context"
+        assert result[2].content == "Moderation note"
+        assert result[3].content == "Question"
+    
+    def test_preserves_user_and_assistant_roles(self):
+        """
+        What it does: Verifies that user and assistant roles are not modified.
+        Purpose: Ensure only unknown roles are converted, not valid ones.
+        """
+        print("Setup: Messages with valid roles...")
+        messages = [
+            UnifiedMessage(role="user", content="Hello"),
+            UnifiedMessage(role="assistant", content="Hi"),
+            UnifiedMessage(role="user", content="How are you?")
+        ]
+        
+        print("Action: Normalizing roles...")
+        result = normalize_message_roles(messages)
+        
+        print(f"Comparing length: Expected 3, Got {len(result)}")
+        assert len(result) == 3
+        print("Checking that roles are unchanged...")
+        assert result[0].role == "user"
+        assert result[1].role == "assistant"
+        assert result[2].role == "user"
+        print("Checking that content is unchanged...")
+        assert result[0].content == "Hello"
+        assert result[1].content == "Hi"
+        assert result[2].content == "How are you?"
+    
+    def test_preserves_tool_calls_when_normalizing(self):
+        """
+        What it does: Verifies tool_calls are preserved when converting role.
+        Purpose: Ensure all message fields are preserved during normalization.
+        """
+        print("Setup: Developer message with tool_calls...")
+        messages = [
+            UnifiedMessage(
+                role="developer",
+                content="Context",
+                tool_calls=[{"id": "call_123", "function": {"name": "bash", "arguments": "{}"}}]
+            )
+        ]
+        
+        print("Action: Normalizing roles...")
+        result = normalize_message_roles(messages)
+        
+        print(f"Comparing length: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        print("Checking that role was converted...")
+        assert result[0].role == "user"
+        print("Checking that tool_calls are preserved...")
+        assert result[0].tool_calls is not None
+        assert len(result[0].tool_calls) == 1
+        assert result[0].tool_calls[0]["id"] == "call_123"
+    
+    def test_preserves_tool_results_when_normalizing(self):
+        """
+        What it does: Verifies tool_results are preserved when converting role.
+        Purpose: Ensure tool_results field is preserved during normalization.
+        """
+        print("Setup: Developer message with tool_results...")
+        messages = [
+            UnifiedMessage(
+                role="developer",
+                content="Result",
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_123", "content": "Output"}]
+            )
+        ]
+        
+        print("Action: Normalizing roles...")
+        result = normalize_message_roles(messages)
+        
+        print(f"Comparing length: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        print("Checking that role was converted...")
+        assert result[0].role == "user"
+        print("Checking that tool_results are preserved...")
+        assert result[0].tool_results is not None
+        assert len(result[0].tool_results) == 1
+        assert result[0].tool_results[0]["tool_use_id"] == "call_123"
+    
+    def test_preserves_images_when_normalizing(self):
+        """
+        What it does: Verifies images are preserved when converting role.
+        Purpose: Ensure images field is preserved during normalization.
+        """
+        print("Setup: Developer message with images...")
+        messages = [
+            UnifiedMessage(
+                role="developer",
+                content="Screenshot",
+                images=[{"media_type": "image/png", "data": "base64data"}]
+            )
+        ]
+        
+        print("Action: Normalizing roles...")
+        result = normalize_message_roles(messages)
+        
+        print(f"Comparing length: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        print("Checking that role was converted...")
+        assert result[0].role == "user"
+        print("Checking that images are preserved...")
+        assert result[0].images is not None
+        assert len(result[0].images) == 1
+        assert result[0].images[0]["media_type"] == "image/png"
+    
+    def test_handles_empty_list(self):
+        """
+        What it does: Verifies empty list handling.
+        Purpose: Ensure empty input returns empty output.
+        """
+        print("Setup: Empty list...")
+        
+        print("Action: Normalizing roles...")
+        result = normalize_message_roles([])
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_handles_single_message(self):
+        """
+        What it does: Verifies single message handling.
+        Purpose: Ensure single message is processed correctly.
+        """
+        print("Setup: Single developer message...")
+        messages = [UnifiedMessage(role="developer", content="Solo")]
+        
+        print("Action: Normalizing roles...")
+        result = normalize_message_roles(messages)
+        
+        print(f"Comparing length: Expected 1, Got {len(result)}")
+        assert len(result) == 1
+        print("Checking that role was converted...")
+        assert result[0].role == "user"
+        assert result[0].content == "Solo"
+
+
+# ==================================================================================================
+# Tests for ensure_alternating_roles
+# ==================================================================================================
+
+class TestEnsureAlternatingRoles:
+    """
+    Tests for ensure_alternating_roles function.
+    
+    This function ensures alternating user/assistant roles by inserting synthetic
+    assistant messages with "(empty)" content between consecutive user messages.
+    This is part of the fix for Issue #64 where multiple 'developer' roles
+    (converted to 'user') create consecutive userInputMessage entries.
+    """
+    
+    def test_inserts_synthetic_assistant_between_two_consecutive_users(self):
+        """
+        What it does: Verifies insertion of synthetic assistant between two user messages.
+        Purpose: Ensure Kiro API requirement of alternating roles is maintained.
+        """
+        print("Setup: Two consecutive user messages...")
+        messages = [
+            UnifiedMessage(role="user", content="First"),
+            UnifiedMessage(role="user", content="Second")
+        ]
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles(messages)
+        
+        print(f"Comparing length: Expected 3 (2 user + 1 synthetic), Got {len(result)}")
+        assert len(result) == 3
+        print("Checking alternation pattern...")
+        assert result[0].role == "user"
+        assert result[0].content == "First"
+        assert result[1].role == "assistant"
+        assert result[1].content == "(empty)"
+        assert result[2].role == "user"
+        assert result[2].content == "Second"
+    
+    def test_inserts_multiple_synthetic_assistants_for_four_consecutive_users(self):
+        """
+        What it does: Verifies insertion of multiple synthetic assistants.
+        Purpose: Fix for Issue #64 - handle multiple consecutive developer messages.
+        """
+        print("Setup: Four consecutive user messages...")
+        messages = [
+            UnifiedMessage(role="user", content="First"),
+            UnifiedMessage(role="user", content="Second"),
+            UnifiedMessage(role="user", content="Third"),
+            UnifiedMessage(role="user", content="Fourth")
+        ]
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles(messages)
+        
+        print(f"Comparing length: Expected 7 (4 user + 3 synthetic), Got {len(result)}")
+        assert len(result) == 7
+        print("Checking alternation pattern...")
+        assert result[0].role == "user" and result[0].content == "First"
+        assert result[1].role == "assistant" and result[1].content == "(empty)"
+        assert result[2].role == "user" and result[2].content == "Second"
+        assert result[3].role == "assistant" and result[3].content == "(empty)"
+        assert result[4].role == "user" and result[4].content == "Third"
+        assert result[5].role == "assistant" and result[5].content == "(empty)"
+        assert result[6].role == "user" and result[6].content == "Fourth"
+    
+    def test_preserves_already_alternating_messages(self):
+        """
+        What it does: Verifies already alternating messages are not modified.
+        Purpose: Ensure function only inserts synthetic messages when needed.
+        """
+        print("Setup: Already alternating messages...")
+        messages = [
+            UnifiedMessage(role="user", content="Hello"),
+            UnifiedMessage(role="assistant", content="Hi"),
+            UnifiedMessage(role="user", content="How are you?"),
+            UnifiedMessage(role="assistant", content="Fine")
+        ]
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles(messages)
+        
+        print(f"Comparing length: Expected 4 (no changes), Got {len(result)}")
+        assert len(result) == 4
+        print("Checking that messages are unchanged...")
+        assert result[0].role == "user" and result[0].content == "Hello"
+        assert result[1].role == "assistant" and result[1].content == "Hi"
+        assert result[2].role == "user" and result[2].content == "How are you?"
+        assert result[3].role == "assistant" and result[3].content == "Fine"
+    
+    def test_handles_multiple_groups_of_consecutive_users(self):
+        """
+        What it does: Verifies handling of multiple groups of consecutive users.
+        Purpose: Ensure function handles complex conversation patterns.
+        """
+        print("Setup: Multiple groups of consecutive users...")
+        messages = [
+            UnifiedMessage(role="user", content="A"),
+            UnifiedMessage(role="user", content="B"),
+            UnifiedMessage(role="assistant", content="C"),
+            UnifiedMessage(role="user", content="D"),
+            UnifiedMessage(role="user", content="E"),
+            UnifiedMessage(role="user", content="F")
+        ]
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles(messages)
+        
+        print(f"Comparing length: Expected 9 (6 original + 3 synthetic), Got {len(result)}")
+        assert len(result) == 9
+        print("Checking first group (A, synthetic, B)...")
+        assert result[0].role == "user" and result[0].content == "A"
+        assert result[1].role == "assistant" and result[1].content == "(empty)"
+        assert result[2].role == "user" and result[2].content == "B"
+        print("Checking real assistant...")
+        assert result[3].role == "assistant" and result[3].content == "C"
+        print("Checking second group (D, synthetic, E, synthetic, F)...")
+        assert result[4].role == "user" and result[4].content == "D"
+        assert result[5].role == "assistant" and result[5].content == "(empty)"
+        assert result[6].role == "user" and result[6].content == "E"
+        assert result[7].role == "assistant" and result[7].content == "(empty)"
+        assert result[8].role == "user" and result[8].content == "F"
+    
+    def test_handles_empty_list(self):
+        """
+        What it does: Verifies empty list handling.
+        Purpose: Ensure empty input returns empty output.
+        """
+        print("Setup: Empty list...")
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles([])
+        
+        print(f"Comparing result: Expected [], Got {result}")
+        assert result == []
+    
+    def test_handles_single_message(self):
+        """
+        What it does: Verifies single message handling.
+        Purpose: Ensure single message is returned unchanged.
+        """
+        print("Setup: Single user message...")
+        messages = [UnifiedMessage(role="user", content="Solo")]
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles(messages)
+        
+        print(f"Comparing length: Expected 1 (no changes), Got {len(result)}")
+        assert len(result) == 1
+        assert result[0].role == "user"
+        assert result[0].content == "Solo"
+    
+    def test_preserves_tool_results_in_original_messages(self):
+        """
+        What it does: Verifies tool_results are preserved in original messages.
+        Purpose: Ensure synthetic assistants don't have tool content, but originals do.
+        """
+        print("Setup: Two consecutive user messages with tool_results...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="First",
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_1", "content": "Result 1"}]
+            ),
+            UnifiedMessage(
+                role="user",
+                content="Second",
+                tool_results=[{"type": "tool_result", "tool_use_id": "call_2", "content": "Result 2"}]
+            )
+        ]
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles(messages)
+        
+        print(f"Comparing length: Expected 3, Got {len(result)}")
+        assert len(result) == 3
+        print("Checking that synthetic assistant has no tool_results...")
+        assert result[1].role == "assistant"
+        assert result[1].tool_results is None
+        print("Checking that original messages preserved tool_results...")
+        assert result[0].tool_results is not None
+        assert len(result[0].tool_results) == 1
+        assert result[2].tool_results is not None
+        assert len(result[2].tool_results) == 1
+    
+    def test_preserves_images_in_original_messages(self):
+        """
+        What it does: Verifies images are preserved in original messages.
+        Purpose: Ensure synthetic assistants don't have images, but originals do.
+        """
+        print("Setup: Two consecutive user messages with images...")
+        messages = [
+            UnifiedMessage(
+                role="user",
+                content="First",
+                images=[{"media_type": "image/png", "data": "data1"}]
+            ),
+            UnifiedMessage(
+                role="user",
+                content="Second",
+                images=[{"media_type": "image/jpeg", "data": "data2"}]
+            )
+        ]
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles(messages)
+        
+        print(f"Comparing length: Expected 3, Got {len(result)}")
+        assert len(result) == 3
+        print("Checking that synthetic assistant has no images...")
+        assert result[1].role == "assistant"
+        assert result[1].images is None
+        print("Checking that original messages preserved images...")
+        assert result[0].images is not None
+        assert len(result[0].images) == 1
+        assert result[2].images is not None
+        assert len(result[2].images) == 1
+
+
+# ==================================================================================================
+# Tests for normalize_message_roles + ensure_alternating_roles integration
+# ==================================================================================================
+
+class TestNormalizeAndAlternatingIntegration:
+    """
+    Integration tests for normalize_message_roles + ensure_alternating_roles.
+    
+    These tests verify the complete pipeline for Issue #64 fix:
+    1. Unknown roles (developer, system) are normalized to 'user'
+    2. Consecutive user messages get synthetic assistant messages inserted
+    """
+    
+    def test_developer_messages_are_normalized_and_alternated(self):
+        """
+        What it does: Verifies complete pipeline for Issue #64.
+        Purpose: Ensure multiple developer messages are normalized and alternated correctly.
+        """
+        print("Setup: Multiple developer messages + user question...")
+        messages = [
+            UnifiedMessage(role="developer", content="Context 1"),
+            UnifiedMessage(role="developer", content="Context 2"),
+            UnifiedMessage(role="developer", content="Context 3"),
+            UnifiedMessage(role="user", content="Question")
+        ]
+        
+        print("Action: Normalizing roles...")
+        normalized = normalize_message_roles(messages)
+        print(f"After normalization: {[msg.role for msg in normalized]}")
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles(normalized)
+        
+        print(f"Comparing length: Expected 7 (4 user + 3 synthetic), Got {len(result)}")
+        assert len(result) == 7
+        print("Checking alternation pattern...")
+        assert result[0].role == "user" and result[0].content == "Context 1"
+        assert result[1].role == "assistant" and result[1].content == "(empty)"
+        assert result[2].role == "user" and result[2].content == "Context 2"
+        assert result[3].role == "assistant" and result[3].content == "(empty)"
+        assert result[4].role == "user" and result[4].content == "Context 3"
+        assert result[5].role == "assistant" and result[5].content == "(empty)"
+        assert result[6].role == "user" and result[6].content == "Question"
+    
+    def test_mixed_roles_are_normalized_and_alternated(self):
+        """
+        What it does: Verifies pipeline with mixed roles (developer, system, user, assistant).
+        Purpose: Ensure complex conversation patterns are handled correctly.
+        """
+        print("Setup: Mixed roles conversation...")
+        messages = [
+            UnifiedMessage(role="system", content="System"),
+            UnifiedMessage(role="developer", content="Dev"),
+            UnifiedMessage(role="user", content="User1"),
+            UnifiedMessage(role="assistant", content="Assistant1"),
+            UnifiedMessage(role="developer", content="Dev2"),
+            UnifiedMessage(role="user", content="User2")
+        ]
+        
+        print("Action: Normalizing roles...")
+        normalized = normalize_message_roles(messages)
+        print(f"After normalization: {[msg.role for msg in normalized]}")
+        
+        print("Action: Ensuring alternating roles...")
+        result = ensure_alternating_roles(normalized)
+        
+        print(f"Result length: {len(result)}")
+        print(f"Result roles: {[msg.role for msg in result]}")
+        
+        # After normalization: all system/developer → user
+        # [user, user, user, assistant, user, user]
+        # After alternation: insert synthetic between consecutive users
+        # [user, synthetic, user, synthetic, user, assistant, user, synthetic, user]
+        assert len(result) == 9
+        print("Checking that all system/developer were converted to user...")
+        assert result[0].role == "user" and result[0].content == "System"
+        assert result[1].role == "assistant" and result[1].content == "(empty)"
+        assert result[2].role == "user" and result[2].content == "Dev"
+        assert result[3].role == "assistant" and result[3].content == "(empty)"
+        assert result[4].role == "user" and result[4].content == "User1"
+        assert result[5].role == "assistant" and result[5].content == "Assistant1"
+        assert result[6].role == "user" and result[6].content == "Dev2"
+        assert result[7].role == "assistant" and result[7].content == "(empty)"
+        assert result[8].role == "user" and result[8].content == "User2"
 
 
 # ==================================================================================================
@@ -3260,24 +3763,29 @@ class TestBuildKiroHistory:
         assert "assistantResponseMessage" in result[0]
         assert result[0]["assistantResponseMessage"]["content"] == "Hi there"
     
-    def test_converts_unknown_role_system_to_user(self):
+    def test_expects_normalized_roles_only(self):
         """
-        What it does: Verifies system messages are converted to user via fallback.
-        Purpose: System messages should be extracted earlier, but if they reach
-                 build_kiro_history, fallback converts them to user to preserve content.
+        What it does: Verifies build_kiro_history only handles user/assistant roles.
+        Purpose: After normalize_message_roles(), build_kiro_history should never
+                 see unknown roles. This test confirms it only processes normalized roles.
         """
-        print("Setup: System message (edge case - should be extracted earlier)...")
-        messages = [UnifiedMessage(role="system", content="You are helpful")]
+        print("Setup: Messages with normalized roles (user/assistant only)...")
+        messages = [
+            UnifiedMessage(role="user", content="Normalized user"),
+            UnifiedMessage(role="assistant", content="Assistant")
+        ]
         
         print("Action: Building history...")
         result = build_kiro_history(messages, "claude-sonnet-4")
         
-        print(f"Comparing length: Expected 1, Got {len(result)}")
-        assert len(result) == 1
-        print("Checking that system was converted to userInputMessage...")
+        print(f"Comparing length: Expected 2, Got {len(result)}")
+        assert len(result) == 2
+        print("Checking that user message is converted to userInputMessage...")
         assert "userInputMessage" in result[0]
-        print(f"Checking content: '{result[0]['userInputMessage']['content']}'")
-        assert result[0]["userInputMessage"]["content"] == "You are helpful"
+        assert result[0]["userInputMessage"]["content"] == "Normalized user"
+        print("Checking that assistant message is converted to assistantResponseMessage...")
+        assert "assistantResponseMessage" in result[1]
+        assert result[1]["assistantResponseMessage"]["content"] == "Assistant"
     
     def test_builds_conversation_history(self):
         """
@@ -3677,95 +4185,6 @@ class TestBuildKiroHistory:
         assert images[0]["format"] == "gif"
         assert images[0]["source"]["bytes"] == "gif_image_data"
     
-    def test_converts_developer_role_to_user(self):
-        """
-        What it does: Verifies that 'developer' role is converted to user message.
-        Purpose: Fix for Issue #64 - Codex App uses 'developer' role which must be
-                 converted to 'user' to maintain Kiro API compatibility.
-        """
-        print("Setup: Message with 'developer' role (Codex App)...")
-        messages = [UnifiedMessage(role="developer", content="<permissions>sandbox enabled</permissions>")]
-        
-        print("Action: Building history...")
-        result = build_kiro_history(messages, "claude-sonnet-4")
-        
-        print(f"Comparing length: Expected 1, Got {len(result)}")
-        assert len(result) == 1
-        print("Checking that developer was converted to userInputMessage...")
-        assert "userInputMessage" in result[0]
-        print(f"Checking content: '{result[0]['userInputMessage']['content']}'")
-        assert result[0]["userInputMessage"]["content"] == "<permissions>sandbox enabled</permissions>"
-    
-    def test_converts_unknown_role_to_user(self):
-        """
-        What it does: Verifies that any unknown role is converted to user message.
-        Purpose: Universal fallback for future API roles - ensures Gateway doesn't break
-                 when new roles are added to OpenAI/Anthropic APIs.
-        """
-        print("Setup: Message with unknown role 'moderator'...")
-        messages = [UnifiedMessage(role="moderator", content="Content approved")]
-        
-        print("Action: Building history...")
-        result = build_kiro_history(messages, "claude-sonnet-4")
-        
-        print(f"Comparing length: Expected 1, Got {len(result)}")
-        assert len(result) == 1
-        print("Checking that unknown role was converted to userInputMessage...")
-        assert "userInputMessage" in result[0]
-        print(f"Checking content: '{result[0]['userInputMessage']['content']}'")
-        assert result[0]["userInputMessage"]["content"] == "Content approved"
-    
-    def test_converts_developer_role_with_tool_results(self):
-        """
-        What it does: Verifies that 'developer' role with tool_results is converted correctly.
-        Purpose: Ensure unknown roles preserve tool_results when converted to user messages.
-        """
-        print("Setup: Developer message with tool_results...")
-        messages = [
-            UnifiedMessage(
-                role="developer",
-                content="Context update",
-                tool_results=[{"type": "tool_result", "tool_use_id": "call_123", "content": "Result"}]
-            )
-        ]
-        
-        print("Action: Building history...")
-        result = build_kiro_history(messages, "claude-sonnet-4")
-        
-        print(f"Result: {result}")
-        assert len(result) == 1
-        assert "userInputMessage" in result[0]
-        user_msg = result[0]["userInputMessage"]
-        print("Checking that tool_results are preserved...")
-        assert "userInputMessageContext" in user_msg
-        assert "toolResults" in user_msg["userInputMessageContext"]
-    
-    def test_converts_developer_role_with_images(self):
-        """
-        What it does: Verifies that 'developer' role with images is converted correctly.
-        Purpose: Ensure unknown roles preserve images when converted to user messages.
-        """
-        print("Setup: Developer message with images...")
-        messages = [
-            UnifiedMessage(
-                role="developer",
-                content="Screenshot attached",
-                images=[{"media_type": "image/png", "data": "screenshot_data"}]
-            )
-        ]
-        
-        print("Action: Building history...")
-        result = build_kiro_history(messages, "claude-sonnet-4")
-        
-        print(f"Result: {result}")
-        assert len(result) == 1
-        user_msg = result[0]["userInputMessage"]
-        print("Checking that images are preserved...")
-        assert "images" in user_msg
-        assert len(user_msg["images"]) == 1
-        assert user_msg["images"][0]["format"] == "png"
-
-
 # ==================================================================================================
 # Tests for strip_all_tool_content
 # ==================================================================================================
