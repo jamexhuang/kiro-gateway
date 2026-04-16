@@ -1522,19 +1522,14 @@ def build_kiro_payload(
     if profile_arn:
         payload["profileArn"] = profile_arn
 
-    # Payload size guard — detect and handle oversized payloads before sending
-    payload_size = check_payload_size(payload)
-    if payload_size > KIRO_MAX_PAYLOAD_BYTES:
-        if AUTO_TRIM_PAYLOAD:
+    # Payload size guard — auto-trim if enabled
+    if AUTO_TRIM_PAYLOAD:
+        payload_size = check_payload_size(payload)
+        if payload_size > KIRO_MAX_PAYLOAD_BYTES:
             stats = trim_payload_to_limit(payload, KIRO_MAX_PAYLOAD_BYTES)
-            logger.warning(
-                f"[PayloadGuard] Payload trimmed: {stats.original_bytes} -> {stats.final_bytes} bytes, "
-                f"history {stats.original_entries} -> {stats.final_entries} entries"
-            )
-        else:
-            logger.error(
-                f"[PayloadGuard] Payload size {payload_size} bytes exceeds limit "
-                f"{KIRO_MAX_PAYLOAD_BYTES} bytes. Use /compact or start a new session."
+            logger.info(
+                f"Trimmed conversation history: {stats.original_entries} -> {stats.final_entries} messages "
+                f"({stats.original_bytes} -> {stats.final_bytes} bytes)"
             )
 
     return KiroPayloadResult(payload=payload, tool_documentation=tool_documentation)
