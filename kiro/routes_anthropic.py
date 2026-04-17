@@ -51,6 +51,8 @@ from kiro.streaming_anthropic import (
 from kiro.http_client import KiroHttpClient
 from kiro.utils import generate_conversation_id
 from kiro.tokenizer import count_tools_tokens
+from kiro.config import WEB_SEARCH_ENABLED
+from kiro.mcp_tools import handle_native_web_search
 
 # Import debug_logger
 try:
@@ -246,6 +248,55 @@ async def messages(
     if tool_results_modified > 0 or content_notices_added > 0:
         request_data.messages = modified_messages
         logger.info(f"Truncation recovery: modified {tool_results_modified} tool_result(s), added {content_notices_added} content notice(s)")
+    
+    # ==============================================================================
+    # WebSearch Support - Path B: Auto-Injection (MCP Tool Emulation)
+    # ==============================================================================
+    
+    # Auto-inject web_search tool if enabled (Path B - MCP emulation)
+    if WEB_SEARCH_ENABLED:
+        if request_data.tools is None:
+            request_data.tools = []
+        
+        # Check if web_search already exists (by name)
+        has_ws = any(
+            getattr(tool, "name", "") == "web_search"
+            for tool in request_data.tools
+        )
+        
+        if not has_ws:
+            from kiro.models_anthropic import AnthropicTool
+            web_search_tool = AnthropicTool(
+                name="web_search",
+                description="Search the web for current information. Use when you need up-to-date data from the internet.",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"}
+                    },
+                    "required": ["query"]
+                }
+            )
+            request_data.tools.append(web_search_tool)
+            logger.debug("Auto-injected web_search tool for MCP emulation (Path B)")
+    
+    # ==============================================================================
+    # WebSearch Support - Path A: Native Anthropic (Early Return)
+    # ==============================================================================
+    
+    # Check for native Anthropic server-side tool (Path A)
+    # This works ALWAYS, regardless of WEB_SEARCH_ENABLED setting
+    if request_data.tools:
+        for tool in request_data.tools:
+            tool_type = getattr(tool, "type", None)
+            if tool_type and tool_type.startswith("web_search"):
+                # Path A: Early return, direct MCP call
+                logger.info("Detected native Anthropic web_search (Path A), routing to MCP API")
+                return await handle_native_web_search(request, request_data, auth_manager, api_format="anthropic")
+    
+    # ==============================================================================
+    # Normal Flow (Path B will be intercepted in streaming, or no web_search)
+    # ==============================================================================
     
     # Generate conversation ID for Kiro API (random UUID, not used for tracking)
     conversation_id = generate_conversation_id()

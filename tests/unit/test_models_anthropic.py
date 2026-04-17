@@ -1127,6 +1127,108 @@ class TestAnthropicTool:
         
         print(f"Comparing description: Expected None, Got {tool.description}")
         assert tool.description is None
+    
+    def test_server_side_tool_without_input_schema_valid(self):
+        """
+        What it does: Server-side tool (with type field) should NOT require input_schema.
+        Purpose: Ensure Anthropic server-side tools work without input_schema.
+        """
+        print("Setup: Creating server-side tool with type field...")
+        tool_data = {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 5
+        }
+        
+        print("Action: Creating AnthropicTool...")
+        tool = AnthropicTool(**tool_data)
+        
+        print(f"Comparing type: Expected 'web_search_20250305', Got '{tool.type}'")
+        assert tool.type == "web_search_20250305"
+        
+        print(f"Comparing name: Expected 'web_search', Got '{tool.name}'")
+        assert tool.name == "web_search"
+        
+        print(f"Comparing input_schema: Expected None, Got {tool.input_schema}")
+        assert tool.input_schema is None
+        
+        print(f"Comparing max_uses: Expected 5, Got {tool.max_uses}")
+        assert tool.max_uses == 5
+    
+    def test_user_defined_tool_without_input_schema_invalid(self):
+        """
+        What it does: User-defined tool (no type field) MUST have input_schema.
+        Purpose: Ensure validation fails for user-defined tools without input_schema.
+        """
+        print("Setup: Attempting to create user-defined tool without input_schema...")
+        tool_data = {
+            "name": "my_tool",
+            "description": "My tool"
+            # Missing input_schema and no type field
+        }
+        
+        print("Action: Creating model (should raise ValidationError)...")
+        with pytest.raises(ValidationError) as exc_info:
+            AnthropicTool(**tool_data)
+        
+        print(f"ValidationError raised: {exc_info.value}")
+        assert "input_schema is required" in str(exc_info.value)
+    
+    def test_server_side_tool_all_parameters(self):
+        """
+        What it does: Server-side tool with all optional parameters.
+        Purpose: Ensure all server-side tool parameters are accepted.
+        """
+        print("Setup: Creating server-side tool with all parameters...")
+        tool_data = {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "description": "Search the web",
+            "max_uses": 10,
+            "allowed_domains": ["example.com", "test.com"],
+            "blocked_domains": ["spam.com"],
+            "user_location": {"city": "Moscow", "country": "RU"}
+        }
+        
+        print("Action: Creating AnthropicTool...")
+        tool = AnthropicTool(**tool_data)
+        
+        print(f"Comparing allowed_domains: Got {tool.allowed_domains}")
+        assert tool.allowed_domains == ["example.com", "test.com"]
+        
+        print(f"Comparing blocked_domains: Got {tool.blocked_domains}")
+        assert tool.blocked_domains == ["spam.com"]
+        
+        print(f"Comparing user_location: Got {tool.user_location}")
+        assert tool.user_location["city"] == "Moscow"
+        assert tool.user_location["country"] == "RU"
+    
+    def test_server_side_tool_with_input_schema_valid(self):
+        """
+        What it does: Server-side tool CAN have input_schema (optional).
+        Purpose: Ensure server-side tools accept input_schema if provided.
+        """
+        print("Setup: Creating server-side tool with input_schema...")
+        tool_data = {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"}
+                }
+            }
+        }
+        
+        print("Action: Creating AnthropicTool...")
+        tool = AnthropicTool(**tool_data)
+        
+        print(f"Comparing type: Got '{tool.type}'")
+        assert tool.type == "web_search_20250305"
+        
+        print(f"Comparing input_schema: Got {tool.input_schema}")
+        assert tool.input_schema is not None
+        assert "properties" in tool.input_schema
 
 
 # ==================================================================================================

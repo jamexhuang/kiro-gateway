@@ -469,10 +469,21 @@ KIRO_MAX_PAYLOAD_BYTES: int = int(os.getenv("KIRO_MAX_PAYLOAD_BYTES", "600000"))
 AUTO_TRIM_PAYLOAD: bool = os.getenv("AUTO_TRIM_PAYLOAD", "false").lower() in ("true", "1", "yes")
 
 # ==================================================================================================
+# WebSearch Settings (MCP Tool Emulation)
+# ==================================================================================================
+
+# Enable web_search tool auto-injection (default: true)
+# When enabled, web_search is automatically added as a tool for MCP emulation (Path B)
+# Model decides whether to use it or not
+#
+# Note: Native Anthropic server-side tools (Path A) work ALWAYS, regardless of this setting
+WEB_SEARCH_ENABLED: bool = os.getenv("WEB_SEARCH_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# ==================================================================================================
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "2.3-dev.2"
+APP_VERSION: str = "2.4-dev.3"
 APP_TITLE: str = "Kiro Gateway"
 APP_DESCRIPTION: str = "Proxy gateway for Kiro API (Amazon Q Developer / AWS CodeWhisperer). OpenAI and Anthropic compatible. Made by @jwadow"
 

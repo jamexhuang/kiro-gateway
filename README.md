@@ -4,7 +4,7 @@
 
 **Proxy gateway for Kiro API (Amazon Q Developer / AWS CodeWhisperer)**
 
-[🇷🇺 Русский](docs/ru/README.md) • [🇨🇳 中文](docs/zh/README.md) • [🇪🇸 Español](docs/es/README.md) • [🇮🇩 Indonesia](docs/id/README.md) • [🇧🇷 Português](docs/pt/README.md) • [🇯🇵 日本語](docs/ja/README.md) • [🇰🇷 한국어](docs/ko/README.md)
+🇬🇧 English • [🇷🇺 Русский](docs/ru/README.md) • [🇨🇳 中文](docs/zh/README.md) • [🇪🇸 Español](docs/es/README.md) • [🇮🇩 Indonesia](docs/id/README.md) • [🇧🇷 Português](docs/pt/README.md) • [🇯🇵 日本語](docs/ja/README.md) • [🇰🇷 한국어](docs/ko/README.md)
 
 Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 
@@ -13,7 +13,7 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
 [![Sponsor](https://img.shields.io/badge/💖_Sponsor-Support_Development-ff69b4)](#-support-the-project)
 
-*Use Claude models from Kiro with Claude Code, OpenCode, Codex app, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue and other OpenAI or Anthropic compatible tools*
+*Use Claude models from Kiro with Claude Code, OpenCode, OpenClaw, Claw Code, Codex app, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue and other OpenAI or Anthropic compatible tools*
 
 [Models](#-supported-models) • [Features](#-features) • [Quick Start](#-quick-start) • [Configuration](#%EF%B8%8F-configuration) • [💖 Sponsor](#-support-the-project)
 
@@ -21,7 +21,7 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 
 ---
 
-## 🤖 Available Models
+## 🤖 Available Models (Free List)
 
 > ⚠️ **Important:** Model availability depends on your Kiro tier (free/paid). The gateway provides access to whatever models are available in your IDE or CLI based on your subscription. The list below shows models commonly available on the **free tier**.
 
@@ -35,7 +35,11 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 
 📦 **Claude 3.7 Sonnet** — Legacy model. Available for backward compatibility.
 
+💤 **GLM-5** — Open MoE model (744B params, 40B active). Advanced model for complex systems engineering and long-horizon agentic tasks.
+
 🐋 **DeepSeek-V3.2** — Open MoE model (685B params, 37B active). Balanced performance for coding, reasoning, and general tasks.
+
+🧩 **MiniMax M2.5** — Open MoE model (230B params, 10B active). Enhanced version with improved reasoning and task handling.
 
 🧩 **MiniMax M2.1** — Open MoE model (230B params, 10B active). Great for complex tasks, planning, and multi-step workflows.
 
@@ -54,6 +58,7 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 | 🌐 **VPN/Proxy Support** | HTTP/SOCKS5 proxy for restricted networks |
 | 🧠 **Extended Thinking** | Reasoning is exclusive to our project |
 | 👁️ **Vision Support** | Send images to model |
+| 🔍 **Web Search** | Search the web for current information |
 | 🛠️ **Tool Calling** | Supports function calling |
 | 💬 **Full message history** | Passes complete conversation context |
 | 📡 **Streaming** | Full SSE streaming support |
@@ -717,7 +722,7 @@ Every contribution helps keep this project alive and growing
 
 ### 🤑 Donate
 
-[**☕ One-time Donation**](https://app.lava.top/jwadow?tabId=donate) &nbsp;•&nbsp; [**💎 Monthly Support**](https://app.lava.top/jwadow?tabId=subscriptions)
+[**☕ One-time Support**](https://app.lava.top/jwadow?tabId=donate)
 
 <br>
 

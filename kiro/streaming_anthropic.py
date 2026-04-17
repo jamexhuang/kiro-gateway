@@ -302,6 +302,126 @@ async def stream_kiro_to_anthropic(
                 tool_name = tool.get("function", {}).get("name", "") or tool.get("name", "")
                 tool_input = tool.get("function", {}).get("arguments", {}) or tool.get("input", {})
                 
+                # ==============================================================================
+                # WebSearch Support - Path B: MCP Tool Emulation (Streaming Interception)
+                # ==============================================================================
+                
+                # INTERCEPT web_search tool calls (Path B - MCP emulation)
+                if tool_name == "web_search":
+                    from kiro.mcp_tools import call_kiro_mcp_api, generate_search_summary
+                    
+                    logger.info("Intercepted web_search tool call (Path B - MCP emulation)")
+                    
+                    # Parse tool_input if string
+                    if isinstance(tool_input, str):
+                        try:
+                            tool_input = json.loads(tool_input)
+                        except json.JSONDecodeError:
+                            tool_input = {}
+                    
+                    # Extract query
+                    query = tool_input.get("query", "")
+                    if not query:
+                        logger.warning("web_search called without query, skipping MCP call")
+                        continue
+                    
+                    logger.debug(f"WebSearch query (Path B): {query}")
+                    
+                    # Call MCP API
+                    mcp_tool_use_id, results = await call_kiro_mcp_api(query, auth_manager)
+                    
+                    if results is None:
+                        logger.error("MCP API call failed for web_search")
+                        # Continue with normal tool_use processing (will show error to user)
+                    else:
+                        # Emit server_tool_use + web_search_tool_result + text summary
+                        # (full SSE sequence as in mcp_tools.py)
+                        
+                        # Event: content_block_start (server_tool_use)
+                        yield format_sse_event("content_block_start", {
+                            "type": "content_block_start",
+                            "index": current_block_index,
+                            "content_block": {
+                                "id": mcp_tool_use_id,
+                                "type": "server_tool_use",
+                                "name": "web_search",
+                                "input": {}
+                            }
+                        })
+                        
+                        # Event: content_block_delta (input_json_delta)
+                        yield format_sse_event("content_block_delta", {
+                            "type": "content_block_delta",
+                            "index": current_block_index,
+                            "delta": {
+                                "type": "input_json_delta",
+                                "partial_json": json.dumps({"query": query})
+                            }
+                        })
+                        
+                        # Event: content_block_stop (server_tool_use)
+                        yield format_sse_event("content_block_stop", {
+                            "type": "content_block_stop",
+                            "index": current_block_index
+                        })
+                        current_block_index += 1
+                        
+                        # Event: content_block_start (web_search_tool_result)
+                        search_content = []
+                        for r in results.get("results", []):
+                            search_content.append({
+                                "type": "web_search_result",
+                                "title": r.get("title", ""),
+                                "url": r.get("url", ""),
+                                "encrypted_content": r.get("snippet", ""),
+                                "page_age": None
+                            })
+                        
+                        yield format_sse_event("content_block_start", {
+                            "type": "content_block_start",
+                            "index": current_block_index,
+                            "content_block": {
+                                "type": "web_search_tool_result",
+                                "tool_use_id": mcp_tool_use_id,
+                                "content": search_content
+                            }
+                        })
+                        
+                        # Event: content_block_stop (web_search_tool_result)
+                        yield format_sse_event("content_block_stop", {
+                            "type": "content_block_stop",
+                            "index": current_block_index
+                        })
+                        current_block_index += 1
+                        
+                        # Event: content_block_start (text)
+                        yield format_sse_event("content_block_start", {
+                            "type": "content_block_start",
+                            "index": current_block_index,
+                            "content_block": {"type": "text", "text": ""}
+                        })
+                        
+                        # Events: content_block_delta (text_delta) - stream summary
+                        summary = generate_search_summary(query, results)
+                        chunk_size = 100
+                        for i in range(0, len(summary), chunk_size):
+                            chunk = summary[i:i + chunk_size]
+                            yield format_sse_event("content_block_delta", {
+                                "type": "content_block_delta",
+                                "index": current_block_index,
+                                "delta": {"type": "text_delta", "text": chunk}
+                            })
+                        
+                        # Event: content_block_stop (text)
+                        yield format_sse_event("content_block_stop", {
+                            "type": "content_block_stop",
+                            "index": current_block_index
+                        })
+                        current_block_index += 1
+                        
+                        # Skip normal tool_use processing
+                        continue
+                
                 # Check if this tool was truncated
                 if tool.get('_truncation_detected'):
                     truncated_tools.append({
