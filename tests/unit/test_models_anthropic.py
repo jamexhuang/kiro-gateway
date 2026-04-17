@@ -1579,3 +1579,79 @@ class TestErrorModels:
         
         print(f"Comparing error.type: Got '{response.error.type}'")
         assert response.error.type == "authentication_error"
+
+
+# ==================================================================================================
+# Tests for Client Thinking Budget Support (Issue #111)
+# ==================================================================================================
+
+class TestThinkingParameter:
+    """Tests for thinking parameter in AnthropicMessagesRequest."""
+    
+    def test_thinking_optional(self):
+        """
+        What it does: Verifies thinking parameter can be None (not specified)
+        Purpose: Ensure thinking is optional parameter
+        """
+        print("Creating AnthropicMessagesRequest without thinking...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4.5",
+            messages=[AnthropicMessage(role="user", content="test")],
+            max_tokens=1024
+        )
+        
+        print(f"Comparing: expected=None, got={request.thinking}")
+        assert request.thinking is None
+    
+    def test_thinking_with_budget_tokens(self):
+        """
+        What it does: Verifies thinking={"type": "enabled", "budget_tokens": 8000} is accepted
+        Purpose: Ensure official Anthropic thinking format with budget works
+        """
+        print("Creating AnthropicMessagesRequest with thinking budget...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4.5",
+            messages=[AnthropicMessage(role="user", content="test")],
+            max_tokens=1024,
+            thinking={"type": "enabled", "budget_tokens": 8000}
+        )
+        
+        print(f"Comparing thinking: got={request.thinking}")
+        assert request.thinking is not None
+        assert request.thinking["type"] == "enabled"
+        assert request.thinking["budget_tokens"] == 8000
+    
+    def test_thinking_without_budget_tokens(self):
+        """
+        What it does: Verifies thinking={"type": "enabled"} without budget_tokens is accepted
+        Purpose: Ensure thinking can be enabled without explicit budget
+        """
+        print("Creating AnthropicMessagesRequest with thinking enabled but no budget...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4.5",
+            messages=[AnthropicMessage(role="user", content="test")],
+            max_tokens=1024,
+            thinking={"type": "enabled"}
+        )
+        
+        print(f"Comparing thinking: got={request.thinking}")
+        assert request.thinking is not None
+        assert request.thinking["type"] == "enabled"
+        assert "budget_tokens" not in request.thinking
+    
+    def test_thinking_disabled(self):
+        """
+        What it does: Verifies thinking={"type": "disabled"} is accepted
+        Purpose: Ensure client can explicitly disable thinking
+        """
+        print("Creating AnthropicMessagesRequest with thinking disabled...")
+        request = AnthropicMessagesRequest(
+            model="claude-sonnet-4.5",
+            messages=[AnthropicMessage(role="user", content="test")],
+            max_tokens=1024,
+            thinking={"type": "disabled"}
+        )
+        
+        print(f"Comparing thinking: got={request.thinking}")
+        assert request.thinking is not None
+        assert request.thinking["type"] == "disabled"

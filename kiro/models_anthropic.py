@@ -286,6 +286,9 @@ class AnthropicMessagesRequest(BaseModel):
     system: Optional[SystemPrompt] = None
     stream: bool = False
 
+    # Extended thinking (official Anthropic parameter)
+    thinking: Optional[Dict[str, Any]] = None
+
     # Tools
     tools: Optional[List[AnthropicTool]] = None
     tool_choice: Optional[Union[ToolChoice, Dict[str, Any]]] = None

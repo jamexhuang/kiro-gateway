@@ -410,11 +410,25 @@ _FAKE_REASONING_RAW: str = os.getenv("FAKE_REASONING", "").lower()
 # Default is True - if env var is not set or empty, enable fake reasoning
 FAKE_REASONING_ENABLED: bool = _FAKE_REASONING_RAW not in ("false", "0", "no", "disabled", "off")
 
-# Maximum thinking length in tokens.
+# Maximum thinking length in tokens (default budget when client doesn't specify).
 # This value is injected into the request as <max_thinking_length>{value}</max_thinking_length>
 # Higher values allow for more detailed reasoning but increase response time and token usage.
 # Default: 4000 tokens
 FAKE_REASONING_MAX_TOKENS: int = int(os.getenv("FAKE_REASONING_MAX_TOKENS", "4000"))
+
+# Maximum budget cap for fake reasoning when client sends thinking budget.
+#
+# WHY CAP? Fake reasoning uses output tokens (not separate thinking tokens like native API).
+# Large budgets can cause the model to spend ALL output tokens on reasoning with NOTHING
+# left for actual content. This cap prevents that.
+#
+# Default: 10000 tokens (2.5x default budget of 4000)
+# - Allows deeper reasoning than default
+# - Prevents excessive token consumption
+# - Still leaves room for actual response
+#
+# Set to 0 to disable capping (not recommended for production).
+FAKE_REASONING_BUDGET_CAP: int = int(os.getenv("FAKE_REASONING_BUDGET_CAP", "10000"))
 
 # How to handle the thinking block in responses:
 # - "as_reasoning_content": Extract to reasoning_content field (OpenAI-compatible, recommended)
@@ -458,7 +472,7 @@ AUTO_TRIM_PAYLOAD: bool = os.getenv("AUTO_TRIM_PAYLOAD", "false").lower() in ("t
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "2.3-dev"
+APP_VERSION: str = "2.3-dev.2"
 APP_TITLE: str = "Kiro Gateway"
 APP_DESCRIPTION: str = "Proxy gateway for Kiro API (Amazon Q Developer / AWS CodeWhisperer). OpenAI and Anthropic compatible. Made by @jwadow"
 
