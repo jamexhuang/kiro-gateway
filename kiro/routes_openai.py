@@ -378,17 +378,25 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         tools_for_tokenizer = [tool.model_dump() for tool in request_data.tools] if request_data.tools else None
         
         if request_data.stream:
-            # Streaming mode
+            # Streaming mode with first token retry
             async def stream_wrapper():
                 streaming_error = None
                 client_disconnected = False
                 try:
-                    async for chunk in stream_kiro_to_openai(
-                        http_client.client,
-                        response,
-                        request_data.model,
-                        model_cache,
-                        auth_manager,
+                    # Create retry request function for retries
+                    async def make_retry_request():
+                        return await http_client.request_with_retry(
+                            "POST", url, kiro_payload, stream=True
+                        )
+                    
+                    # Use retry wrapper with initial response
+                    async for chunk in stream_with_first_token_retry(
+                        make_request=make_retry_request,
+                        client=http_client.client,
+                        model=request_data.model,
+                        model_cache=model_cache,
+                        auth_manager=auth_manager,
+                        initial_response=response,
                         request_messages=messages_for_tokenizer,
                         request_tools=tools_for_tokenizer
                     ):

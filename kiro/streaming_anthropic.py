@@ -634,8 +634,13 @@ async def stream_kiro_to_anthropic(
             if prompt_source != "unknown":
                 input_tokens = prompt_tokens
         
-        # Determine stop reason
-        stop_reason = "tool_use" if tool_blocks else "end_turn"
+        # Determine stop reason (truncation has highest priority)
+        if content_was_truncated:
+            stop_reason = "max_tokens"
+        elif tool_blocks:
+            stop_reason = "tool_use"
+        else:
+            stop_reason = "end_turn"
         
         # Send message_delta with stop_reason and usage
         usage_payload = {
@@ -810,8 +815,29 @@ async def collect_anthropic_response(
         if prompt_source != "unknown":
             input_tokens = prompt_tokens
     
-    # Determine stop reason
-    stop_reason = "tool_use" if result.tool_calls else "end_turn"
+    # Detect content truncation (missing completion signals)
+    stream_completed_normally = result.context_usage_percentage is not None
+    content_was_truncated = (
+        not stream_completed_normally and
+        len(result.content) > 0 and
+        not result.tool_calls  # Don't confuse with tool call truncation
+    )
+    
+    if content_was_truncated:
+        from kiro.config import TRUNCATION_RECOVERY
+        logger.error(
+            f"Content truncated by Kiro API (non-streaming): stream ended without completion signals, "
+            f"length={len(result.content)} chars. "
+            f"{'Model will be notified automatically about truncation.' if TRUNCATION_RECOVERY else 'Set TRUNCATION_RECOVERY=true in .env to auto-notify model about truncation.'}"
+        )
+    
+    # Determine stop reason (truncation has highest priority)
+    if content_was_truncated:
+        stop_reason = "max_tokens"
+    elif result.tool_calls:
+        stop_reason = "tool_use"
+    else:
+        stop_reason = "end_turn"
     
     logger.debug(
         f"[Anthropic Non-Streaming] Completed: "
@@ -842,6 +868,7 @@ async def stream_with_first_token_retry_anthropic(
     model: str,
     model_cache: "ModelInfoCache",
     auth_manager: "KiroAuthManager",
+    initial_response: Optional[httpx.Response] = None,
     max_retries: int = FIRST_TOKEN_MAX_RETRIES,
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
@@ -862,6 +889,8 @@ async def stream_with_first_token_retry_anthropic(
         model: Model name
         model_cache: Model cache
         auth_manager: Authentication manager
+        initial_response: Optional pre-validated response to use on first attempt.
+                         If provided, make_request is only called on retries.
         max_retries: Maximum number of attempts
         first_token_timeout: First token wait timeout (seconds)
         request_messages: Original request messages (for fallback token counting)
@@ -911,6 +940,7 @@ async def stream_with_first_token_retry_anthropic(
     async for chunk in stream_with_first_token_retry(
         make_request=make_request,
         stream_processor=stream_processor,
+        initial_response=initial_response,
         max_retries=max_retries,
         first_token_timeout=first_token_timeout,
         on_http_error=create_http_error,

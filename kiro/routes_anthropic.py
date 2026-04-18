@@ -413,16 +413,24 @@ async def messages(
             )
         
         if request_data.stream:
-            # Streaming mode - Kiro already returned 200, now stream the response
+            # Streaming mode with first token retry
             async def stream_wrapper():
                 streaming_error = None
                 client_disconnected = False
                 try:
-                    async for chunk in stream_kiro_to_anthropic(
-                        response,
-                        request_data.model,
-                        model_cache,
-                        auth_manager,
+                    # Create retry request function for retries
+                    async def make_retry_request():
+                        return await http_client.request_with_retry(
+                            "POST", url, kiro_payload, stream=True
+                        )
+                    
+                    # Use retry wrapper with initial response
+                    async for chunk in stream_with_first_token_retry_anthropic(
+                        make_request=make_retry_request,
+                        model=request_data.model,
+                        model_cache=model_cache,
+                        auth_manager=auth_manager,
+                        initial_response=response,
                         request_messages=messages_for_tokenizer,
                         request_tools=tools_for_tokenizer,
                         request_system=system_for_tokenizer,

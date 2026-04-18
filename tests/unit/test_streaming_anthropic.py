@@ -360,6 +360,7 @@ class TestStreamKiroToAnthropic:
         
         async def mock_parse_kiro_stream(*args, **kwargs):
             yield KiroEvent(type="content", content="Hello")
+            yield KiroEvent(type="context_usage", context_usage_percentage=5.0)
         
         print("Action: Streaming to Anthropic format...")
         events = []
@@ -622,7 +623,7 @@ class TestCollectAnthropicResponse:
             thinking_content="",
             tool_calls=[],
             usage=None,
-            context_usage_percentage=None
+            context_usage_percentage=5.0
         )
         
         print("Action: Collecting Anthropic response...")
@@ -1532,3 +1533,137 @@ class TestStreamWithFirstTokenRetryAnthropic:
         print(f"Call count: {call_count}")
         assert call_count == 5  # Should try exactly 5 times
         print("✓ max_retries parameter respected")
+
+
+# ==================================================================================================
+# Tests for truncation detection
+# ==================================================================================================
+
+class TestStreamingAnthropicTruncationDetection:
+    """Tests for truncation detection in Anthropic streaming."""
+    
+    @pytest.mark.asyncio
+    async def test_stop_reason_is_max_tokens_when_truncated(self, mock_response, mock_model_cache, mock_auth_manager):
+        """
+        What it does: Sets stop_reason to max_tokens when content is truncated.
+        Goal: Verify truncation detection without completion signals.
+        """
+        print("Setup: Mock stream without completion signals (truncated)...")
+        
+        async def mock_parse_kiro_stream(*args, **kwargs):
+            yield KiroEvent(type="content", content="This response was cut off mid-sentence because")
+            # No context_usage event = truncation
+        
+        print("Action: Streaming to Anthropic format...")
+        events = []
+        
+        with patch('kiro.streaming_anthropic.parse_kiro_stream', mock_parse_kiro_stream):
+            with patch('kiro.streaming_anthropic.parse_bracket_tool_calls', return_value=[]):
+                async for event in stream_kiro_to_anthropic(
+                    mock_response, "claude-sonnet-4", mock_model_cache, mock_auth_manager
+                ):
+                    events.append(event)
+        
+        print(f"Received {len(events)} events")
+        
+        # Should have message_delta with stop_reason: max_tokens
+        message_delta_events = [e for e in events if "message_delta" in e]
+        assert len(message_delta_events) >= 1
+        print(f"Comparing stop_reason: Expected 'max_tokens', Got event: {message_delta_events[0]}")
+        assert "max_tokens" in message_delta_events[0]
+        print("✓ stop_reason is max_tokens when truncated")
+    
+    @pytest.mark.asyncio
+    async def test_stop_reason_is_tool_use_even_without_completion_signals(self, mock_response, mock_model_cache, mock_auth_manager):
+        """
+        What it does: Sets stop_reason to tool_use when tool use present.
+        Goal: Verify tool_use takes priority (not confused with content truncation).
+        """
+        print("Setup: Mock stream with tool use but no completion signals...")
+        
+        async def mock_parse_kiro_stream(*args, **kwargs):
+            yield KiroEvent(type="content", content="Let me call a tool")
+            yield KiroEvent(type="tool_use", tool_use={
+                "id": "toolu_1",
+                "function": {"name": "get_weather", "arguments": "{}"}
+            })
+            # No context_usage event, but tool use present = tool_use stop_reason
+        
+        print("Action: Streaming to Anthropic format...")
+        events = []
+        
+        with patch('kiro.streaming_anthropic.parse_kiro_stream', mock_parse_kiro_stream):
+            with patch('kiro.streaming_anthropic.parse_bracket_tool_calls', return_value=[]):
+                async for event in stream_kiro_to_anthropic(
+                    mock_response, "claude-sonnet-4", mock_model_cache, mock_auth_manager
+                ):
+                    events.append(event)
+        
+        print(f"Received {len(events)} events")
+        
+        # Tool use takes priority (not confused with content truncation)
+        message_delta_events = [e for e in events if "message_delta" in e]
+        assert len(message_delta_events) >= 1
+        print(f"Comparing stop_reason: Expected 'tool_use', Got event: {message_delta_events[0]}")
+        assert "tool_use" in message_delta_events[0]
+        print("✓ stop_reason is tool_use (not confused with content truncation)")
+    
+    @pytest.mark.asyncio
+    async def test_stop_reason_is_end_turn_with_completion_signals(self, mock_response, mock_model_cache, mock_auth_manager):
+        """
+        What it does: Sets stop_reason to end_turn when completion signals present.
+        Goal: Verify normal completion is detected correctly.
+        """
+        print("Setup: Mock stream with completion signals (not truncated)...")
+        
+        async def mock_parse_kiro_stream(*args, **kwargs):
+            yield KiroEvent(type="content", content="Complete response")
+            yield KiroEvent(type="context_usage", context_usage_percentage=5.0)
+        
+        print("Action: Streaming to Anthropic format...")
+        events = []
+        
+        with patch('kiro.streaming_anthropic.parse_kiro_stream', mock_parse_kiro_stream):
+            with patch('kiro.streaming_anthropic.parse_bracket_tool_calls', return_value=[]):
+                async for event in stream_kiro_to_anthropic(
+                    mock_response, "claude-sonnet-4", mock_model_cache, mock_auth_manager
+                ):
+                    events.append(event)
+        
+        print(f"Received {len(events)} events")
+        
+        # With completion signals, should be end_turn
+        message_delta_events = [e for e in events if "message_delta" in e]
+        assert len(message_delta_events) >= 1
+        print(f"Comparing stop_reason: Expected 'end_turn', Got event: {message_delta_events[0]}")
+        assert "end_turn" in message_delta_events[0]
+        print("✓ stop_reason is end_turn with completion signals")
+    
+    @pytest.mark.asyncio
+    async def test_collect_detects_truncation_in_non_streaming(self, mock_response, mock_model_cache, mock_auth_manager):
+        """
+        What it does: Non-streaming detects truncation correctly.
+        Goal: Verify collect_anthropic_response detects truncation.
+        """
+        print("Setup: Mock stream result without completion signals...")
+        
+        mock_result = StreamResult(
+            content="Truncated response",
+            thinking_content="",
+            tool_calls=[],
+            usage=None,
+            context_usage_percentage=None  # No completion signal = truncation
+        )
+        
+        print("Action: Collecting Anthropic response...")
+        
+        with patch('kiro.streaming_anthropic.collect_stream_to_result', return_value=mock_result):
+            result = await collect_anthropic_response(
+                mock_response, "claude-sonnet-4", mock_model_cache, mock_auth_manager
+            )
+        
+        print(f"stop_reason: {result['stop_reason']}")
+        
+        # Should detect truncation and set max_tokens
+        assert result["stop_reason"] == "max_tokens"
+        print("✓ collect_anthropic_response detects truncation correctly")

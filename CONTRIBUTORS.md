@@ -13,7 +13,7 @@ These contributors have made significant, sustained contributions to the project
 - [@Kartvya69](https://github.com/Kartvya69) — STREAMING_READ_TIMEOUT feature (#9)
 - [@uratmangun](https://github.com/uratmangun) — Testing, debugging, and providing the fix for AWS SSO OIDC support (#12)
 - [@JoeGrimes123](https://github.com/JoeGrimes123) — Suggesting the fake reasoning approach (#11)
-- [@kilhyeonjun](https://github.com/kilhyeonjun) — SQLite credentials reload for containers (#22), thinking tags fix for toolResults (#23)
+- [@kilhyeonjun](https://github.com/kilhyeonjun) — SQLite credentials reload for containers (#22), thinking tags fix (#23), streaming reliability issues (#113)
 - [@cniu6](https://github.com/cniu6) — Image content block support inspiration (#26)
 - [@somehow-paul](https://github.com/somehow-paul) — Enterprise Kiro IDE support (#45, #48), Cursor IDE compatibility design (#49)
 - [@PAzter1101](https://github.com/PAzter1101) — Docker containerization with CI/CD (#55)
