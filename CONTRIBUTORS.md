@@ -19,5 +19,6 @@ These contributors have made significant, sustained contributions to the project
 - [@PAzter1101](https://github.com/PAzter1101) — Docker containerization with CI/CD (#55)
 - [@Ry-DS](https://github.com/Ry-DS) — Images in tool results support for Anthropic MCP servers (#57)
 - [@saaj](https://github.com/saaj) — Regional endpoint fix for eu-central-1 and other non-us-east-1 regions (#58)
+- [@Logesh-waran2003](https://github.com/Logesh-waran2003) — Fix kiro-cli volume mount and Docker image size (#97)
 - [@BoosterY](https://github.com/BoosterY) — SQLite write-back field preservation (#131), regional configuration auto-detection (#132, #133)
 - [@leikaiwei](https://github.com/leikaiwei) — Anthropic token counting fix (#135)
