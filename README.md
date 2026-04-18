@@ -722,7 +722,7 @@ Every contribution helps keep this project alive and growing
 
 ### 🤑 Donate
 
-[**☕ One-time Support**](https://app.lava.top/jwadow?tabId=donate)
+[**☕ One-time Support**](https://app.lava.top/products/b4e34d12-3b6b-49b7-be50-50b6a20ed262/f3ea941f-de73-4ad1-bbb6-f82042ef8132)
 
 <br>
 
