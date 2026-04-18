@@ -277,7 +277,6 @@ def count_system_tokens(system_prompt: Optional[Any], apply_claude_correction: b
         for block in system_prompt:
             if isinstance(block, dict):
                 # Count text content, support prompt caching structure
-                total_tokens += count_tokens(block.get("type", ""), apply_claude_correction=False)
                 total_tokens += count_tokens(block.get("text", ""), apply_claude_correction=False)
                 if block.get("cache_control") is not None:
                     total_tokens += count_tokens(

@@ -166,6 +166,12 @@ async def stream_kiro_to_anthropic(
     full_content = ""
     full_thinking_content = ""
     
+    # NOTE: Anthropic streaming spec requires input_tokens in message_start (beginning),
+    # but Kiro API provides accurate context_usage at the end of stream.
+    # This creates a fundamental limitation: we must use fallback estimation in message_start.
+    # Accuracy: ~85-90% (acceptable trade-off for maintaining streaming capability).
+    # See: https://docs.anthropic.com/en/api/messages-streaming
+    
     # Fallback estimation must cover messages/tools/system to avoid significant undercount
     if request_messages or request_tools or request_system:
         request_token_stats = estimate_request_tokens(
@@ -623,7 +629,8 @@ async def stream_kiro_to_anthropic(
             prompt_tokens, _, prompt_source, _ = calculate_tokens_from_context_usage(
                 context_usage_percentage, output_tokens, model_cache, model
             )
-            # Only override local estimate when upstream context usage is available, avoid 0% zeroing out
+            # Don't override fallback when context_usage=0% (returns source="unknown")
+            # Only override local estimate when upstream context usage is available
             if prompt_source != "unknown":
                 input_tokens = prompt_tokens
         
@@ -799,6 +806,7 @@ async def collect_anthropic_response(
         prompt_tokens, _, prompt_source, _ = calculate_tokens_from_context_usage(
             result.context_usage_percentage, output_tokens, model_cache, model
         )
+        # Don't override fallback when context_usage=0% (returns source="unknown")
         if prompt_source != "unknown":
             input_tokens = prompt_tokens
     

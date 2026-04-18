@@ -19,3 +19,4 @@ These contributors have made significant, sustained contributions to the project
 - [@PAzter1101](https://github.com/PAzter1101) — Docker containerization with CI/CD (#55)
 - [@Ry-DS](https://github.com/Ry-DS) — Images in tool results support for Anthropic MCP servers (#57)
 - [@saaj](https://github.com/saaj) — Regional endpoint fix for eu-central-1 and other non-us-east-1 regions (#58)
+- [@leikaiwei](https://github.com/leikaiwei) — Anthropic token counting fix (#135)
