@@ -348,7 +348,6 @@ class KiroAuthManager:
                         parts = arn.split(":")
                         if len(parts) >= 4 and parts[3]:
                             # Validate region format (e.g., us-east-1, eu-central-1)
-                            import re
                             if re.match(r'^[a-z]+-[a-z]+-\d+$', parts[3]):
                                 self._detected_api_region = parts[3]
                                 logger.info(f"API region auto-detected from profile ARN: {parts[3]}")
