@@ -130,7 +130,20 @@ REFRESH_TOKEN: str = os.getenv("REFRESH_TOKEN", "")
 # Profile ARN for AWS CodeWhisperer
 PROFILE_ARN: str = os.getenv("PROFILE_ARN", "")
 
-# AWS region (default us-east-1)
+# AWS SSO/auth region (default us-east-1)
+# This region is used for OIDC token refresh endpoint: https://oidc.{region}.amazonaws.com/token
+#
+# IMPORTANT: SSO region may differ from Q API region!
+# - SSO region: Where your AWS SSO/IAM Identity Center is configured
+# - API region: Where Q Developer API endpoints are available (q.{region}.amazonaws.com)
+#
+# The gateway automatically detects the correct API region from your credentials:
+# - SQLite (kiro-cli): Extracts from profile ARN in state table
+# - JSON (Kiro IDE): Uses region field from credentials file
+# - Environment variables: Falls back to this SSO region
+#
+# For manual override of API region, use KIRO_API_REGION environment variable.
+# See: https://github.com/jwadow/kiro-gateway/issues/132
 REGION: str = os.getenv("KIRO_REGION", "us-east-1")
 
 # Path to credentials file (optional, alternative to .env)
@@ -489,7 +502,7 @@ WEB_SEARCH_ENABLED: bool = os.getenv("WEB_SEARCH_ENABLED", "true").lower() in ("
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "2.4-dev.5"
+APP_VERSION: str = "2.4-dev.6"
 APP_TITLE: str = "Kiro Gateway"
 APP_DESCRIPTION: str = "Proxy gateway for Kiro API (Amazon Q Developer / AWS CodeWhisperer). OpenAI and Anthropic compatible. Made by @jwadow"
 

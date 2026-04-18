@@ -29,6 +29,8 @@ Manages the lifecycle of access tokens:
 
 import asyncio
 import json
+import os
+import re
 import sqlite3
 from datetime import datetime, timezone, timedelta
 from enum import Enum
@@ -152,6 +154,11 @@ class KiroAuthManager:
         # Enterprise Kiro IDE specific fields
         self._client_id_hash: Optional[str] = None  # clientIdHash from Enterprise Kiro IDE
         
+        # Auto-detected API region from credentials
+        # This is separate from SSO region because q.amazonaws.com endpoints
+        # only exist in specific regions, while OIDC endpoints exist everywhere
+        self._detected_api_region: Optional[str] = None
+        
         # Track which SQLite key we loaded credentials from (for saving back to correct location)
         self._sqlite_token_key: Optional[str] = None
         
@@ -161,14 +168,6 @@ class KiroAuthManager:
         
         # Auth type will be determined after loading credentials
         self._auth_type: AuthType = AuthType.KIRO_DESKTOP
-        
-        # Dynamic URLs based on region
-        self._refresh_url = get_kiro_refresh_url(region)
-        self._api_host = get_kiro_api_host(region)
-        self._q_host = get_kiro_q_host(region)
-        
-        # Log initialized endpoints for diagnostics (helps with DNS issues like #58)
-        logger.info(f"Auth manager initialized: region={region}, api_host={self._api_host}, q_host={self._q_host}")
         
         # Fingerprint for User-Agent
         self._fingerprint = get_machine_fingerprint()
@@ -182,6 +181,47 @@ class KiroAuthManager:
         
         # Determine auth type based on available credentials
         self._detect_auth_type()
+        
+        # Determine final API region with priority hierarchy:
+        # 1. KIRO_API_REGION env var (explicit override) - highest priority
+        # 2. Auto-detected from credentials (SQLite ARN or JSON region)
+        # 3. SSO region (fallback)
+        # 4. Default region parameter (us-east-1)
+        api_region_override = os.getenv("KIRO_API_REGION")
+        
+        if api_region_override:
+            # Explicit override from environment variable
+            final_api_region = api_region_override
+            logger.info(f"API region: {final_api_region} (from KIRO_API_REGION env var)")
+        elif self._detected_api_region:
+            # Auto-detected from credentials (SQLite profile ARN or JSON region field)
+            final_api_region = self._detected_api_region
+            logger.info(f"API region: {final_api_region} (auto-detected from credentials)")
+        elif self._sso_region:
+            # Fallback to SSO region
+            final_api_region = self._sso_region
+            logger.info(f"API region: {final_api_region} (using SSO region as fallback)")
+        else:
+            # Final fallback to default region
+            final_api_region = region
+            logger.info(f"API region: {final_api_region} (using default)")
+        
+        # Set up URLs with correct regions:
+        # - OIDC refresh: uses SSO region (for token refresh)
+        # - API/Q hosts: use determined API region (for Q Developer API calls)
+        sso_region_for_oidc = self._sso_region or region
+        self._refresh_url = get_kiro_refresh_url(sso_region_for_oidc)
+        self._api_host = get_kiro_api_host(final_api_region)
+        self._q_host = get_kiro_q_host(final_api_region)
+        
+        # Log initialized endpoints for diagnostics (helps with DNS issues like #58, #132, #133)
+        logger.info(
+            f"Auth manager initialized: "
+            f"sso_region={sso_region_for_oidc}, "
+            f"api_region={final_api_region}, "
+            f"api_host={self._api_host}, "
+            f"q_host={self._q_host}"
+        )
     
     def _detect_auth_type(self) -> None:
         """
@@ -249,12 +289,10 @@ class KiroAuthManager:
                     if 'profile_arn' in token_data:
                         self._profile_arn = token_data['profile_arn']
                     if 'region' in token_data:
-                        # Store SSO region for OIDC token refresh only
-                        # IMPORTANT: CodeWhisperer API is only available in us-east-1,
-                        # so we don't update _api_host and _q_host here.
-                        # The SSO region (e.g., ap-southeast-1) is only used for OIDC token refresh.
+                        # Store SSO region for OIDC token refresh
+                        # Note: API region is determined separately (see __init__ for priority logic)
                         self._sso_region = token_data['region']
-                        logger.debug(f"SSO region from SQLite: {self._sso_region} (API stays at {self._region})")
+                        logger.debug(f"SSO region from SQLite: {self._sso_region}")
                     
                     # Load scopes if available
                     if 'scopes' in token_data:
@@ -292,6 +330,34 @@ class KiroAuthManager:
                     if 'region' in registration_data and not self._sso_region:
                         self._sso_region = registration_data['region']
                         logger.debug(f"SSO region from device-registration: {self._sso_region}")
+            
+            # Try to auto-detect API region from profile ARN in state table
+            # This is separate from SSO region because q.amazonaws.com endpoints
+            # only exist in specific regions (Issue #132, #133)
+            try:
+                cursor.execute("SELECT value FROM state WHERE key = 'api.codewhisperer.profile'")
+                profile_row = cursor.fetchone()
+                if profile_row:
+                    profile_data = json.loads(profile_row[0])
+                    arn = profile_data.get("arn", "")
+                    if arn:
+                        # ARN format: arn:aws:codewhisperer:REGION:account:profile/id
+                        # Extract region from 4th component (index 3)
+                        parts = arn.split(":")
+                        if len(parts) >= 4 and parts[3]:
+                            # Validate region format (e.g., us-east-1, eu-central-1)
+                            import re
+                            if re.match(r'^[a-z]+-[a-z]+-\d+$', parts[3]):
+                                self._detected_api_region = parts[3]
+                                logger.info(f"API region auto-detected from profile ARN: {parts[3]}")
+                            else:
+                                logger.debug(f"Invalid region format in ARN: {parts[3]}")
+            except sqlite3.Error as e:
+                logger.debug(f"Failed to read state table from SQLite: {e}")
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse profile data from state table: {e}")
+            except Exception as e:
+                logger.debug(f"Failed to auto-detect API region from profile ARN: {e}")
             
             conn.close()
             logger.info(f"Credentials loaded from SQLite database: {db_path}")
@@ -343,12 +409,11 @@ class KiroAuthManager:
             if 'profileArn' in data:
                 self._profile_arn = data['profileArn']
             if 'region' in data:
-                self._region = data['region']
-                # Update URLs for new region
-                self._refresh_url = get_kiro_refresh_url(self._region)
-                self._api_host = get_kiro_api_host(self._region)
-                self._q_host = get_kiro_q_host(self._region)
-                logger.info(f"Region updated from credentials file: region={self._region}, api_host={self._api_host}, q_host={self._q_host}")
+                # Store as SSO region for OIDC token refresh
+                self._sso_region = data['region']
+                # Also use as detected API region (can be overridden by KIRO_API_REGION env var)
+                self._detected_api_region = data['region']
+                logger.debug(f"Region from JSON credentials: {data['region']}")
             
             # Load clientIdHash and device registration for Enterprise Kiro IDE
             if 'clientIdHash' in data:

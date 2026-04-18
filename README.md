@@ -682,6 +682,44 @@ When enabled, requests are logged to the `debug_logs/` folder:
 
 ---
 
+## 🔧 Troubleshooting
+
+### Connection Issues
+
+**Error: "Name or service not known" or DNS resolution failed**
+
+The Q API endpoint may not be publicly resolvable in your region. Use a VPN or proxy:
+
+```env
+VPN_PROXY_URL=http://127.0.0.1:7890
+```
+
+See [VPN/Proxy Support](#-vpnproxy-support) for details.
+
+---
+
+**Error: "503 Service Unavailable" through proxy**
+
+The Q API endpoint exists in specific regions only. Try a different region:
+
+```env
+KIRO_API_REGION="eu-central-1"  # or us-east-1
+```
+
+Commonly reachable regions: `us-east-1`, `eu-central-1`
+
+---
+
+**OIDC works but Q API fails**
+
+Your SSO region may differ from the Q API region. The gateway auto-detects this from credentials, but you can override:
+
+```env
+KIRO_API_REGION="eu-central-1"
+```
+
+---
+
 ## 📜 License
 
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
