@@ -146,6 +146,12 @@ KIRO_CREDS_FILE: str = str(Path(_raw_creds_file)) if _raw_creds_file else ""
 _raw_cli_db_file = _get_raw_env_value("KIRO_CLI_DB_FILE") or os.getenv("KIRO_CLI_DB_FILE", "")
 KIRO_CLI_DB_FILE: str = str(Path(_raw_cli_db_file)) if _raw_cli_db_file else ""
 
+# Disable SQLite write-back (read-only mode)
+# When enabled, gateway will only read from kiro-cli database without modifying it.
+# Useful when kiro-cli is actively managing tokens and you don't want gateway to interfere.
+# Default: false (write-back enabled)
+SQLITE_READONLY: bool = os.getenv("SQLITE_READONLY", "false").lower() in ("true", "1", "yes")
+
 # ==================================================================================================
 # Kiro API URL Templates
 # ==================================================================================================
@@ -483,7 +489,7 @@ WEB_SEARCH_ENABLED: bool = os.getenv("WEB_SEARCH_ENABLED", "true").lower() in ("
 # Application Version
 # ==================================================================================================
 
-APP_VERSION: str = "2.4-dev.4"
+APP_VERSION: str = "2.4-dev.5"
 APP_TITLE: str = "Kiro Gateway"
 APP_DESCRIPTION: str = "Proxy gateway for Kiro API (Amazon Q Developer / AWS CodeWhisperer). OpenAI and Anthropic compatible. Made by @jwadow"
 
