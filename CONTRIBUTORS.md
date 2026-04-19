@@ -22,3 +22,4 @@ These contributors have made significant, sustained contributions to the project
 - [@Logesh-waran2003](https://github.com/Logesh-waran2003) — Fix kiro-cli volume mount and Docker image size (#97)
 - [@BoosterY](https://github.com/BoosterY) — SQLite write-back field preservation (#131), regional configuration auto-detection (#132, #133)
 - [@leikaiwei](https://github.com/leikaiwei) — Anthropic token counting fix (#135)
+- [@ramaiyaKushal](https://github.com/ramaiyaKushal) — Missing import fix (#138)
