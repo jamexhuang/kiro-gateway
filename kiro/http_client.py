@@ -170,7 +170,8 @@ class KiroHttpClient:
         self,
         method: str,
         url: str,
-        json_data: dict,
+        json_data: Optional[dict] = None,
+        params: Optional[dict] = None,
         stream: bool = False
     ) -> httpx.Response:
         """
@@ -188,7 +189,8 @@ class KiroHttpClient:
         Args:
             method: HTTP method (GET, POST, etc.)
             url: Request URL
-            json_data: Request body (JSON)
+            json_data: Optional JSON body (for POST/PUT/PATCH)
+            params: Optional query parameters (for GET)
             stream: Use streaming (default False)
         
         Returns:
@@ -211,15 +213,24 @@ class KiroHttpClient:
                 token = await self.auth_manager.get_access_token()
                 headers = get_kiro_headers(self.auth_manager, token)
                 
+                # Build request kwargs based on parameters
+                request_kwargs = {"headers": headers}
+                
+                if json_data is not None:
+                    request_kwargs["json"] = json_data
+                
+                if params is not None:
+                    request_kwargs["params"] = params
+                
                 if stream:
                     # Prevent CLOSE_WAIT connection leak (issue #38)
                     headers["Connection"] = "close"
-                    req = client.build_request(method, url, json=json_data, headers=headers)
+                    req = client.build_request(method, url, **request_kwargs)
                     logger.debug("Sending request to Kiro API...")
                     response = await client.send(req, stream=True)
                 else:
                     logger.debug("Sending request to Kiro API...")
-                    response = await client.request(method, url, json=json_data, headers=headers)
+                    response = await client.request(method, url, **request_kwargs)
                 
                 # Check status
                 if response.status_code == 200:
