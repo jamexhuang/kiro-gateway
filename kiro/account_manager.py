@@ -228,7 +228,17 @@ class AccountManager:
                 logger.warning(f"Invalid credential entry (type=refresh_token requires refresh_token field): {entry}")
                 continue
             
-            # Handle folder scanning
+            # Handle refresh_token type (no path processing needed)
+            if cred_type == "refresh_token":
+                # Use deterministic hash for refresh_token (hash() is not deterministic between process restarts)
+                token = entry.get('refresh_token', '')
+                token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+                account_id = f"refresh_token_{token_hash}"
+                self._accounts[account_id] = Account(id=account_id)
+                logger.debug(f"Added account: {account_id}")
+                continue  # Skip path processing for refresh_token
+            
+            # Handle folder scanning for json/sqlite types
             expanded_path = Path(path).expanduser()
             if expanded_path.is_dir():
                 logger.info(f"Scanning folder for credentials: {path}")

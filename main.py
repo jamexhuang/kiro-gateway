@@ -311,7 +311,7 @@ def validate_configuration() -> None:
                 logger.error(f"  {line}")
         logger.error("=" * 60)
         logger.error("")
-        sys.exit(1)
+        raise RuntimeError("Configuration validation failed")
     
     # Note: Credential loading details are logged by KiroAuthManager
 
@@ -472,7 +472,7 @@ async def lifespan(app: FastAPI):
     
     if not all_accounts:
         logger.error("No accounts configured in credentials.json")
-        sys.exit(1)
+        raise RuntimeError("No accounts configured in credentials.json")
     
     # Determine start index from state.json
     start_index = app.state.account_manager._current_account_index
@@ -497,7 +497,7 @@ async def lifespan(app: FastAPI):
     
     if not initialized:
         logger.error("Failed to initialize any account. Check your credentials.")
-        sys.exit(1)
+        raise RuntimeError("Failed to initialize any account")
     
     # Save initial state
     await app.state.account_manager._save_state()

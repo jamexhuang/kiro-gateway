@@ -206,6 +206,7 @@ class KiroHttpClient:
         client = await self._get_client(stream=stream)
         last_error = None
         last_error_info: Optional[NetworkErrorInfo] = None
+        last_response: Optional[httpx.Response] = None  # Для сохранения последнего 429/5xx
         
         for attempt in range(max_retries):
             try:
@@ -244,15 +245,17 @@ class KiroHttpClient:
                 
                 # 429 - rate limit, wait and retry
                 if response.status_code == 429:
+                    last_response = response  # Сохраняем для возврата после exhaustion
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
-                    logger.warning(f"Received 429, waiting {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                    logger.warning(f"Received 429, waiting {delay}s (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(delay)
                     continue
                 
                 # 5xx - server error, wait and retry
                 if 500 <= response.status_code < 600:
+                    last_response = response  # Сохраняем для возврата после exhaustion
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
-                    logger.warning(f"Received {response.status_code}, waiting {delay}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                    logger.warning(f"Received {response.status_code}, waiting {delay}s (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(delay)
                     continue
                 
@@ -296,6 +299,15 @@ class KiroHttpClient:
                     logger.error(f"{short_msg} - no more retries (attempt {attempt + 1}/{max_retries})")
                     if not error_info.is_retryable:
                         break  # Don't retry non-retryable errors
+        
+        # If we have a last_response (429/5xx retry exhausted), return it
+        # This allows the caller to see the real status code and error body
+        if last_response is not None:
+            logger.warning(
+                f"Retries exhausted for HTTP {last_response.status_code}, "
+                f"returning response to caller for classification"
+            )
+            return last_response
         
         # All attempts exhausted - provide detailed, user-friendly error message
         if last_error_info:

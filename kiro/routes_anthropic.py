@@ -579,6 +579,29 @@ async def messages(
             
             except HTTPException as e:
                 await http_client.close()
+                
+                # Network errors (502/504 from request_with_retry) = RECOVERABLE
+                # These are thrown ONLY for network-level issues (timeouts, connection errors)
+                # NOT for HTTP-level errors (which are returned as response objects)
+                if e.status_code in (502, 504):
+                    # Network error → try next account
+                    await account_manager.report_failure(
+                        account.id, request_data.model, ErrorType.RECOVERABLE,
+                        e.status_code, None
+                    )
+                    
+                    last_error_message = str(e.detail)
+                    last_error_status = e.status_code
+                    
+                    # Single account - no point in failover, break immediately
+                    if len(all_accounts) == 1:
+                        break
+                    
+                    logger.warning(f"Network error on account {account.id}, trying next account")
+                    continue  # Try next account
+                
+                # All other HTTPException (400, 500, etc.) = application errors
+                # These come from build_kiro_payload() or other places → re-raise immediately
                 logger.error(f"HTTP {e.status_code} - POST /v1/messages - {e.detail}")
                 if debug_logger:
                     debug_logger.flush_on_error(e.status_code, str(e.detail))
@@ -855,6 +878,12 @@ async def messages(
     
     except HTTPException as e:
         await http_client.close()
+        
+        # Network errors (502/504 from request_with_retry) = RECOVERABLE
+        # In legacy mode, we still log them but re-raise (no failover available)
+        if e.status_code in (502, 504):
+            logger.warning(f"Network error (legacy mode, no failover available)")
+        
         logger.error(f"HTTP {e.status_code} - POST /v1/messages - {e.detail}")
         if debug_logger:
             debug_logger.flush_on_error(e.status_code, str(e.detail))
