@@ -84,6 +84,11 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
       
+      - name: Clean up test artifacts
+        run: |
+          rm -f credentials.json state.json
+          echo "Cleaned up test artifacts (credentials.json, state.json)"
+      
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
