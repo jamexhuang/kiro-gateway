@@ -22,6 +22,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY --chown=kiro:kiro . .
 
+# Remove runtime files that should not be in image
+# (in case they were copied from build context or cache)
+RUN rm -f credentials.json state.json
+
 # Create directory for debug logs with proper permissions
 RUN mkdir -p debug_logs && chown -R kiro:kiro debug_logs
 
