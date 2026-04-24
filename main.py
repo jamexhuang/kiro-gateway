@@ -408,11 +408,11 @@ async def lifespan(app: FastAPI):
                         "refresh_token": REFRESH_TOKEN
                     }
                     _add_env_overrides(entry)
-                credentials.append(entry)
+                    credentials.append(entry)
             
-            # Save credentials.json
-            with open(creds_path, 'w', encoding='utf-8') as f:
-                json.dump(credentials, f, indent=2, ensure_ascii=False)
+                # Save credentials.json
+                with open(creds_path, 'w', encoding='utf-8') as f:
+                    json.dump(credentials, f, indent=2, ensure_ascii=False)
                 
                 logger.info("Created credentials.json from .env (one-time migration)")
     else:
