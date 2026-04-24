@@ -411,6 +411,9 @@ async def lifespan(app: FastAPI):
                     credentials.append(entry)
                 
                 # Save credentials.json
+                # Remove file first if exists (handles read-only files from Docker cache)
+                if creds_path.exists():
+                    creds_path.unlink()
                 with open(creds_path, 'w', encoding='utf-8') as f:
                     json.dump(credentials, f, indent=2, ensure_ascii=False)
                 
@@ -445,6 +448,9 @@ async def lifespan(app: FastAPI):
                 credentials.append(entry)
             
             # Save credentials.json (overwrite if exists)
+            # Remove file first if exists (handles read-only files from Docker cache)
+            if creds_path.exists():
+                creds_path.unlink()
             with open(creds_path, 'w', encoding='utf-8') as f:
                 json.dump(credentials, f, indent=2, ensure_ascii=False)
             
