@@ -2106,3 +2106,416 @@ class TestMessagesNativeWebSearchAccountSelection:
         assert result == account
         
         print("✅ Native WebSearch uses get_first_account() (no failover)")
+
+
+# ==================================================================================================
+# Tests for /v1/messages/count_tokens endpoint
+# ==================================================================================================
+
+class TestCountTokensEndpoint:
+    """Tests for /v1/messages/count_tokens endpoint."""
+    
+    def test_count_tokens_basic(self, test_client, valid_proxy_api_key):
+        """
+        What it does: Tests basic token counting with one message.
+        Purpose: Ensure endpoint returns token count for simple request.
+        """
+        print("Setup: Creating basic request with one message...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "Hello, world!"}]
+        }
+        
+        print("Action: POST /v1/messages/count_tokens...")
+        response = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        print("Checking: HTTP 200...")
+        assert response.status_code == 200
+        
+        print("Checking: Response structure...")
+        data = response.json()
+        assert "input_tokens" in data
+        
+        print("Checking: input_tokens is int and > 0...")
+        assert isinstance(data["input_tokens"], int)
+        assert data["input_tokens"] > 0
+        
+        print(f"✅ Token count: {data['input_tokens']} tokens")
+    
+    def test_count_tokens_with_tools(self, test_client, valid_proxy_api_key):
+        """
+        What it does: Tests token counting with tool definitions.
+        Purpose: Ensure tools are included in token count.
+        """
+        print("Setup: Creating request with tools...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "What's the weather?"}],
+            "tools": [{
+                "name": "get_weather",
+                "description": "Get weather for location",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                    "required": ["location"]
+                }
+            }]
+        }
+        
+        print("Action: POST /v1/messages/count_tokens...")
+        response = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        print("Checking: HTTP 200...")
+        assert response.status_code == 200
+        
+        print("Checking: Token count includes tools...")
+        data = response.json()
+        tokens_with_tools = data["input_tokens"]
+        
+        # Compare with request without tools
+        response_no_tools = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json={
+                "model": "claude-sonnet-4-5",
+                "messages": [{"role": "user", "content": "What's the weather?"}]
+            }
+        )
+        tokens_no_tools = response_no_tools.json()["input_tokens"]
+        
+        print(f"Tokens with tools: {tokens_with_tools}, without tools: {tokens_no_tools}")
+        assert tokens_with_tools > tokens_no_tools
+        
+        print("✅ Tools increase token count")
+    
+    def test_count_tokens_with_system_string(self, test_client, valid_proxy_api_key):
+        """
+        What it does: Tests token counting with system prompt (string format).
+        Purpose: Ensure system prompt is included in token count.
+        """
+        print("Setup: Creating request with system prompt (string)...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "system": "You are a helpful assistant."
+        }
+        
+        print("Action: POST /v1/messages/count_tokens...")
+        response = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        print("Checking: HTTP 200...")
+        assert response.status_code == 200
+        
+        print("Checking: Token count includes system prompt...")
+        data = response.json()
+        tokens_with_system = data["input_tokens"]
+        
+        # Compare with request without system
+        response_no_system = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json={
+                "model": "claude-sonnet-4-5",
+                "messages": [{"role": "user", "content": "Hello"}]
+            }
+        )
+        tokens_no_system = response_no_system.json()["input_tokens"]
+        
+        print(f"Tokens with system: {tokens_with_system}, without system: {tokens_no_system}")
+        assert tokens_with_system > tokens_no_system
+        
+        print("✅ System prompt increases token count")
+    
+    def test_count_tokens_with_system_blocks(self, test_client, valid_proxy_api_key):
+        """
+        What it does: Tests token counting with system prompt (list format for prompt caching).
+        Purpose: Ensure system prompt blocks are handled correctly.
+        """
+        print("Setup: Creating request with system prompt (list of blocks)...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "system": [
+                {"type": "text", "text": "You are a helpful assistant."},
+                {"type": "text", "text": "Be concise.", "cache_control": {"type": "ephemeral"}}
+            ]
+        }
+        
+        print("Action: POST /v1/messages/count_tokens...")
+        response = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        print("Checking: HTTP 200...")
+        assert response.status_code == 200
+        
+        print("Checking: input_tokens > 0...")
+        data = response.json()
+        assert data["input_tokens"] > 0
+        
+        print(f"✅ System blocks counted: {data['input_tokens']} tokens")
+    
+    def test_count_tokens_empty_messages(self, test_client, valid_proxy_api_key):
+        """
+        What it does: Tests validation with empty messages array.
+        Purpose: Ensure at least one message is required (Pydantic validation).
+        """
+        print("Setup: Creating request with empty messages...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": []
+        }
+        
+        print("Action: POST /v1/messages/count_tokens...")
+        response = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        print("Checking: HTTP 422 (validation error)...")
+        assert response.status_code == 422
+        
+        print("✅ Empty messages rejected")
+    
+    def test_count_tokens_invalid_api_key(self, test_client, invalid_proxy_api_key):
+        """
+        What it does: Tests authentication with invalid API key.
+        Purpose: Ensure endpoint is protected by authentication.
+        """
+        print("Setup: Creating request with invalid API key...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "Hello"}]
+        }
+        
+        print("Action: POST /v1/messages/count_tokens with invalid key...")
+        response = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": invalid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        print("Checking: HTTP 401 (unauthorized)...")
+        assert response.status_code == 401
+        
+        print("Checking: Error format is Anthropic-style...")
+        data = response.json()
+        assert "detail" in data
+        detail = data["detail"]
+        assert "error" in detail
+        assert detail["error"]["type"] == "authentication_error"
+        
+        print("✅ Invalid API key rejected")
+    
+    def test_count_tokens_multiple_messages(self, test_client, valid_proxy_api_key):
+        """
+        What it does: Tests token counting for dialogue with history.
+        Purpose: Ensure multiple messages are counted correctly.
+        """
+        print("Setup: Creating request with conversation history...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"}
+            ]
+        }
+        
+        print("Action: POST /v1/messages/count_tokens...")
+        response = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        print("Checking: HTTP 200...")
+        assert response.status_code == 200
+        
+        print("Checking: Token count for multiple messages...")
+        data = response.json()
+        tokens_multi = data["input_tokens"]
+        
+        # Compare with single message
+        response_single = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json={
+                "model": "claude-sonnet-4-5",
+                "messages": [{"role": "user", "content": "Hello"}]
+            }
+        )
+        tokens_single = response_single.json()["input_tokens"]
+        
+        print(f"Tokens multi: {tokens_multi}, single: {tokens_single}")
+        assert tokens_multi > tokens_single
+        
+        print("✅ Multiple messages increase token count")
+    
+    def test_count_tokens_with_images(self, test_client, valid_proxy_api_key):
+        """
+        What it does: Tests token counting for messages with images.
+        Purpose: Ensure images are counted (~100 tokens by default).
+        """
+        print("Setup: Creating request with image...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's in this image?"},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                        }
+                    }
+                ]
+            }]
+        }
+        
+        print("Action: POST /v1/messages/count_tokens...")
+        response = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        print("Checking: HTTP 200...")
+        assert response.status_code == 200
+        
+        print("Checking: Image adds tokens...")
+        data = response.json()
+        tokens_with_image = data["input_tokens"]
+        
+        # Compare with text-only
+        response_text_only = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json={
+                "model": "claude-sonnet-4-5",
+                "messages": [{
+                    "role": "user",
+                    "content": [{"type": "text", "text": "What's in this image?"}]
+                }]
+            }
+        )
+        tokens_text_only = response_text_only.json()["input_tokens"]
+        
+        print(f"Tokens with image: {tokens_with_image}, text only: {tokens_text_only}")
+        assert tokens_with_image > tokens_text_only
+        
+        print("✅ Image increases token count")
+    
+    def test_count_tokens_consistency(self, test_client, valid_proxy_api_key):
+        """
+        What it does: Tests deterministic behavior - same input gives same output.
+        Purpose: Ensure token counting is consistent.
+        """
+        print("Setup: Creating identical requests...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "Test message for consistency"}]
+        }
+        
+        print("Action: Sending same request twice...")
+        response1 = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        response2 = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Response 1: {response1.json()}")
+        print(f"Response 2: {response2.json()}")
+        
+        print("Checking: Both requests successful...")
+        assert response1.status_code == 200
+        assert response2.status_code == 200
+        
+        print("Checking: Token counts are identical...")
+        tokens1 = response1.json()["input_tokens"]
+        tokens2 = response2.json()["input_tokens"]
+        
+        print(f"Tokens 1: {tokens1}, Tokens 2: {tokens2}")
+        assert tokens1 == tokens2
+        
+        print("✅ Token counting is deterministic")
+    
+    def test_count_tokens_no_max_tokens_required(self, test_client, valid_proxy_api_key):
+        """
+        What it does: Tests that max_tokens is NOT required (unlike /v1/messages).
+        Purpose: Ensure count_tokens endpoint doesn't require generation parameters.
+        """
+        print("Setup: Creating request WITHOUT max_tokens...")
+        request_data = {
+            "model": "claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "Hello"}]
+            # Intentionally NO max_tokens field
+        }
+        
+        print("Action: POST /v1/messages/count_tokens...")
+        response = test_client.post(
+            "/v1/messages/count_tokens",
+            headers={"x-api-key": valid_proxy_api_key},
+            json=request_data
+        )
+        
+        print(f"Status: {response.status_code}")
+        print(f"Response: {response.json()}")
+        
+        print("Checking: HTTP 200 (NOT 422)...")
+        assert response.status_code == 200
+        
+        print("Checking: Token count returned...")
+        data = response.json()
+        assert "input_tokens" in data
+        assert data["input_tokens"] > 0
+        
+        print("✅ max_tokens is NOT required for count_tokens")

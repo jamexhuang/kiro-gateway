@@ -37,6 +37,7 @@ from loguru import logger
 from kiro.config import PROXY_API_KEY
 from kiro.models_anthropic import (
     AnthropicMessagesRequest,
+    AnthropicCountTokensRequest,
     AnthropicMessagesResponse,
     AnthropicErrorResponse,
     AnthropicErrorDetail,
@@ -51,6 +52,7 @@ from kiro.streaming_anthropic import (
 )
 from kiro.http_client import KiroHttpClient
 from kiro.utils import generate_conversation_id
+from kiro.tokenizer import estimate_request_tokens
 from kiro.config import WEB_SEARCH_ENABLED
 from kiro.mcp_tools import handle_native_web_search
 
@@ -905,3 +907,56 @@ async def messages(
                 }
             }
         )
+
+
+@router.post("/v1/messages/count_tokens", dependencies=[Depends(verify_anthropic_api_key)])
+async def count_tokens_endpoint(
+    request: Request,
+    request_data: AnthropicCountTokensRequest,
+):
+    """
+    Anthropic Count Tokens API endpoint.
+    
+    Returns estimated token count for the given request payload.
+    Used by Claude Code to decide when to trigger conversation compaction.
+    
+    Uses the same fallback estimation as Anthropic streaming (message_start event),
+    since Kiro API only provides accurate token counts after request completion.
+    This endpoint is called BEFORE the actual request, so we cannot use Kiro's
+    contextUsagePercentage (which is only available after generation completes).
+    
+    Args:
+        request: FastAPI Request for accessing app.state
+        request_data: Request in Anthropic MessagesRequest format
+    
+    Returns:
+        JSONResponse with {"input_tokens": int}
+    
+    Raises:
+        HTTPException: 401 if authentication fails (handled by dependency)
+    """
+    logger.info(f"Request to /v1/messages/count_tokens (model={request_data.model}, messages={len(request_data.messages)})")
+    
+    # Prepare data for tokenizer (same format as streaming message_start)
+    messages_for_tokenizer = [msg.model_dump() for msg in request_data.messages]
+    tools_for_tokenizer = [tool.model_dump() for tool in request_data.tools] if request_data.tools else None
+    
+    # Handle system prompt (can be string or list of content blocks)
+    if isinstance(request_data.system, list):
+        system_for_tokenizer = [b.model_dump() if hasattr(b, "model_dump") else b for b in request_data.system]
+    else:
+        system_for_tokenizer = request_data.system
+    
+    # Use the SAME estimation logic as Anthropic streaming message_start
+    request_token_stats = estimate_request_tokens(
+        messages=messages_for_tokenizer,
+        tools=tools_for_tokenizer,
+        system_prompt=system_for_tokenizer,
+        apply_claude_correction=True  # CRITICAL: Enable correction for Claude models
+    )
+    
+    input_tokens = request_token_stats["total_tokens"]
+    
+    logger.info(f"Token count estimate: {input_tokens} tokens")
+    
+    return JSONResponse(content={"input_tokens": input_tokens})
