@@ -16,7 +16,7 @@ import uuid
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from threading import RLock
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 from loguru import logger
 
@@ -266,6 +266,30 @@ class ControlPanelState:
         self._active_requests: Dict[str, RequestRecord] = {}
         self._completed_requests: Deque[RequestRecord] = deque(maxlen=max_completed_requests)
         self._max_chunks_per_request = max_chunks_per_request
+        self._subscribers: List[Callable[[Dict[str, Any]], None]] = []
+
+    def subscribe(self, fn: Callable[[Dict[str, Any]], None]) -> None:
+        """Add a subscriber for real-time events."""
+        with self._lock:
+            self._subscribers.append(fn)
+
+    def unsubscribe(self, fn: Callable[[Dict[str, Any]], None]) -> None:
+        """Remove a subscriber."""
+        with self._lock:
+            try:
+                self._subscribers.remove(fn)
+            except ValueError:
+                pass
+
+    def _emit(self, event: str, data: Dict[str, Any]) -> None:
+        """Emit an event to all subscribers."""
+        with self._lock:
+            subs = list(self._subscribers)
+        for fn in subs:
+            try:
+                fn({"event": event, "data": data})
+            except Exception:
+                pass
 
     def get_routing_config(self) -> RoutingConfig:
         """
@@ -445,6 +469,7 @@ class ControlPanelState:
         )
         with self._lock:
             self._active_requests[request_id] = record
+        self._emit("request_started", asdict(record))
         return request_id
 
     def start_attempt(self, request_id: str, model: str, account_id: Optional[str]) -> None:
@@ -491,6 +516,7 @@ class ControlPanelState:
             attempt.error = error
             attempt.status = "ok" if http_status == 200 and not error else "failed"
             record.updated_at = attempt.finished_at
+            self._emit("attempt", asdict(record))
 
     def record_payload(self, request_id: str, label: str, payload: Any) -> None:
         """
@@ -638,6 +664,7 @@ class ControlPanelState:
             except Exception:
                 pass
 
+            self._emit("request_finished", asdict(record))
             self._completed_requests.appendleft(record)
 
     def clear_monitor(self) -> None:

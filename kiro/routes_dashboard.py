@@ -9,12 +9,14 @@ no startup hooks, and no background tasks.
 
 from __future__ import annotations
 
+import asyncio
+import json as _json
 import time
 from dataclasses import asdict
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Security, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -293,6 +295,64 @@ async def get_dashboard_logs(since: int = -1, limit: int = 500) -> Dict[str, Any
     else:
         entries = log_buffer.snapshot(limit=limit)
     return {"entries": entries}
+
+
+@router.get("/dashboard/api/events")
+async def dashboard_events(
+    request: Request,
+    authenticated: bool = Security(verify_dashboard_api_key),
+):
+    """
+    SSE stream of real-time dashboard events.
+
+    Sends an initial snapshot, then incremental events as they occur.
+    Sends keep-alive comments every 15s to prevent connection timeout.
+    """
+    queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+    loop = asyncio.get_event_loop()
+
+    def on_panel_event(evt):
+        try:
+            loop.call_soon_threadsafe(queue.put_nowait, evt)
+        except asyncio.QueueFull:
+            pass
+
+    def on_log_event(entry):
+        try:
+            loop.call_soon_threadsafe(
+                queue.put_nowait, {"event": "log", "data": entry}
+            )
+        except asyncio.QueueFull:
+            pass
+
+    from kiro.log_buffer import log_buffer
+    control_panel.subscribe(on_panel_event)
+    log_buffer.subscribe(on_log_event)
+
+    account_manager = getattr(request.app.state, "account_manager", None)
+
+    async def gen():
+        try:
+            snap = control_panel.snapshot()
+            snap["accounts"] = (
+                account_manager.get_accounts_snapshot() if account_manager else []
+            )
+            yield f"event: snapshot\ndata: {_json.dumps(snap, default=str)}\n\n"
+            while True:
+                try:
+                    evt = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"event: {evt['event']}\ndata: {_json.dumps(evt['data'], default=str)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+        finally:
+            control_panel.unsubscribe(on_panel_event)
+            log_buffer.unsubscribe(on_log_event)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 DASHBOARD_HTML = r"""<!doctype html>
