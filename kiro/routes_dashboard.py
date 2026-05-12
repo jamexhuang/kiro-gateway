@@ -297,6 +297,22 @@ async def get_dashboard_logs(since: int = -1, limit: int = 500) -> Dict[str, Any
     return {"entries": entries}
 
 
+@router.get("/dashboard/api/models", dependencies=[Security(verify_dashboard_api_key)])
+async def get_remote_models() -> Dict[str, Any]:
+    """
+    Fetch available models from Kiro remote API (ListAvailableModels).
+
+    Returns:
+        List of models with token limits.
+    """
+    try:
+        from list_remote_models import fetch_remote_models
+        data = await fetch_remote_models()
+        return {"models": data.get("models", []), "error": None}
+    except Exception as exc:
+        return {"models": [], "error": str(exc)}
+
+
 @router.get("/dashboard/api/events")
 async def dashboard_events(
     request: Request,
@@ -360,781 +376,475 @@ DASHBOARD_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kiro Gateway 控制面板</title>
+  <title>Kiro Gateway 控制台</title>
   <style>
-    :root {
-      --ink: #18211f;
-      --muted: #65706c;
-      --paper: #f5f1e8;
-      --card: rgba(255, 253, 247, .86);
-      --line: rgba(24, 33, 31, .13);
-      --accent: #c45f2c;
-      --accent-2: #1d6f68;
-      --danger: #9b2d20;
-      --shadow: 0 24px 70px rgba(43, 35, 24, .16);
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 8% 12%, rgba(196, 95, 44, .22), transparent 34rem),
-        radial-gradient(circle at 94% 4%, rgba(29, 111, 104, .22), transparent 30rem),
-        linear-gradient(135deg, #f3eadb 0%, #eef0e7 52%, #e1eadf 100%);
-      font-family: "Avenir Next", "IBM Plex Sans", "Gill Sans", sans-serif;
-      min-height: 100vh;
-    }
-
-    main {
-      width: min(1440px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 28px 0 42px;
-    }
-
-    header {
-      display: flex;
-      justify-content: space-between;
-      gap: 18px;
-      align-items: flex-end;
-      margin-bottom: 22px;
-    }
-
-    h1 {
-      font-family: "Iowan Old Style", "Palatino", Georgia, serif;
-      font-size: clamp(34px, 5vw, 72px);
-      line-height: .92;
-      letter-spacing: -.05em;
-      margin: 0;
-      max-width: 760px;
-    }
-
-    .subtitle {
-      color: var(--muted);
-      margin-top: 12px;
-      font-size: 15px;
-      max-width: 760px;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: 440px 1fr;
-      gap: 18px;
-      align-items: start;
-    }
-
-    .intro-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 14px;
-      margin-bottom: 18px;
-    }
-
-    .card {
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 26px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(18px);
-      padding: 20px;
-    }
-
-    .intro-card {
-      min-height: 150px;
-      animation: rise .42s ease both;
-    }
-
-    .intro-card:nth-child(2) { animation-delay: .06s; }
-    .intro-card:nth-child(3) { animation-delay: .12s; }
-
-    @keyframes rise {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .card h2 {
-      margin: 0 0 14px;
-      font-size: 14px;
-      letter-spacing: .16em;
-      text-transform: uppercase;
-      color: var(--muted);
-    }
-
-    .card h3 {
-      margin: 0 0 8px;
-      font-size: 18px;
-    }
-
-    .card p {
-      margin: 8px 0;
-      line-height: 1.58;
-    }
-
-    label {
-      display: block;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin: 14px 0 7px;
-    }
-
-    input, select, textarea {
-      width: 100%;
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, .68);
-      color: var(--ink);
-      border-radius: 15px;
-      padding: 12px 13px;
-      font: inherit;
-      outline: none;
-    }
-
-    textarea {
-      min-height: 92px;
-      resize: vertical;
-      font-family: "SF Mono", "Cascadia Mono", Menlo, monospace;
-      font-size: 12px;
-    }
-
-    button {
-      border: 0;
-      border-radius: 999px;
-      padding: 11px 15px;
-      font-weight: 800;
-      color: #fffaf0;
-      background: var(--ink);
-      cursor: pointer;
-      transition: transform .15s ease, opacity .15s ease;
-    }
-
-    button:hover { transform: translateY(-1px); }
-    button.secondary { background: var(--accent-2); }
-    button.danger { background: var(--danger); }
-    button.ghost {
-      background: transparent;
-      color: var(--ink);
-      border: 1px solid var(--line);
-    }
-
-    .row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 16px;
-    }
-
-    .switch-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 11px 0;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .switch-row input { width: auto; transform: scale(1.2); }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, .52);
-      padding: 8px 11px;
-      font-size: 12px;
-      color: var(--muted);
-    }
-
-    .dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 999px;
-      background: var(--accent-2);
-      box-shadow: 0 0 0 5px rgba(29, 111, 104, .13);
-    }
-
-    .request {
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 14px;
-      background: rgba(255, 255, 255, .48);
-      margin-bottom: 12px;
-    }
-
-    .request-head {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: flex-start;
-      font-family: "SF Mono", "Cascadia Mono", Menlo, monospace;
-      font-size: 12px;
-    }
-
-    .models {
-      margin-top: 8px;
-      font-size: 13px;
-    }
-
-    pre {
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 360px;
-      overflow: auto;
-      background: #18211f;
-      color: #fff4dd;
-      border-radius: 14px;
-      padding: 13px;
-      font-family: "SF Mono", "Cascadia Mono", Menlo, monospace;
-      font-size: 11px;
-      line-height: 1.45;
-    }
-
-    details { margin-top: 10px; }
-    summary { cursor: pointer; color: var(--accent); font-weight: 800; }
-    .muted { color: var(--muted); }
-    .error { color: var(--danger); font-weight: 800; }
-    .success { color: var(--accent-2); font-weight: 800; }
-
-    .notice {
-      border: 1px solid rgba(29, 111, 104, .22);
-      background: rgba(29, 111, 104, .08);
-      border-radius: 18px;
-      padding: 12px;
-      color: var(--ink);
-      margin: 12px 0;
-      line-height: 1.55;
-    }
-
-    .result {
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, .54);
-      border-radius: 16px;
-      padding: 12px;
-      margin-top: 12px;
-      min-height: 48px;
-      line-height: 1.55;
-    }
-
-    .kbd {
-      font-family: "SF Mono", "Cascadia Mono", Menlo, monospace;
-      font-size: 12px;
-      background: rgba(24, 33, 31, .08);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 2px 6px;
-    }
-
-    .account-list {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 12px;
-      margin-bottom: 24px;
-    }
-    .account-card {
-      border: 1px solid var(--line);
-      border-radius: 20px;
-      padding: 16px;
-      background: rgba(255, 255, 255, .48);
-      transition: all .2s ease;
-    }
-    .account-card.current {
-      border-color: var(--accent-2);
-      background: rgba(29, 111, 104, .05);
-      box-shadow: 0 4px 12px rgba(29, 111, 104, .08);
-    }
-    .account-card h4 {
-      margin: 0 0 10px;
-      font-size: 14px;
-      word-break: break-all;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .account-card .tag {
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 6px;
-      background: var(--line);
-      color: var(--muted);
-      text-transform: uppercase;
-    }
-    .account-card.current .tag {
-      background: var(--accent-2);
-      color: white;
-    }
-    .account-stats {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 8px;
-      font-size: 11px;
-      text-align: center;
-    }
-    .stat-item {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-    .stat-val { font-weight: 800; font-size: 13px; }
-
-    @media (max-width: 980px) {
-      header { display: block; }
-      .grid { grid-template-columns: 1fr; }
-      .intro-grid { grid-template-columns: 1fr; }
-      .row { grid-template-columns: 1fr; }
-    }
+    :root{--ink:#18211f;--muted:#65706c;--paper:#f5f1e8;--card:rgba(255,253,247,.9);
+      --line:rgba(24,33,31,.13);--accent:#c45f2c;--accent-2:#1d6f68;--danger:#9b2d20;
+      --shadow:0 12px 30px rgba(43,35,24,.12)}
+    *{box-sizing:border-box}html,body{margin:0;height:100%}
+    body{color:var(--ink);background:var(--paper);
+      font:13px/1.45 "Inter","IBM Plex Sans","Helvetica Neue",sans-serif}
+    .app{display:grid;grid-template-columns:200px 1fr;min-height:100vh}
+    nav.sidebar{background:#efe9dc;border-right:1px solid var(--line);padding:14px 12px;
+      position:sticky;top:0;height:100vh;overflow:auto}
+    nav h1{font:700 14px/1.2 "Iowan Old Style",Georgia,serif;margin:0 0 18px;letter-spacing:-.01em}
+    nav .ver{color:var(--muted);font-size:11px;margin-bottom:14px}
+    nav a{display:block;padding:7px 9px;border-radius:8px;color:var(--ink);text-decoration:none;
+      font-weight:600;font-size:12.5px;margin-bottom:2px;cursor:pointer}
+    nav a:hover,nav a.active{background:rgba(24,33,31,.08)}
+    nav .key{margin-top:20px}nav .key label{display:block;font-size:10px;color:var(--muted);margin-bottom:4px;
+      text-transform:uppercase;letter-spacing:.08em}
+    nav input[type=password]{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;
+      background:#fff;font:12px "SF Mono",Menlo,monospace}
+    nav .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent-2);
+      margin-right:6px;vertical-align:middle}
+    nav .status-dot.err{background:var(--danger)}
+    nav .status-dot.off{background:#aaa}
+    main{padding:14px 18px 40px;overflow-x:hidden}
+    .stripe{display:grid;grid-template-columns:repeat(5,1fr) 2fr;gap:10px;margin-bottom:14px;align-items:stretch}
+    .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+    .stat .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+    .stat .val{font:700 18px/1.1 "SF Mono",Menlo,monospace;margin-top:2px}
+    .spark{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 10px;display:flex;
+      align-items:center;gap:8px}
+    .spark svg{flex:1;height:36px}
+    section.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+      margin-bottom:14px;scroll-margin-top:12px}
+    section.panel>header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px}
+    section.panel h2{margin:0;font:600 13px/1 "Inter",sans-serif;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
+    .btn{border:1px solid var(--line);background:#fff;border-radius:6px;padding:4px 10px;font:600 12px/1 inherit;
+      cursor:pointer;color:var(--ink)}
+    .btn.primary{background:var(--ink);color:#fffaf0;border-color:var(--ink)}
+    .btn.warn{background:var(--danger);color:#fff;border-color:var(--danger)}
+    .btn.ghost{background:transparent}
+    .btn+.btn{margin-left:6px}
+    .accounts{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
+    .acct{border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fffcf3;font-size:12px}
+    .acct.current{border-color:var(--accent-2);background:rgba(29,111,104,.06)}
+    .acct .name{font-weight:700;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+    .tag{font-size:10px;padding:1px 6px;border-radius:999px;background:var(--line);color:var(--muted);
+      text-transform:uppercase;letter-spacing:.08em}
+    .tag.on{background:var(--accent-2);color:#fff}
+    .tag.err{background:var(--danger);color:#fff}
+    .acct dl{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin:0;font-size:11px}
+    .acct dt{color:var(--muted)}.acct dd{margin:0;font-weight:700}
+    .acct .cooldown{margin-top:6px;font-size:11px;color:var(--danger)}
+    table.reqs{width:100%;border-collapse:collapse;font-size:12px;font-family:"SF Mono",Menlo,monospace}
+    table.reqs th{text-align:left;color:var(--muted);font-weight:600;padding:4px 6px;font-size:10.5px;
+      text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--line)}
+    table.reqs td{padding:4px 6px;border-bottom:1px solid rgba(24,33,31,.06);vertical-align:top}
+    table.reqs tr.row{cursor:pointer}table.reqs tr.row:hover{background:rgba(24,33,31,.04)}
+    table.reqs tr.exp td{background:#fffbe9}
+    .statusbadge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:700}
+    .statusbadge.ok{background:rgba(29,111,104,.15);color:var(--accent-2)}
+    .statusbadge.err{background:rgba(155,45,32,.15);color:var(--danger)}
+    .statusbadge.active{background:rgba(196,95,44,.15);color:var(--accent)}
+    .statusbadge.dis{background:rgba(24,33,31,.08);color:var(--muted)}
+    details.payload{margin:4px 0;font-family:"SF Mono",Menlo,monospace}
+    details.payload>summary{cursor:pointer;color:var(--accent);font-weight:700;font-size:11px}
+    pre.code{white-space:pre-wrap;word-break:break-word;max-height:260px;overflow:auto;background:#18211f;
+      color:#fff4dd;border-radius:6px;padding:8px;font:11px/1.45 "SF Mono",Menlo,monospace;margin:6px 0 0}
+    .log-console{background:#18211f;color:#e5e0d1;border-radius:8px;padding:0;overflow:hidden;
+      font:11.5px/1.5 "SF Mono",Menlo,monospace;display:flex;flex-direction:column;height:340px}
+    .log-console header{background:#21302d;display:flex;gap:6px;padding:6px 8px;align-items:center;flex-wrap:wrap}
+    .log-console input.filter{flex:1;min-width:160px;background:#0f1918;color:#e5e0d1;border:1px solid #334;
+      border-radius:4px;padding:3px 6px;font:inherit}
+    .log-console select,.log-console label{color:#e5e0d1;font-size:11px}
+    .log-console .body{flex:1;overflow:auto;padding:6px 10px}
+    .log-console .line{white-space:pre-wrap;word-break:break-word;padding:1px 0}
+    .log-console .lvl-WARNING{color:#f7c06f}.log-console .lvl-ERROR{color:#ff8d7a}
+    .log-console .lvl-SUCCESS{color:#7ecf9a}.log-console .lvl-INFO{color:#cfd3c8}
+    .log-console .lvl-DEBUG{color:#8892a0}
+    .toolbar{display:flex;gap:6px;align-items:center}
+    .search{padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;font:12px inherit;width:220px}
+    .filter-chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:11px;color:var(--muted);cursor:pointer}
+    .filter-chip.on{background:var(--ink);color:#fffaf0;border-color:var(--ink)}
+    .hidden{display:none!important}
+    @media (max-width: 960px){.app{grid-template-columns:1fr}nav.sidebar{position:static;height:auto}}
   </style>
 </head>
 <body>
+<div class="app">
+  <nav class="sidebar">
+    <h1>Kiro Gateway</h1>
+    <div class="ver">vAPP_VERSION_PLACEHOLDER · <span id="connStatus"><span class="status-dot off"></span>未連線</span></div>
+    <a data-jump="panel-status" class="active">總覽</a>
+    <a data-jump="panel-routing">路由設定</a>
+    <a data-jump="panel-accounts">帳號</a>
+    <a data-jump="panel-active">進行中</a>
+    <a data-jump="panel-history">歷史紀錄</a>
+    <a data-jump="panel-logs">即時日誌</a>
+    <a data-jump="panel-models">遠端模型</a>
+    <div class="key">
+      <label>代理 API 金鑰</label>
+      <input id="apiKey" type="password" placeholder="輸入 Bearer 金鑰">
+      <div style="margin-top:6px"><button class="btn primary" onclick="saveKey()">連線</button><button class="btn ghost" onclick="forgetKey()">清除</button></div>
+    </div>
+  </nav>
   <main>
-    <header>
-      <div>
-        <h1>模型路由控制台 <small style="font-size: 14px; opacity: 0.5;">vAPP_VERSION_PLACEHOLDER</small></h1>
-        <div class="subtitle">
-          即時切換 Kiro Gateway 使用的模型，不需要改 client 設定，也不需要重啟服務。
-          所有設定只存在目前伺服器記憶體；重啟後會回到安全預設。內容監控預設關閉，避免不必要地保存敏感資料。
-        </div>
+    <section id="panel-status" class="panel">
+      <header><h2>總覽（近 5 分鐘）</h2><div id="stripeMeta" class="muted" style="font-size:11px;color:var(--muted)"></div></header>
+      <div class="stripe">
+        <div class="stat"><div class="lbl">每秒請求</div><div class="val" id="mRps">—</div></div>
+        <div class="stat"><div class="lbl">P50 延遲</div><div class="val" id="mP50">—</div></div>
+        <div class="stat"><div class="lbl">P95 延遲</div><div class="val" id="mP95">—</div></div>
+        <div class="stat"><div class="lbl">錯誤率</div><div class="val" id="mErr">—</div></div>
+        <div class="stat"><div class="lbl">進行中</div><div class="val" id="mActive">—</div></div>
+        <div class="spark"><svg id="sparkRps" viewBox="0 0 200 36" preserveAspectRatio="none"></svg><svg id="sparkErr" viewBox="0 0 200 36" preserveAspectRatio="none"></svg></div>
       </div>
-      <div class="pill"><span class="dot"></span><span id="status">尚未輸入 API Key</span></div>
-    </header>
-
-    <section class="intro-grid">
-      <article class="card intro-card">
-        <h2>功能說明</h2>
-        <h3>不改 client，直接改實際上游模型</h3>
-        <p class="muted">
-          Client 仍然可以送 <span class="kbd">claude-opus-4-7</span>。
-          控制台可以在 gateway 內即時改成 4.6、4.7，或依照模型名稱做 redirect。
-        </p>
-      </article>
-      <article class="card intro-card">
-        <h2>效果說明</h2>
-        <h3>Manual、Redirect、Fallback 的差異</h3>
-        <p class="muted">
-          Manual 會強制所有請求走指定模型；Redirect 只改命中的模型；
-          Fallback 只適合 4.7 → 4.6 這種同等級 Opus 內切換；不要把 Opus 自動降到 Sonnet。
-          如果只想換帳號，請關閉模型 Fallback，交給 account manager 處理。
-        </p>
-      </article>
-      <article class="card intro-card">
-        <h2>監控安全</h2>
-        <h3>看得到真實模型與請求狀態</h3>
-        <p class="muted">
-          Active 顯示正在傳遞的請求，Completed 顯示近期完成紀錄。
-          只有打開「擷取內容」才會把 payload/stream 片段保存在記憶體中。
-        </p>
-      </article>
+      <p style="font-size:11px;color:var(--muted);margin-top:8px">滾動窗口統計近 5 分鐘的請求量、延遲百分位數和錯誤率。火花圖顯示每 5 秒一個桶的趨勢。</p>
     </section>
 
-    <section class="grid">
-      <aside class="card">
-        <h2>存取驗證</h2>
-        <label for="apiKey">Proxy API Key</label>
-        <input id="apiKey" type="password" placeholder="和 client 使用的 Bearer key 相同">
-        <div class="notice">
-          未輸入 Key 時，頁面不會輪詢 API，因此不會再洗出 401。Key 只存在這個瀏覽器的 localStorage。
-        </div>
-        <div class="actions">
-          <button onclick="saveKey()">儲存並連線</button>
-          <button class="ghost" onclick="forgetKey()">清除 Key</button>
-        </div>
+    <section id="panel-routing" class="panel">
+      <header><h2>路由設定</h2><div class="toolbar">
+        <button class="btn" onclick="quickSwap('claude-opus-4.6')">強制 4.6</button>
+        <button class="btn" onclick="quickSwap('claude-opus-4.7')">強制 4.7</button>
+        <button class="btn warn" onclick="resetRouting()">重設</button>
+      </div></header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">即時調整模型路由策略。「直通」不做任何修改；「手動」強制使用指定模型；「重導向」依 JSON 規則映射。啟用降級後，主模型失敗會自動嘗試備用模型。</p>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">
+        <label class="chip"><input id="enabled" type="checkbox"> 啟用路由</label>
+        <label class="chip"><input id="safeFallback" type="checkbox"> 失敗時重試原模型</label>
+        <label class="chip"><input id="fallbackEnabled" type="checkbox"> 模型降級</label>
+        <label class="chip"><input id="captureContent" type="checkbox"> 擷取請求內容</label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
+        <div><label style="font-size:10.5px;color:var(--muted)">模式</label>
+          <select id="mode" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"><option value="passthrough">直通</option><option value="manual">手動</option><option value="redirect">重導向</option></select></div>
+        <div><label style="font-size:10.5px;color:var(--muted)">手動指定模型</label>
+          <input id="manualModel" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px" placeholder="claude-opus-4.6"></div>
+        <div><label style="font-size:10.5px;color:var(--muted)">降級模型（逗號分隔）</label>
+          <input id="fallbackModels" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"></div>
+      </div>
+      <label style="font-size:10.5px;color:var(--muted);display:block;margin-top:8px">重導向規則 JSON</label>
+      <textarea id="redirects" style="width:100%;min-height:64px;padding:6px;border:1px solid var(--line);border-radius:6px;font:12px 'SF Mono',Menlo,monospace"></textarea>
+      <div style="margin-top:8px"><button class="btn primary" onclick="applyRouting()">套用</button><span id="saveResult" style="margin-left:10px;color:var(--muted)"></span></div>
+    </section>
 
-        <h2 style="margin-top:26px">路由設定</h2>
-        <div class="switch-row">
-          <div>
-            <strong>啟用即時路由</strong>
-            <div class="muted">關閉時完全維持原本專案行為。</div>
-          </div>
-          <input id="enabled" type="checkbox">
-        </div>
-        <div class="switch-row">
-          <div>
-            <strong>失敗時回原模型</strong>
-            <div class="muted">改寫失敗後先重試 client 原本要求的模型。</div>
-          </div>
-          <input id="safeFallback" type="checkbox">
-        </div>
-        <div class="switch-row">
-          <div>
-            <strong>啟用模型 Fallback</strong>
-            <div class="muted">關閉時只會換帳號，不會自動降級到其他模型家族。</div>
-          </div>
-          <input id="fallbackEnabled" type="checkbox">
-        </div>
-        <div class="switch-row">
-          <div>
-            <strong>擷取傳遞內容</strong>
-            <div class="muted">只存在記憶體；建議排錯時短暫開啟。</div>
-          </div>
-          <input id="captureContent" type="checkbox">
-        </div>
+    <section id="panel-accounts" class="panel">
+      <header><h2>帳號 <span id="accountCount" class="tag">0</span></h2></header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">顯示所有 API 帳號的即時狀態。「使用中」為當前輪轉到的帳號；「冷卻中」表示該帳號因錯誤觸發指數退避，倒數結束後自動恢復。</p>
+      <div id="accounts" class="accounts"><p style="color:var(--muted)">等待資料…</p></div>
+    </section>
 
-        <label for="mode">模式</label>
-        <select id="mode">
-          <option value="passthrough">Passthrough：不改模型</option>
-          <option value="manual">Manual：所有請求強制指定模型</option>
-          <option value="redirect">Redirect：依模型名稱重新導向</option>
-        </select>
+    <section id="panel-active" class="panel">
+      <header><h2>進行中的請求</h2><span id="activeCount" class="tag">0</span></header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">正在處理的串流/非串流請求。點擊列可展開查看嘗試明細、路由原因和原始 payload。「首字」= 首 token 延遲 (TTFT)，「速度」= 每秒 token 數 (TPS)。</p>
+      <div id="activeWrap"><p style="color:var(--muted)">目前沒有進行中的請求。</p></div>
+    </section>
 
-        <label for="manualModel">Manual 指定模型</label>
-        <input id="manualModel" placeholder="claude-opus-4.6">
+    <section id="panel-history" class="panel">
+      <header><h2>歷史紀錄</h2>
+        <div class="toolbar">
+          <input id="histFilter" class="search" placeholder="篩選：模型 / 狀態 / 帳號 / 錯誤">
+          <button class="btn ghost" onclick="clearMonitor()">清除</button>
+        </div>
+      </header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">最近 200 筆已完成請求。支援全文篩選（模型名稱、狀態碼、帳號 ID、錯誤訊息）。點擊列展開詳情。「裁剪」欄顯示 context window 自動截斷前後的訊息數。</p>
+      <div id="historyWrap" style="max-height:520px;overflow:auto"></div>
+    </section>
 
-        <label for="redirects">Redirect 規則 JSON</label>
-        <textarea id="redirects" spellcheck="false"></textarea>
+    <section id="panel-logs" class="panel">
+      <header><h2>即時日誌</h2>
+        <div class="toolbar">
+          <span class="filter-chip on" data-level="ALL">全部</span>
+          <span class="filter-chip" data-level="WARNING">警告以上</span>
+          <span class="filter-chip" data-level="ERROR">僅錯誤</span>
+        </div>
+      </header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">透過 SSE 即時串流伺服器日誌（最多保留 2000 筆）。可依等級篩選或用關鍵字搜尋。日誌包含請求路由決策、帳號切換、錯誤堆疊等資訊。</p>
+      <div class="log-console">
+        <header>
+          <input class="filter" id="logSearch" placeholder="搜尋日誌（子字串，不分大小寫）">
+          <label><input id="logAutoScroll" type="checkbox" checked> 自動捲動</label>
+          <button class="btn" onclick="clearLogView()">清除畫面</button>
+        </header>
+        <div class="body" id="logBody"></div>
+      </div>
+    </section>
 
-        <label for="fallbackModels">同等級模型 Fallback，逗號分隔</label>
-        <input id="fallbackModels" placeholder="例如 claude-opus-4.6；不要填 claude-sonnet">
-        <div class="notice">
-          Opus 失敗時自動降到 Sonnet 會改變輸出品質與能力。控制台會避免 Opus → Sonnet/Haiku 這類降級；429 仍會由既有帳號系統嘗試其他帳號。
+    <section id="panel-models" class="panel">
+      <header><h2>遠端模型</h2>
+        <div class="toolbar">
+          <button class="btn primary" onclick="loadModels()">重新載入</button>
+          <span id="modelsStatus" style="font-size:11px;color:var(--muted)"></span>
         </div>
-
-        <div class="actions">
-          <button onclick="applyRouting()">套用路由</button>
-          <button class="secondary" onclick="quickSwap('claude-opus-4.6')">強制 4.6</button>
-          <button class="secondary" onclick="quickSwap('claude-opus-4.7')">強制 4.7</button>
-          <button class="danger" onclick="resetRouting()">回安全預設</button>
-        </div>
-        <div id="saveResult" class="result muted">尚未套用新的設定。</div>
-
-        <h2 style="margin-top:26px">變更測試</h2>
-        <p class="muted">這個測試只用目前 runtime 設定試算路由結果，不會送到 Kiro，也不消耗模型額度。</p>
-        <label for="testModel">測試 client 送出的模型</label>
-        <input id="testModel" value="claude-opus-4-7">
-        <div class="actions">
-          <button class="ghost" onclick="runRoutingTest()">測試目前設定</button>
-        </div>
-        <div id="testResult" class="result muted">套用後會在這裡顯示「原模型 → 實際上游模型」。</div>
-      </aside>
-
-      <section class="card">
-        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
-          <h2>帳號系統狀態</h2>
-          <div class="pill"><span id="accountCount">0 帳號</span></div>
-        </div>
-        <div id="accounts" class="account-list">
-          <p class='muted'>載入中...</p>
-        </div>
-
-        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
-          <h2>請求監控</h2>
-          <div class="actions" style="margin:0">
-            <button class="ghost" onclick="refresh(true)">重新整理</button>
-            <button class="ghost" onclick="clearMonitor()">清除完成紀錄</button>
-          </div>
-        </div>
-        <div class="row">
-          <div>
-            <h2>進行中</h2>
-            <div id="active"></div>
-          </div>
-          <div>
-            <h2>已完成</h2>
-            <div id="completed"></div>
-          </div>
-        </div>
-      </section>
+      </header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">查詢 Kiro 遠端 API 目前可用的模型清單，包含各模型的輸入/輸出 token 上限。可用於確認帳號權限和模型可用性。</p>
+      <div id="modelsWrap"><p style="color:var(--muted)">點擊「重新載入」查詢遠端模型。</p></div>
     </section>
   </main>
+</div>
 
-  <script>
-    const keyInput = document.querySelector("#apiKey");
-    const statusEl = document.querySelector("#status");
-    const saveResult = document.querySelector("#saveResult");
-    const testResult = document.querySelector("#testResult");
-    
-    // Auto-bring cred from server injection
-    const autoKey = window.KIRO_AUTO_KEY;
-    let storedKey = localStorage.getItem("kiro-dashboard-key");
-    
-    console.log("Kiro Dashboard Init: autoKey=" + (autoKey ? "found" : "not found") + ", storedKey=" + (storedKey ? "found" : "empty"));
-    
-    if (autoKey) {
-        if (!storedKey || storedKey.length < 3) {
-            console.log("Kiro Dashboard: Applying auto-fill key to empty/short storage");
-            localStorage.setItem("kiro-dashboard-key", autoKey);
-            storedKey = autoKey;
-        }
+<script>
+const $=s=>document.querySelector(s);const $$=s=>document.querySelectorAll(s);
+const autoKey=window.KIRO_AUTO_KEY;let storedKey=localStorage.getItem("kiro-dashboard-key");
+if(autoKey&&(!storedKey||storedKey.length<3)){localStorage.setItem("kiro-dashboard-key",autoKey);storedKey=autoKey;}
+$("#apiKey").value=storedKey||"";
+
+function authHeaders(){return{"Authorization":`Bearer ${$("#apiKey").value.trim()}`,"Content-Type":"application/json"};}
+function hasKey(){return $("#apiKey").value.trim().length>0;}
+async function api(p,o={}){if(!hasKey())throw new Error("請先輸入 API 金鑰");
+  const r=await fetch(p,{...o,headers:{...authHeaders(),...(o.headers||{})}});
+  if(r.status===401)throw new Error("驗證失敗");
+  if(!r.ok)throw new Error(await r.text());
+  return r.json();}
+
+function setConn(ok,msg){$("#connStatus").innerHTML=`<span class="status-dot ${ok?'':'off'} ${ok===false?'err':''}"></span>${msg}`;}
+
+// sidebar jump
+$$(".sidebar a[data-jump]").forEach(el=>el.addEventListener("click",()=>{
+  $$(".sidebar a[data-jump]").forEach(x=>x.classList.remove("active"));
+  el.classList.add("active");
+  document.getElementById(el.dataset.jump).scrollIntoView({behavior:"smooth",block:"start"});
+}));
+
+// -------- state --------
+const state={routing:null,accounts:[],active:{},completed:[],metrics:null,logs:[],logSeq:-1};
+const LOG_MAX_VIEW=2000;let logLevelFilter="ALL";let histFilterText="";
+
+function fmtTime(ts){if(!ts)return"";return new Date(ts*1000).toLocaleTimeString();}
+function fmtMs(s){if(s==null)return"—";return s<1?`${(s*1000).toFixed(0)}ms`:`${s.toFixed(2)}s`;}
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);}
+
+function saveKey(){if(!hasKey()){setConn(false,"未輸入金鑰");return;}
+  localStorage.setItem("kiro-dashboard-key",$("#apiKey").value.trim());connect();}
+function forgetKey(){localStorage.removeItem("kiro-dashboard-key");$("#apiKey").value="";if(es)es.close();setConn(false,"未連線");}
+
+// -------- SSE --------
+let es=null;
+function connect(){
+  if(es)es.close();
+  if(!hasKey()){setConn(false,"未輸入金鑰");return;}
+  const url=`/dashboard/api/events?_auth=${encodeURIComponent($("#apiKey").value.trim())}`;
+  // fall back to fetch+reader because EventSource can't set headers
+  streamEvents();
+  pullMetrics();setInterval(pullMetrics,5000);
+  pullLogs();
+}
+async function streamEvents(){
+  setConn(null,"連線中");
+  try{
+    const r=await fetch("/dashboard/api/events",{headers:authHeaders()});
+    if(r.status===401){setConn(false,"驗證失敗");return;}
+    setConn(true,"已連線");
+    const reader=r.body.getReader();const dec=new TextDecoder();let buf="";
+    while(true){
+      const{value,done}=await reader.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let idx;while((idx=buf.indexOf("\n\n"))>=0){
+        const raw=buf.slice(0,idx);buf=buf.slice(idx+2);
+        if(!raw.trim()||raw.startsWith(":"))continue;
+        let ev="message";let data="";
+        raw.split("\n").forEach(line=>{
+          if(line.startsWith("event: "))ev=line.slice(7);
+          else if(line.startsWith("data: "))data+=line.slice(6);
+        });
+        try{handleEvent(ev,JSON.parse(data));}catch(e){}
+      }
     }
-    
-    keyInput.value = storedKey || "";
-    
-    let authPaused = false;
+    setConn(false,"串流已關閉");setTimeout(streamEvents,2000);
+  }catch(e){setConn(false,"錯誤: "+e.message);setTimeout(streamEvents,3000);}
+}
 
-    keyInput.addEventListener("input", () => {
-      authPaused = false;
+function handleEvent(ev,d){
+  if(ev==="snapshot"){
+    state.routing=d.routing;state.accounts=d.accounts||[];
+    (d.active_requests||[]).forEach(r=>state.active[r.id]=r);
+    state.completed=d.completed_requests||[];
+    writeRoutingForm(state.routing);renderAll();
+  }else if(ev==="request_started"){state.active[d.id]=d;renderActive();}
+   else if(ev==="attempt"){if(state.active[d.id]){state.active[d.id]=d;renderActive();}}
+   else if(ev==="request_finished"){delete state.active[d.id];state.completed.unshift(d);if(state.completed.length>200)state.completed.pop();renderActive();renderHistory();}
+   else if(ev==="log"){pushLog(d);}
+}
+
+async function pullMetrics(){
+  try{const m=await api("/dashboard/api/metrics");state.metrics=m;renderStripe();}catch{}
+}
+async function pullLogs(){
+  try{const r=await api(`/dashboard/api/logs?since=${state.logSeq}`);
+    (r.entries||[]).forEach(pushLog);
+  }catch{}
+}
+
+function pushLog(e){
+  if(e.seq!=null&&e.seq<=state.logSeq)return;
+  if(e.seq!=null)state.logSeq=e.seq;
+  state.logs.push(e);if(state.logs.length>LOG_MAX_VIEW)state.logs.shift();
+  renderLogLine(e);
+}
+
+// -------- rendering --------
+function renderAll(){renderStripe();renderAccounts();renderActive();renderHistory();}
+
+function renderStripe(){
+  const m=state.metrics;
+  if(!m){return;}
+  const rps=m.count/Math.max(1,m.window_s);
+  $("#mRps").textContent=rps.toFixed(2);
+  $("#mP50").textContent=fmtMs(m.p50);
+  $("#mP95").textContent=fmtMs(m.p95);
+  const errPct=m.count?(m.errors/m.count*100):0;
+  $("#mErr").textContent=errPct.toFixed(1)+"%";
+  $("#mActive").textContent=Object.keys(state.active).length;
+  $("#stripeMeta").textContent=`${m.count} 次請求 · ${m.errors} 次錯誤 · 窗口=${m.window_s}秒`;
+  drawSpark("#sparkRps",(m.series||[]).map(s=>s.count),"#1d6f68");
+  drawSpark("#sparkErr",(m.series||[]).map(s=>s.errors),"#9b2d20");
+}
+function drawSpark(sel,data,color){
+  const svg=$(sel);if(!svg||!data||!data.length){svg.innerHTML="";return;}
+  const w=200,h=36;const max=Math.max(1,...data);const step=w/Math.max(1,data.length-1);
+  const pts=data.map((v,i)=>`${(i*step).toFixed(1)},${(h-(v/max)*(h-2)-1).toFixed(1)}`).join(" ");
+  svg.innerHTML=`<polyline fill="none" stroke="${color}" stroke-width="1.4" points="${pts}"/>`;
+}
+
+function renderAccounts(){
+  const el=$("#accounts");if(!state.accounts.length){el.innerHTML=`<p style="color:var(--muted)">尚無帳號資料。</p>`;return;}
+  $("#accountCount").textContent=state.accounts.length;
+  el.innerHTML=state.accounts.map(a=>{
+    const cur=a.is_current?'current':'';
+    const cool=a.cooldown_remaining_s>0
+      ? `<div class="cooldown">冷卻中 ${a.cooldown_remaining_s}秒 / ${a.cooldown_total_s}秒（第 ${a.backoff_tier} 級）</div>`:"";
+    const lastErr=a.last_error_reason?`<div style="font-size:10.5px;color:var(--muted)">last: ${esc(a.last_error_reason)} (${a.last_error_status||"-"})</div>`:"";
+    return `<div class="acct ${cur}">
+      <div class="name"><span>${esc(a.display_id)}</span><span class="tag ${a.is_current?'on':''} ${a.failures>0?'err':''}">${a.is_current?'使用中':(a.failures>0?'冷卻中':'待命')}</span></div>
+      <dl><dt>總計</dt><dt>成功</dt><dt>失敗</dt>
+        <dd>${a.stats.total_requests}</dd><dd>${a.stats.successful_requests}</dd><dd>${a.stats.failed_requests}</dd></dl>
+      ${cool}${lastErr}</div>`;
+  }).join("");
+}
+
+function reqRow(r,isActive){
+  const statusCls=r.status==="completed"?"ok":(r.status==="active"?"active":(r.status==="client_disconnected"?"dis":"err"));
+  const ttft=r.ttft_s!=null?fmtMs(r.ttft_s):"—";const tps=r.tps!=null?`${r.tps.toFixed(1)}t/s`:"—";
+  const trim=r.trim_before_messages?`${r.trim_before_messages}→${r.trim_after_messages} msg`:"";
+  const attempts=(r.attempts||[]).length;
+  return `<tr class="row" data-id="${esc(r.id)}"><td>${fmtTime(r.started_at)}</td>
+    <td><span class="statusbadge ${statusCls}">${esc(r.status)}</span></td>
+    <td>${esc(r.api_format)} ${r.stream?"⋯":""}</td>
+    <td>${esc(r.original_model)}${r.original_model!==r.active_model?`→${esc(r.active_model)}`:""}</td>
+    <td>${ttft}</td><td>${tps}</td><td>${r.output_tokens??"—"}</td><td>${attempts}</td><td>${esc(trim)}</td>
+    <td>${r.error?`<span class="statusbadge err">${esc(r.error.slice(0,60))}</span>`:""}</td></tr>`;
+}
+
+function renderActive(){
+  const rows=Object.values(state.active).sort((a,b)=>b.started_at-a.started_at);
+  $("#activeCount").textContent=rows.length;
+  const el=$("#activeWrap");
+  if(!rows.length){el.innerHTML=`<p style="color:var(--muted)">目前沒有進行中的請求。</p>`;return;}
+  el.innerHTML=`<table class="reqs"><thead><tr><th>開始</th><th>狀態</th><th>格式</th><th>模型</th><th>首字</th><th>速度</th><th>token</th><th>重試</th><th>裁剪</th><th>錯誤</th></tr></thead>
+    <tbody>${rows.map(r=>reqRow(r,true)).join("")}</tbody></table>`;
+  wireRowExpand("#activeWrap","active");
+}
+
+function renderHistory(){
+  const f=histFilterText.toLowerCase().trim();
+  const rows=state.completed.filter(r=>{
+    if(!f)return true;
+    return JSON.stringify(r).toLowerCase().includes(f);
+  });
+  const el=$("#historyWrap");
+  if(!rows.length){el.innerHTML=`<p style="color:var(--muted)">尚無已完成的請求。</p>`;return;}
+  el.innerHTML=`<table class="reqs"><thead><tr><th>開始</th><th>狀態</th><th>格式</th><th>模型</th><th>首字</th><th>速度</th><th>token</th><th>重試</th><th>裁剪</th><th>錯誤</th></tr></thead>
+    <tbody>${rows.slice(0,300).map(r=>reqRow(r,false)).join("")}</tbody></table>`;
+  wireRowExpand("#historyWrap","completed");
+}
+
+$("#histFilter").addEventListener("input",e=>{histFilterText=e.target.value;renderHistory();});
+
+function wireRowExpand(wrapSel,kind){
+  $(wrapSel).querySelectorAll("tr.row").forEach(tr=>{
+    tr.addEventListener("click",()=>{
+      const next=tr.nextElementSibling;
+      if(next&&next.classList.contains("exp")){next.remove();return;}
+      const id=tr.dataset.id;const r=(kind==="active"?state.active[id]:state.completed.find(x=>x.id===id));
+      if(!r)return;
+      const exp=document.createElement("tr");exp.className="exp";
+      exp.innerHTML=`<td colspan="10">${renderDetail(r)}</td>`;
+      tr.after(exp);
     });
+  });
+}
 
-    function hasApiKey() {
-      return keyInput.value.trim().length > 0;
-    }
+function renderDetail(r){
+  const attempts=(r.attempts||[]).map(a=>`<div>${esc(a.model)} · ${a.account_id||"-"} · ${a.http_status||"-"} · ${esc(a.status)}${a.error?` · ${esc(a.error)}`:""}</div>`).join("");
+  const payloads=Object.entries(r.payloads||{}).map(([n,b])=>{
+    const big=b&&b.length>40000;
+    return `<details class="payload"><summary>${esc(n)}${big?" (large)":""}</summary>${big?`<p style="color:var(--muted)">${b.length} chars — open to load</p><button class="btn" onclick="this.nextElementSibling.classList.remove('hidden');this.remove()">Show</button><pre class="code hidden">${esc(b)}</pre>`:`<pre class="code">${esc(b)}</pre>`}</details>`;
+  }).join("");
+  const chunks=(r.chunks||[]).length?`<details class="payload"><summary>stream chunks (${r.chunks.length})</summary><pre class="code">${esc(r.chunks.join("\n\n"))}</pre></details>`:"";
+  const resp=r.response?`<details class="payload"><summary>response</summary><pre class="code">${esc(r.response)}</pre></details>`:"";
+  return `<div style="padding:6px 4px"><div style="color:var(--muted);margin-bottom:4px">id=${esc(r.id)} · reason=${esc(r.routing_reason||"")}</div>
+    <div style="margin-bottom:4px"><strong>嘗試紀錄</strong>${attempts||" —"}</div>${payloads}${chunks}${resp}</div>`;
+}
 
-    function authHeaders() {
-      return {
-        "Authorization": `Bearer ${keyInput.value.trim()}`,
-        "Content-Type": "application/json"
-      };
-    }
+// -------- logs UI --------
+$$(".filter-chip").forEach(c=>c.addEventListener("click",()=>{
+  $$(".filter-chip").forEach(x=>x.classList.remove("on"));c.classList.add("on");
+  logLevelFilter=c.dataset.level;redrawLogs();
+}));
+$("#logSearch").addEventListener("input",redrawLogs);
+function clearLogView(){$("#logBody").innerHTML="";}
+function keepLine(e){
+  if(logLevelFilter==="WARNING"&&!["WARNING","ERROR","CRITICAL"].includes(e.level))return false;
+  if(logLevelFilter==="ERROR"&&!["ERROR","CRITICAL"].includes(e.level))return false;
+  const q=$("#logSearch").value.toLowerCase();
+  if(q&&!(e.msg||"").toLowerCase().includes(q))return false;
+  return true;
+}
+function renderLogLine(e){
+  if(!keepLine(e))return;
+  const body=$("#logBody");const d=document.createElement("div");
+  d.className="line lvl-"+(e.level||"INFO");
+  const ts=new Date((e.ts||0)*1000).toLocaleTimeString();
+  d.textContent=`${ts} ${e.level||""} ${e.msg||""}`;
+  body.appendChild(d);
+  while(body.childElementCount>LOG_MAX_VIEW)body.firstElementChild.remove();
+  if($("#logAutoScroll").checked)body.scrollTop=body.scrollHeight;
+}
+function redrawLogs(){const b=$("#logBody");b.innerHTML="";state.logs.forEach(renderLogLine);}
 
-    function saveKey() {
-      if (!hasApiKey()) {
-        setStatus("尚未輸入 API Key，不會輪詢 API");
-        renderUnauthenticated();
-        return;
-      }
-      authPaused = false;
-      localStorage.setItem("kiro-dashboard-key", keyInput.value.trim());
-      setStatus("API Key 已儲存，正在讀取狀態");
-      refresh(true);
-    }
+// -------- routing form (unchanged behavior) --------
+function writeRoutingForm(r){if(!r)return;
+  $("#enabled").checked=r.enabled;$("#mode").value=r.mode;$("#manualModel").value=r.manual_model;
+  $("#redirects").value=JSON.stringify(r.redirects,null,2);
+  $("#fallbackModels").value=r.fallback_models.join(", ");
+  $("#fallbackEnabled").checked=r.fallback_enabled;$("#safeFallback").checked=r.safe_fallback_to_original;
+  $("#captureContent").checked=r.capture_content;}
+function readRoutingForm(){let red={};try{red=JSON.parse($("#redirects").value||"{}")}catch(e){throw new Error("重導向規則必須是合法 JSON");}
+  return{enabled:$("#enabled").checked,mode:$("#mode").value,manual_model:$("#manualModel").value,redirects:red,
+    fallback_enabled:$("#fallbackEnabled").checked,
+    fallback_models:$("#fallbackModels").value.split(",").map(v=>v.trim()).filter(Boolean),
+    safe_fallback_to_original:$("#safeFallback").checked,capture_content:$("#captureContent").checked};}
+async function applyRouting(){try{const d=await api("/dashboard/api/routing",{method:"PUT",body:JSON.stringify(readRoutingForm())});
+  writeRoutingForm(d.routing);$("#saveResult").textContent="已套用 "+new Date().toLocaleTimeString();}catch(e){$("#saveResult").textContent=e.message;}}
+async function quickSwap(m){$("#enabled").checked=true;$("#mode").value="manual";$("#manualModel").value=m;await applyRouting();}
+async function resetRouting(){await api("/dashboard/api/routing/reset",{method:"POST",body:"{}"});$("#saveResult").textContent="已重設";}
+async function clearMonitor(){await api("/dashboard/api/monitor/clear",{method:"POST",body:"{}"});state.completed=[];renderHistory();}
 
-    function forgetKey() {
-      localStorage.removeItem("kiro-dashboard-key");
-      keyInput.value = "";
-      authPaused = false;
-      setStatus("尚未輸入 API Key，不會輪詢 API");
-      renderUnauthenticated();
-    }
+if(hasKey())connect();else setConn(false,"未輸入金鑰");
 
-    async function api(path, options = {}) {
-      if (!hasApiKey()) {
-        throw new Error("請先輸入 Proxy API Key。");
-      }
-      const res = await fetch(path, {
-        ...options,
-        headers: { ...authHeaders(), ...(options.headers || {}) }
-      });
-      if (res.status === 401) {
-        throw new Error("API Key 錯誤或未授權。");
-      }
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
-      return res.json();
-    }
-
-    function setStatus(message) {
-      statusEl.textContent = message;
-    }
-
-    function setSaveResult(message, kind = "success") {
-      saveResult.className = `result ${kind}`;
-      saveResult.textContent = message;
-    }
-
-    function renderUnauthenticated() {
-      document.querySelector("#active").innerHTML =
-        "<p class='muted'>輸入 API Key 後才會讀取進行中的請求。</p>";
-      document.querySelector("#completed").innerHTML =
-        "<p class='muted'>輸入 API Key 後才會讀取完成紀錄。</p>";
-      document.querySelector("#accounts").innerHTML =
-        "<p class='muted'>輸入 API Key 後才會讀取帳號狀態。</p>";
-    }
-
-    function readRoutingForm() {
-      let redirects = {};
-      try {
-        redirects = JSON.parse(document.querySelector("#redirects").value || "{}");
-      } catch (err) {
-        throw new Error("Redirect 規則必須是合法 JSON。");
-      }
-      return {
-        enabled: document.querySelector("#enabled").checked,
-        mode: document.querySelector("#mode").value,
-        manual_model: document.querySelector("#manualModel").value,
-        redirects,
-        fallback_enabled: document.querySelector("#fallbackEnabled").checked,
-        fallback_models: document.querySelector("#fallbackModels").value
-          .split(",").map(v => v.trim()).filter(Boolean),
-        safe_fallback_to_original: document.querySelector("#safeFallback").checked,
-        capture_content: document.querySelector("#captureContent").checked
-      };
-    }
-
-    function writeRoutingForm(routing) {
-      document.querySelector("#enabled").checked = routing.enabled;
-      document.querySelector("#mode").value = routing.mode;
-      document.querySelector("#manualModel").value = routing.manual_model;
-      document.querySelector("#redirects").value = JSON.stringify(routing.redirects, null, 2);
-      document.querySelector("#fallbackModels").value = routing.fallback_models.join(", ");
-      document.querySelector("#fallbackEnabled").checked = routing.fallback_enabled;
-      document.querySelector("#safeFallback").checked = routing.safe_fallback_to_original;
-      document.querySelector("#captureContent").checked = routing.capture_content;
-    }
-
-    async function applyRouting() {
-      try {
-        const data = await api("/dashboard/api/routing", {
-          method: "PUT",
-          body: JSON.stringify(readRoutingForm())
-        });
-        writeRoutingForm(data.routing);
-        setSaveResult(`設定已套用成功：${data.routing.mode} / ${data.routing.manual_model}`);
-        await runRoutingTest(true);
-        refresh(true);
-      } catch (err) {
-        setSaveResult(err.message, "error");
-      }
-    }
-
-    async function quickSwap(model) {
-      document.querySelector("#enabled").checked = true;
-      document.querySelector("#mode").value = "manual";
-      document.querySelector("#manualModel").value = model;
-      await applyRouting();
-    }
-
-    async function resetRouting() {
-      await api("/dashboard/api/routing/reset", { method: "POST", body: "{}" });
-      setSaveResult("已回到安全預設：不改寫模型、內容擷取關閉。");
-      await runRoutingTest(true);
-      refresh(true);
-    }
-
-    async function clearMonitor() {
-      await api("/dashboard/api/monitor/clear", { method: "POST", body: "{}" });
-      refresh(true);
-    }
-
-    async function runRoutingTest(silent = false) {
-      try {
-        const model = document.querySelector("#testModel").value.trim() || "claude-opus-4-7";
-        const data = await api("/dashboard/api/routing/test", {
-          method: "POST",
-          body: JSON.stringify({ model })
-        });
-        const decision = data.decision;
-        const fallbacks = decision.fallback_models.length
-          ? `；Fallback：${decision.fallback_models.join(", ")}`
-          : "；沒有 Fallback";
-        testResult.className = "result success";
-        testResult.innerHTML =
-          `測試成功：<span class="kbd">${escapeHtml(decision.original_model)}</span> → ` +
-          `<span class="kbd">${escapeHtml(decision.routed_model)}</span>` +
-          `<br>${escapeHtml(decision.reason)}${escapeHtml(fallbacks)}`;
-        if (!silent) {
-          setStatus("路由測試成功");
-        }
-      } catch (err) {
-        testResult.className = "result error";
-        testResult.textContent = err.message;
-        if (!silent) {
-          setStatus("路由測試失敗");
-        }
-      }
-    }
-
-    function fmtTime(ts) {
-      if (!ts) return "";
-      return new Date(ts * 1000).toLocaleTimeString();
-    }
-
-    function renderRecord(record) {
-      const payloads = Object.entries(record.payloads || {})
-        .map(([name, body]) => `<details><summary>${escapeHtml(name)}</summary><pre>${escapeHtml(body)}</pre></details>`)
-        .join("");
-      const chunks = (record.chunks || []).length
-        ? `<details><summary>stream chunks (${record.chunks.length})</summary><pre>${escapeHtml(record.chunks.join("\n\n"))}</pre></details>`
-        : "";
-      const response = record.response
-        ? `<details><summary>response</summary><pre>${escapeHtml(record.response)}</pre></details>`
-        : "";
-      const attempts = (record.attempts || [])
-        .map(a => `${escapeHtml(a.model)} ${a.http_status || ""} ${a.status}`)
-        .join(" | ");
-      return `<div class="request">
-        <div class="request-head">
-          <div>${escapeHtml(record.id)} · ${escapeHtml(record.api_format)} · ${record.stream ? "串流" : "非串流"}</div>
-          <div>${fmtTime(record.started_at)}</div>
-        </div>
-        <div class="models"><strong>${escapeHtml(record.original_model)}</strong> → <strong>${escapeHtml(record.active_model)}</strong></div>
-        <div class="muted">${escapeHtml(record.routing_reason || "")}</div>
-        <div class="muted">${escapeHtml(attempts)}</div>
-        ${record.error ? `<div class="error">${escapeHtml(record.error)}</div>` : ""}
-        ${payloads}${chunks}${response}
-      </div>`;
-    }
-
-    function renderAccount(account) {
-      const isCurrent = account.is_current ? "current" : "";
-      const statusClass = account.failures > 0 ? "error" : "success";
-      
-      return `
-        <div class="account-card ${isCurrent}">
-          <h4>
-            <span>${escapeHtml(account.display_id)}</span>
-            <span class="tag">${account.is_current ? "使用中" : "備用"}</span>
-          </h4>
-          <div class="account-stats">
-            <div class="stat-item"><span class="muted">總次數</span><span class="stat-val">${account.stats.total_requests}</span></div>
-            <div class="stat-item"><span class="success">成功</span><span class="stat-val">${account.stats.successful_requests}</span></div>
-            <div class="stat-item"><span class="error">失敗</span><span class="stat-val">${account.stats.failed_requests}</span></div>
-          </div>
-          <div class="account-status">
-            <span class="${statusClass}">${account.failures > 0 ? account.failures + ' 次失敗' : '運作正常'}</span>
-            <span class="muted">${fmtTime(account.models_cached_at)} 更新</span>
-          </div>
-        </div>
-      `;
-    }
-
-    function escapeHtml(value) {
-      return String(value ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    async function refresh(force = false) {
-      try {
-        const state = await api("/dashboard/api/state");
-        if (!state.authenticated) {
-          authPaused = true;
-          setStatus("API Key 尚未驗證，已停止自動輪詢");
-          renderUnauthenticated();
-          return;
-        }
-        writeRoutingForm(state.routing);
-
-        // Render Accounts
-        const accountsEl = document.querySelector("#accounts");
-        if (state.accounts && state.accounts.length) {
-          accountsEl.innerHTML = state.accounts.map(renderAccount).join("");
-          document.querySelector("#accountCount").textContent = `${state.accounts.length} 帳號`;
-        } else {
-          accountsEl.innerHTML = "<p class='muted'>沒有帳號資訊。</p>";
-        }
-
-        document.querySelector("#active").innerHTML =
-          state.active_requests.length ? state.active_requests.map(renderRecord).join("") : "<p class='muted'>目前沒有進行中的請求。</p>";
-        document.querySelector("#completed").innerHTML =
-          state.completed_requests.length ? state.completed_requests.map(renderRecord).join("") : "<p class='muted'>目前沒有完成紀錄。</p>";
-        setStatus(`${state.active_requests.length} 進行中 · ${state.completed_requests.length} 已完成`);
-      } catch (err) {
-        authPaused = true;
-        setStatus(err.message);
-      }
-    }
-
-    renderUnauthenticated();
-    if (hasApiKey()) {
-      refresh(true);
-    }
-    setInterval(() => {
-      if (hasApiKey() && !authPaused) {
-        refresh(false);
-      }
-    }, 1200);
-  </script>
-</body>
-</html>"""
+// -------- models panel --------
+async function loadModels(){
+  $("#modelsStatus").textContent="載入中…";
+  try{
+    const d=await api("/dashboard/api/models");
+    if(d.error){$("#modelsStatus").textContent="錯誤: "+d.error;return;}
+    const models=d.models||[];
+    $("#modelsStatus").textContent=`${models.length} 個模型 · ${new Date().toLocaleTimeString()}`;
+    if(!models.length){$("#modelsWrap").innerHTML=`<p style="color:var(--muted)">遠端未回傳任何模型。</p>`;return;}
+    let html=`<table class="reqs"><thead><tr><th>#</th><th>模型 ID</th><th>顯示名稱</th><th>最大輸入</th><th>最大輸出</th></tr></thead><tbody>`;
+    models.forEach((m,i)=>{
+      const limits=m.tokenLimits||{};
+      const maxIn=limits.maxInputTokens!=null?Number(limits.maxInputTokens).toLocaleString():"—";
+      const maxOut=limits.maxOutputTokens!=null?Number(limits.maxOutputTokens).toLocaleString():"—";
+      html+=`<tr><td>${i+1}</td><td>${esc(m.modelId||"?")}</td><td>${esc(m.displayName||m.modelName||"?")}</td><td style="text-align:right">${maxIn}</td><td style="text-align:right">${maxOut}</td></tr>`;
+    });
+    html+=`</tbody></table>`;
+    $("#modelsWrap").innerHTML=html;
+  }catch(e){$("#modelsStatus").textContent="錯誤: "+e.message;}
+}
+</script>
+</body></html>
+"""

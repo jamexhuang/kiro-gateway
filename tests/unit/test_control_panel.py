@@ -209,9 +209,8 @@ class TestDashboardRoutes:
 
         print(f"Status: {response.status_code}")
         assert response.status_code == 200
-        assert "模型路由控制台" in response.text
-        assert "變更測試" in response.text
-        assert "不要把 Opus 自動降到 Sonnet" in response.text
+        assert "Kiro Gateway 控制台" in response.text
+        assert "panel-routing" in response.text
 
     def test_state_api_without_authentication_returns_sanitized_state(self):
         """
