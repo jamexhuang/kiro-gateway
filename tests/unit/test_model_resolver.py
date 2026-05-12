@@ -1738,3 +1738,75 @@ class TestAliasSystemSecurity:
         print(f"Received suggestions: {suggestions}")
         # This is expected behavior - alias name doesn't contain family
         assert len(suggestions) > 0
+
+
+# =============================================================================
+# TestFamilyRedirection - Tests for family-based redirection (NEW!)
+# =============================================================================
+
+class TestFamilyRedirection:
+    """
+    Tests for model family redirection (e.g., Haiku → Sonnet).
+    """
+    
+    def test_redirects_haiku_to_sonnet(self, mock_model_cache):
+        """
+        What it does: Redirects claude-haiku-4.5 → claude-sonnet-4.5.
+        Goal: Verify global family redirection rule.
+        """
+        family_aliases = {"haiku": "sonnet"}
+        resolver = ModelResolver(cache=mock_model_cache, family_aliases=family_aliases)
+        
+        print("Action: Resolving 'claude-haiku-4.5'...")
+        result = resolver.resolve("claude-haiku-4.5")
+        
+        print(f"Result: {result.internal_id}, Source: {result.source}")
+        assert result.internal_id == "claude-sonnet-4.5"
+        assert result.source == "cache"  # sonnet-4.5 is in mock_model_cache
+    
+    def test_handles_dash_format_redirection(self, mock_model_cache):
+        """
+        What it does: Redirects claude-haiku-4-5 → claude-sonnet-4.5.
+        Goal: Ensure redirection works after normalization.
+        """
+        family_aliases = {"haiku": "sonnet"}
+        resolver = ModelResolver(cache=mock_model_cache, family_aliases=family_aliases)
+        
+        print("Action: Resolving 'claude-haiku-4-5'...")
+        result = resolver.resolve("claude-haiku-4-5")
+        
+        print(f"Result: {result.internal_id}, Source: {result.source}")
+        assert result.internal_id == "claude-sonnet-4.5"
+        assert result.source == "cache"
+    
+    def test_passthrough_if_redirected_model_missing(self, empty_model_cache):
+        """
+        What it does: Redirects to sonnet, but passes through if sonnet doesn't exist.
+        Goal: Ensure redirection doesn't break passthrough logic.
+        """
+        family_aliases = {"haiku": "sonnet"}
+        resolver = ModelResolver(cache=empty_model_cache, family_aliases=family_aliases)
+        
+        print("Action: Resolving 'claude-haiku-9.9' (non-existent)...")
+        result = resolver.resolve("claude-haiku-9.9")
+        
+        print(f"Result: {result.internal_id}, Source: {result.source}")
+        assert result.internal_id == "claude-sonnet-9.9"
+        assert result.source == "passthrough"
+    
+    def test_standalone_helper_supports_family_redirection(self):
+        """
+        What it does: get_model_id_for_kiro() also supports redirection.
+        """
+        family_aliases = {"haiku": "sonnet"}
+        hidden = {"claude-sonnet-3.7": "INTERNAL_ID"}
+        
+        print("Action: Calling get_model_id_for_kiro with haiku-3-7...")
+        result = get_model_id_for_kiro(
+            "claude-haiku-3-7", 
+            hidden_models=hidden, 
+            family_aliases=family_aliases
+        )
+        
+        print(f"Result: {result}")
+        assert result == "INTERNAL_ID"

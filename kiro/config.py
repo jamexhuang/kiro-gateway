@@ -251,7 +251,26 @@ HIDDEN_MODELS: Dict[str, str] = {
 #
 # Default: {"auto-kiro": "auto"} to avoid Cursor IDE conflict
 MODEL_ALIASES: Dict[str, str] = {
-    "auto-kiro": "auto",  # Default alias to avoid Cursor's "auto" model conflict
+    "auto-kiro": "claude-opus-4.6",
+    "automatic": "claude-opus-4.6",
+    "自動": "claude-opus-4.6",
+    "claude-opus-4.7": "claude-opus-4.6",
+}
+
+# Model family aliases - redirect entire families of models (e.g., Haiku → Sonnet).
+# This is useful when a family is unavailable or performs poorly.
+#
+# Format: {"source_family": "target_family"}
+# Example: {"haiku": "sonnet"} will redirect all claude-haiku-* to claude-sonnet-*
+#
+# Default: {}
+MODEL_FAMILY_ALIASES: Dict[str, str] = {
+    "haiku": "sonnet",
+}
+
+# Dynamic Fallbacks: If the primary model fails, try these alternatives.
+MODEL_FALLBACKS: Dict[str, List[str]] = {
+    "claude-opus-4.7": ["claude-opus-4.6"],
 }
 
 # Models to hide from /v1/models endpoint.

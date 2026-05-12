@@ -362,6 +362,24 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                     stream=True
                 )
                 
+                # Dynamic Fallback Logic (4.7 -> 4.6)
+                if response.status_code in (404, 403):
+                    fallbacks = MODEL_FALLBACKS.get(request_data.model, [])
+                    if fallbacks:
+                        logger.warning(f"Model {request_data.model} unavailable (HTTP {response.status_code}). Trying fallback: {fallbacks[0]}")
+                        fallback_name = fallbacks[0]
+                        
+                        # Update request and payload
+                        request_data.model = fallback_name
+                        kiro_payload = build_kiro_payload(request_data, conversation_id, profile_arn_for_payload)
+                        
+                        # Retry
+                        await response.aclose()
+                        response = await http_client.request_with_retry("POST", url, kiro_payload, stream=True)
+                        
+                        if response.status_code == 200:
+                            logger.success(f"Dynamic fallback to {fallback_name} SUCCESSFUL")
+                
                 if response.status_code == 200:
                     # SUCCESS - report and return
                     await account_manager.report_success(account.id, request_data.model)

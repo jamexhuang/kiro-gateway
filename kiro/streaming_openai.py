@@ -413,6 +413,14 @@ async def stream_kiro_to_openai_internal(
             f"total_tokens={total_tokens} ({total_source})"
         )
         
+        # Log Performance Metrics
+        if _first_token_time:
+            ttft = _first_token_time - _start_time
+            total_dur = time.time() - _start_time
+            gen_time = time.time() - _first_token_time
+            tps = completion_tokens / gen_time if gen_time > 0 else 0
+            logger.info(f"[{model}] Stream finished: TTFT={ttft:.2f}s, TPS={tps:.1f} tok/s, Total={total_dur:.2f}s, Tokens={completion_tokens}")
+
         yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
         

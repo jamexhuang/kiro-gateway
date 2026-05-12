@@ -162,12 +162,18 @@ def normalize_model_name(name: str) -> str:
     return name
 
 
-def get_model_id_for_kiro(model_name: str, hidden_models: Dict[str, str]) -> str:
+def get_model_id_for_kiro(
+    model_name: str, 
+    hidden_models: Dict[str, str],
+    aliases: Optional[Dict[str, str]] = None,
+    family_aliases: Optional[Dict[str, str]] = None
+) -> str:
     """
     Get the model ID to send to Kiro API.
     
     This is a simple helper for converters that don't have access to the full
-    ModelResolver. It normalizes the name and checks hidden models.
+    ModelResolver. It resolves aliases, normalizes the name, handles family 
+    redirection and checks hidden models.
     
     For hidden models (like claude-3.7-sonnet), returns the internal Kiro ID.
     For regular models, returns the normalized name.
@@ -175,19 +181,25 @@ def get_model_id_for_kiro(model_name: str, hidden_models: Dict[str, str]) -> str
     Args:
         model_name: External model name from client
         hidden_models: Dict mapping display names to internal Kiro IDs
+        aliases: Optional dict mapping alias names to real model IDs
+        family_aliases: Optional dict mapping family names to target families
     
     Returns:
         Model ID to send to Kiro API
-    
-    Examples:
-        >>> get_model_id_for_kiro("claude-haiku-4-5-20251001", {})
-        'claude-haiku-4.5'
-        >>> get_model_id_for_kiro("claude-3.7-sonnet", {"claude-3.7-sonnet": "CLAUDE_3_7_SONNET_20250219_V1_0"})
-        'CLAUDE_3_7_SONNET_20250219_V1_0'
-        >>> get_model_id_for_kiro("claude-3-7-sonnet", {"claude-3.7-sonnet": "CLAUDE_3_7_SONNET_20250219_V1_0"})
-        'CLAUDE_3_7_SONNET_20250219_V1_0'
     """
+    # Layer 0: Resolve alias (if exists)
+    if aliases:
+        model_name = aliases.get(model_name, model_name)
+        
     normalized = normalize_model_name(model_name)
+    
+    # Layer 1.5: Family redirection
+    if family_aliases:
+        family = extract_model_family(normalized)
+        if family and family in family_aliases:
+            new_family = family_aliases[family]
+            normalized = normalized.replace(family, new_family)
+            
     return hidden_models.get(normalized, normalized)
 
 
@@ -227,6 +239,7 @@ class ModelResolver:
     Resolution layers:
     0. Resolve aliases (custom name mappings)
     1. Normalize name (dashes→dots, strip dates)
+    1.5 Redirect families (e.g., haiku → sonnet)
     2. Check dynamic cache (from /ListAvailableModels)
     3. Check hidden models (manual config)
     4. Pass-through (let Kiro decide)
@@ -235,6 +248,7 @@ class ModelResolver:
         cache: ModelInfoCache instance for dynamic model lookup
         hidden_models: Dict mapping display names to internal Kiro IDs
         aliases: Dict mapping alias names to real model IDs
+        family_aliases: Dict mapping family names to target families
         hidden_from_list: Set of model IDs to hide from /v1/models endpoint
     
     Example:
@@ -251,7 +265,8 @@ class ModelResolver:
         cache: ModelInfoCache,
         hidden_models: Optional[Dict[str, str]] = None,
         aliases: Optional[Dict[str, str]] = None,
-        hidden_from_list: Optional[List[str]] = None
+        hidden_from_list: Optional[List[str]] = None,
+        family_aliases: Optional[Dict[str, str]] = None
     ):
         """
         Initialize the model resolver.
@@ -264,10 +279,13 @@ class ModelResolver:
                     Example: {"auto-kiro": "auto", "my-opus": "claude-opus-4.5"}
             hidden_from_list: List of model IDs to hide from /v1/models endpoint.
                              These models still work but are not shown in the list.
+            family_aliases: Dict mapping family names to target families.
+                           Example: {"haiku": "sonnet"}
         """
         self.cache = cache
         self.hidden_models = hidden_models or {}
         self.aliases = aliases or {}
+        self.family_aliases = family_aliases or {}
         self.hidden_from_list = set(hidden_from_list or [])
     
     def resolve(self, external_model: str) -> ModelResolution:
@@ -293,6 +311,16 @@ class ModelResolver:
         
         # Layer 1: Normalize name (dashes→dots, strip date)
         normalized = normalize_model_name(resolved_model)
+        
+        # Layer 1.5: Family redirection (e.g., haiku → sonnet)
+        family = extract_model_family(normalized)
+        if family and family in self.family_aliases:
+            new_family = self.family_aliases[family]
+            redirected = normalized.replace(family, new_family)
+            logger.info(
+                f"Family redirection: '{normalized}' → '{redirected}' (triggered by family rule: {family}→{new_family})"
+            )
+            normalized = redirected
         
         logger.debug(
             f"Model resolution: '{external_model}' → normalized: '{normalized}'"

@@ -166,6 +166,10 @@ async def stream_kiro_to_anthropic(
     full_content = ""
     full_thinking_content = ""
     
+    # Speed monitoring
+    _start_time = time.time()
+    _first_token_time = None
+    
     # NOTE: Anthropic streaming spec requires input_tokens in message_start (beginning),
     # but Kiro API provides accurate context_usage at the end of stream.
     # This creates a fundamental limitation: we must use fallback estimation in message_start.
@@ -201,6 +205,10 @@ async def stream_kiro_to_anthropic(
     # Track truncated tool calls for recovery
     truncated_tools: List[Dict[str, Any]] = []
     
+    # Speed monitoring
+    _start_time = time.time()
+    _first_token_time = None
+    
     try:
         # Send message_start event
         yield format_sse_event("message_start", {
@@ -222,6 +230,10 @@ async def stream_kiro_to_anthropic(
         
         async for event in parse_kiro_stream(response, first_token_timeout):
             if event.type == "content":
+                # Capture first token time
+                if _first_token_time is None:
+                    _first_token_time = time.time()
+
                 content = event.content or ""
                 full_content += content
                 
@@ -259,6 +271,10 @@ async def stream_kiro_to_anthropic(
                     })
             
             elif event.type == "thinking":
+                # Capture first token time
+                if _first_token_time is None:
+                    _first_token_time = time.time()
+
                 thinking_content = event.thinking_content or ""
                 full_thinking_content += thinking_content
                 
@@ -691,6 +707,14 @@ async def stream_kiro_to_anthropic(
             f"input_tokens={input_tokens}, output_tokens={output_tokens}, "
             f"tool_blocks={len(tool_blocks)}, stop_reason={stop_reason}"
         )
+        
+        # Log Performance Metrics
+        if _first_token_time:
+            ttft = _first_token_time - _start_time
+            total_dur = time.time() - _start_time
+            gen_time = time.time() - _first_token_time
+            tps = output_tokens / gen_time if gen_time > 0 else 0
+            logger.info(f"[{model}] Stream finished (Anthropic): TTFT={ttft:.2f}s, TPS={tps:.1f} tok/s, Total={total_dur:.2f}s, Tokens={output_tokens}")
         
     except FirstTokenTimeoutError:
         raise

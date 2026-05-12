@@ -51,6 +51,7 @@ from kiro.model_resolver import ModelResolver, normalize_model_name
 from kiro.config import (
     HIDDEN_MODELS,
     MODEL_ALIASES,
+    MODEL_FAMILY_ALIASES,
     HIDDEN_FROM_LIST,
     ACCOUNT_RECOVERY_TIMEOUT,
     ACCOUNT_MAX_BACKOFF_MULTIPLIER,
@@ -516,6 +517,7 @@ class AccountManager:
                 cache=model_cache,
                 hidden_models=HIDDEN_MODELS,
                 aliases=MODEL_ALIASES,
+                family_aliases=MODEL_FAMILY_ALIASES,
                 hidden_from_list=HIDDEN_FROM_LIST
             )
             

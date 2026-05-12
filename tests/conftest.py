@@ -1661,6 +1661,7 @@ def mock_account():
         cache=model_cache,
         hidden_models={},
         aliases={},
+        family_aliases={},
         hidden_from_list=set()
     )
     

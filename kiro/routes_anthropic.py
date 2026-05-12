@@ -743,15 +743,38 @@ async def messages(
         system_for_tokenizer = request_data.system
     
     try:
-        # Make request to Kiro API (for both streaming and non-streaming modes)
-        # Important: we wait for Kiro response BEFORE returning StreamingResponse,
-        # so that we can return proper HTTP error codes if Kiro fails
+        # Make request to Kiro API
         response = await http_client.request_with_retry(
             "POST",
             url,
             kiro_payload,
             stream=True
         )
+        
+        # Determine actual model ID for logging (before potential fallback)
+        from kiro.config import HIDDEN_MODELS, MODEL_ALIASES, MODEL_FAMILY_ALIASES
+        from kiro.model_resolver import get_model_id_for_kiro
+        model_id_used = get_model_id_for_kiro(request_data.model, HIDDEN_MODELS, MODEL_ALIASES, MODEL_FAMILY_ALIASES)
+
+        
+        # Dynamic Fallback Logic (4.7 -> 4.6)
+        if response.status_code in (404, 403):
+            fallbacks = MODEL_FALLBACKS.get(request_data.model, [])
+            if fallbacks:
+                logger.warning(f"Model {request_data.model} unavailable (HTTP {response.status_code}). Trying fallback: {fallbacks[0]}")
+                fallback_name = fallbacks[0]
+                
+                # Update request and payload
+                request_data.model = fallback_name
+                kiro_payload = anthropic_to_kiro(request_data, conversation_id, profile_arn_for_payload)
+                model_id_used = get_model_id_for_kiro(fallback_name, HIDDEN_MODELS, MODEL_ALIASES, MODEL_FAMILY_ALIASES)
+                
+                # Retry
+                await response.aclose()
+                response = await http_client.request_with_retry("POST", url, kiro_payload, stream=True)
+                
+                if response.status_code == 200:
+                    logger.success(f"Dynamic fallback to {fallback_name} SUCCESSFUL")
         
         if response.status_code != 200:
             try:

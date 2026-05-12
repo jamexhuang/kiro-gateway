@@ -36,6 +36,21 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
+import hashlib
+TOOL_NAME_CACHE = {}
+
+def get_short_tool_name(long_name: str) -> str:
+    if len(long_name) <= 64:
+        return long_name
+    hash_suffix = hashlib.md5(long_name.encode()).hexdigest()[:10]
+    short_name = long_name[:53] + "_" + hash_suffix
+    TOOL_NAME_CACHE[short_name] = long_name
+    return short_name
+
+def restore_tool_name(short_name: str) -> str:
+    return TOOL_NAME_CACHE.get(short_name, short_name)
+
+
 from kiro.config import (
     TOOL_DESCRIPTION_MAX_LENGTH,
     FAKE_REASONING_ENABLED,
@@ -591,12 +606,7 @@ def validate_tool_names(tools: Optional[List[UnifiedTool]]) -> None:
             for name, length in problematic_tools
         ])
         
-        raise ValueError(
-            f"Tool name(s) exceed Kiro API limit of 64 characters:\n"
-            f"{tool_list}\n\n"
-            f"Solution: Use shorter tool names (max 64 characters).\n"
-            f"Example: 'get_user_data' instead of 'get_authenticated_user_profile_data_with_extended_information_about_it'"
-        )
+        logger.warning(f"Auto-shortening tool names exceeding 64 characters limit")
 
 
 def convert_tools_to_kiro_format(tools: Optional[List[UnifiedTool]]) -> List[Dict[str, Any]]:
@@ -625,7 +635,7 @@ def convert_tools_to_kiro_format(tools: Optional[List[UnifiedTool]]) -> List[Dic
         
         kiro_tools.append({
             "toolSpecification": {
-                "name": tool.name,
+                "name": get_short_tool_name(tool.name),
                 "description": description,
                 "inputSchema": {"json": sanitized_params}
             }
