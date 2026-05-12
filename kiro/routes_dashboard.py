@@ -298,19 +298,75 @@ async def get_dashboard_logs(since: int = -1, limit: int = 500) -> Dict[str, Any
 
 
 @router.get("/dashboard/api/models", dependencies=[Security(verify_dashboard_api_key)])
-async def get_remote_models() -> Dict[str, Any]:
+async def get_remote_models(request: Request, account_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    Fetch available models from Kiro remote API (ListAvailableModels).
+    Fetch available models from Kiro remote API via an initialized account.
+
+    Uses the gateway's own account_manager so credentials are handled per-account
+    instead of relying on a single REFRESH_TOKEN env var.
+
+    Args:
+        account_id: Optional account ID. Falls back to the first initialized account.
 
     Returns:
-        List of models with token limits.
+        List of models with token limits, plus which account was used.
     """
+    import httpx
+    from kiro.auth import AuthType
+
+    account_manager = getattr(request.app.state, "account_manager", None)
+    if account_manager is None:
+        return {"models": [], "error": "account_manager unavailable", "account_id": None}
+
+    account = None
+    if account_id:
+        account = account_manager._accounts.get(account_id)
+        if account is None:
+            return {"models": [], "error": f"account not found: {account_id}", "account_id": None}
+    else:
+        for acct in account_manager._accounts.values():
+            if acct.auth_manager is not None:
+                account = acct
+                break
+
+    if account is None or account.auth_manager is None:
+        return {"models": [], "error": "no initialized account available", "account_id": None}
+
     try:
-        from list_remote_models import fetch_remote_models
-        data = await fetch_remote_models()
-        return {"models": data.get("models", []), "error": None}
+        token = await account.auth_manager.get_access_token()
+        url = f"{account.auth_manager.q_host}/ListAvailableModels"
+        params: Dict[str, str] = {"origin": "AI_EDITOR"}
+        if (
+            account.auth_manager.auth_type == AuthType.KIRO_DESKTOP
+            and account.auth_manager.profile_arn
+        ):
+            params["profileArn"] = account.auth_manager.profile_arn
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        return {
+            "models": data.get("models", []),
+            "error": None,
+            "account_id": account.id,
+        }
+    except httpx.HTTPStatusError as exc:
+        return {
+            "models": [],
+            "error": f"HTTP {exc.response.status_code}: {exc.response.text[:200]}",
+            "account_id": account.id,
+        }
     except Exception as exc:
-        return {"models": [], "error": str(exc)}
+        return {"models": [], "error": str(exc), "account_id": account.id}
 
 
 @router.get("/dashboard/api/events")
@@ -830,9 +886,10 @@ async function loadModels(){
   $("#modelsStatus").textContent="載入中…";
   try{
     const d=await api("/dashboard/api/models");
-    if(d.error){$("#modelsStatus").textContent="錯誤: "+d.error;return;}
+    if(d.error){$("#modelsStatus").textContent="錯誤: "+d.error;$("#modelsWrap").innerHTML=`<p style="color:var(--danger)">${esc(d.error)}</p>`;return;}
     const models=d.models||[];
-    $("#modelsStatus").textContent=`${models.length} 個模型 · ${new Date().toLocaleTimeString()}`;
+    const acct=d.account_id?` · 帳號 ${esc(d.account_id)}`:"";
+    $("#modelsStatus").textContent=`${models.length} 個模型${acct} · ${new Date().toLocaleTimeString()}`;
     if(!models.length){$("#modelsWrap").innerHTML=`<p style="color:var(--muted)">遠端未回傳任何模型。</p>`;return;}
     let html=`<table class="reqs"><thead><tr><th>#</th><th>模型 ID</th><th>顯示名稱</th><th>最大輸入</th><th>最大輸出</th></tr></thead><tbody>`;
     models.forEach((m,i)=>{
