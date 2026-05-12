@@ -407,3 +407,53 @@ class TestCliVersion:
         print(f"APP_VERSION: {APP_VERSION}")
         
         assert APP_VERSION in captured.out
+
+
+class TestInterceptHandlerDashboardFilter:
+    """Tests for InterceptHandler filtering of dashboard access logs."""
+
+    def test_intercept_handler_drops_dashboard_access_logs(self):
+        import logging
+        from main import InterceptHandler
+
+        handler = InterceptHandler()
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='127.0.0.1:51901 - "GET /dashboard/api/state HTTP/1.1" 200',
+            args=(),
+            exc_info=None,
+        )
+        captured = []
+        from loguru import logger as loguru_logger
+        sink_id = loguru_logger.add(lambda msg: captured.append(msg), level="INFO")
+        try:
+            handler.emit(record)
+        finally:
+            loguru_logger.remove(sink_id)
+        assert captured == [], "dashboard access logs must be dropped"
+
+    def test_intercept_handler_keeps_v1_messages_access_logs(self):
+        import logging
+        from main import InterceptHandler
+
+        handler = InterceptHandler()
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='127.0.0.1:51901 - "POST /v1/messages HTTP/1.1" 200',
+            args=(),
+            exc_info=None,
+        )
+        captured = []
+        from loguru import logger as loguru_logger
+        sink_id = loguru_logger.add(lambda msg: captured.append(msg), level="INFO")
+        try:
+            handler.emit(record)
+        finally:
+            loguru_logger.remove(sink_id)
+        assert len(captured) == 1

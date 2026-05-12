@@ -86,6 +86,7 @@ from kiro.model_resolver import ModelResolver
 from kiro.account_manager import AccountManager
 from kiro.routes_openai import router as openai_router
 from kiro.routes_anthropic import router as anthropic_router
+from kiro.routes_dashboard import router as dashboard_router
 from kiro.exceptions import validation_exception_handler
 from kiro.debug_middleware import DebugLoggerMiddleware
 
@@ -117,8 +118,22 @@ class InterceptHandler(logging.Handler):
         "KeyboardInterrupt",
         "asyncio.exceptions.CancelledError",
     )
-    
+
+    # Dashboard API paths polled frequently; suppress their access logs to reduce noise
+    ACCESS_LOG_DROP_PATTERNS = (
+        "/dashboard/api/state",
+        "/dashboard/api/events",
+        "/dashboard/api/logs",
+        "/dashboard/api/metrics",
+    )
+
     def emit(self, record: logging.LogRecord) -> None:
+        # Drop noisy dashboard polling access logs
+        if record.name == "uvicorn.access":
+            msg = record.getMessage()
+            if any(pat in msg for pat in self.ACCESS_LOG_DROP_PATTERNS):
+                return
+
         # Filter out shutdown-related exceptions that uvicorn logs as ERROR
         # These are normal during Ctrl+C and don't need to spam the console
         if record.exc_info:
@@ -570,6 +585,9 @@ app.include_router(openai_router)
 
 # Anthropic-compatible API: /v1/messages
 app.include_router(anthropic_router)
+
+# Runtime dashboard: /dashboard and /dashboard/api/*
+app.include_router(dashboard_router)
 
 
 # --- Uvicorn log config ---
