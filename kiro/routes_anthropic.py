@@ -55,6 +55,7 @@ from kiro.utils import generate_conversation_id
 from kiro.tokenizer import estimate_request_tokens
 from kiro.config import WEB_SEARCH_ENABLED
 from kiro.mcp_tools import handle_native_web_search
+from kiro.control_panel import control_panel
 
 # Import debug_logger
 try:
@@ -310,6 +311,34 @@ async def messages(
                 return await handle_native_web_search(request, request_data, auth_manager, api_format="anthropic")
     
     # ==============================================================================
+    # Runtime Dashboard: Model Routing + Monitoring
+    # ==============================================================================
+    
+    routing_decision = control_panel.route_model(request_data.model)
+    if routing_decision.routed_model != request_data.model:
+        logger.info(
+            f"Runtime routing: {routing_decision.original_model} -> "
+            f"{routing_decision.routed_model} ({routing_decision.reason})"
+        )
+        request_data.model = routing_decision.routed_model
+    
+    monitor_request_id = control_panel.start_request(
+        api_format="anthropic",
+        path="/v1/messages",
+        stream=request_data.stream,
+        decision=routing_decision,
+    )
+    control_panel.record_payload(
+        monitor_request_id,
+        "client_request",
+        {
+            "original_model": routing_decision.original_model,
+            "effective_model": request_data.model,
+            "request": request_data.model_dump(),
+        },
+    )
+    
+    # ==============================================================================
     # Account System: Account System Failover or Legacy Mode
     # ==============================================================================
     
@@ -338,6 +367,11 @@ async def messages(
                 # All accounts unavailable
                 if len(all_accounts) == 1:
                     # Single account - return original error with original status code
+                    control_panel.finish_request(
+                        monitor_request_id,
+                        status="error",
+                        error=last_error_message or "Account unavailable",
+                    )
                     return JSONResponse(
                         status_code=last_error_status or 503,
                         content={
@@ -353,6 +387,11 @@ async def messages(
                     detail = "No available accounts for this model."
                     if last_error_message:
                         detail += f" Last error: {last_error_message}"
+                    control_panel.finish_request(
+                        monitor_request_id,
+                        status="error",
+                        error=detail,
+                    )
                     return JSONResponse(
                         status_code=503,
                         content={
@@ -384,10 +423,16 @@ async def messages(
                 kiro_payload = anthropic_to_kiro(
                     request_data,
                     conversation_id,
-                    profile_arn_for_payload
+                    profile_arn_for_payload,
+                    monitor_request_id=monitor_request_id,
                 )
             except ValueError as e:
                 logger.error(f"Conversion error: {e}")
+                control_panel.finish_request(
+                    monitor_request_id,
+                    status="error",
+                    error=str(e),
+                )
                 return JSONResponse(
                     status_code=400,
                     content={
@@ -404,6 +449,11 @@ async def messages(
                 kiro_request_body = json.dumps(kiro_payload, ensure_ascii=False, indent=2).encode('utf-8')
                 if debug_logger:
                     debug_logger.log_kiro_request_body(kiro_request_body)
+                control_panel.record_payload(
+                    monitor_request_id,
+                    f"kiro_payload:{request_data.model}",
+                    kiro_payload,
+                )
             except Exception as e:
                 logger.warning(f"Failed to log Kiro request: {e}")
             
@@ -427,12 +477,69 @@ async def messages(
             
             try:
                 # Make request to Kiro API
+                fallback_candidates = [
+                    model for model in routing_decision.fallback_models
+                    if model != request_data.model
+                ]
+                control_panel.start_attempt(monitor_request_id, request_data.model, account.id)
                 response = await http_client.request_with_retry(
                     "POST",
                     url,
                     kiro_payload,
                     stream=True
                 )
+                control_panel.finish_attempt(monitor_request_id, response.status_code)
+                
+                while control_panel.should_retry_failure(response.status_code, fallback_candidates):
+                    fallback_name = fallback_candidates.pop(0)
+                    logger.warning(
+                        f"Model {request_data.model} unavailable (HTTP {response.status_code}). "
+                        f"Trying fallback: {fallback_name}"
+                    )
+                    await response.aclose()
+                    request_data.model = fallback_name
+                    try:
+                        kiro_payload = anthropic_to_kiro(
+                            request_data,
+                            conversation_id,
+                            profile_arn_for_payload,
+                            monitor_request_id=monitor_request_id,
+                        )
+                    except ValueError as e:
+                        logger.error(f"Conversion error: {e}")
+                        await http_client.close()
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="error",
+                            error=str(e),
+                        )
+                        return JSONResponse(
+                            status_code=400,
+                            content={
+                                "type": "error",
+                                "error": {
+                                    "type": "invalid_request_error",
+                                    "message": str(e)
+                                }
+                            }
+                        )
+                    
+                    control_panel.record_payload(
+                        monitor_request_id,
+                        f"kiro_payload:{request_data.model}",
+                        kiro_payload,
+                    )
+                    control_panel.start_attempt(monitor_request_id, request_data.model, account.id)
+                    response = await http_client.request_with_retry(
+                        "POST",
+                        url,
+                        kiro_payload,
+                        stream=True
+                    )
+                    control_panel.finish_attempt(monitor_request_id, response.status_code)
+                    
+                    if response.status_code == 200:
+                        logger.success(f"Runtime fallback to {fallback_name} successful")
                 
                 if response.status_code == 200:
                     # SUCCESS - report and return
@@ -458,7 +565,9 @@ async def messages(
                                     request_messages=messages_for_tokenizer,
                                     request_tools=tools_for_tokenizer,
                                     request_system=system_for_tokenizer,
+                                    monitor_request_id=monitor_request_id,
                                 ):
+                                    control_panel.record_chunk(monitor_request_id, chunk)
                                     yield chunk
                             except GeneratorExit:
                                 client_disconnected = True
@@ -486,6 +595,23 @@ async def messages(
                                         debug_logger.flush_on_error(500, str(streaming_error))
                                     else:
                                         debug_logger.discard_buffers()
+                                
+                                if streaming_error:
+                                    control_panel.finish_request(
+                                        monitor_request_id,
+                                        status="error",
+                                        error=str(streaming_error),
+                                    )
+                                elif client_disconnected:
+                                    control_panel.finish_request(
+                                        monitor_request_id,
+                                        status="client_disconnected",
+                                    )
+                                else:
+                                    control_panel.finish_request(
+                                        monitor_request_id,
+                                        status="completed",
+                                    )
                         
                         return StreamingResponse(
                             stream_wrapper(),
@@ -513,6 +639,12 @@ async def messages(
                         
                         if debug_logger:
                             debug_logger.discard_buffers()
+                        
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="completed",
+                            response=anthropic_response,
+                        )
                         
                         return JSONResponse(content=anthropic_response)
                 
@@ -555,6 +687,12 @@ async def messages(
                         if debug_logger:
                             debug_logger.flush_on_error(response.status_code, last_error_message)
                         
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="error",
+                            error=last_error_message,
+                        )
+                        
                         return JSONResponse(
                             status_code=response.status_code,
                             content={
@@ -586,6 +724,7 @@ async def messages(
                 # These are thrown ONLY for network-level issues (timeouts, connection errors)
                 # NOT for HTTP-level errors (which are returned as response objects)
                 if e.status_code in (502, 504):
+                    control_panel.finish_attempt(monitor_request_id, e.status_code, str(e.detail))
                     # Network error → try next account
                     await account_manager.report_failure(
                         account.id, request_data.model, ErrorType.RECOVERABLE,
@@ -607,6 +746,11 @@ async def messages(
                 logger.error(f"HTTP {e.status_code} - POST /v1/messages - {e.detail}")
                 if debug_logger:
                     debug_logger.flush_on_error(e.status_code, str(e.detail))
+                control_panel.finish_request(
+                    monitor_request_id,
+                    status="error",
+                    error=str(e.detail),
+                )
                 raise
             except Exception as e:
                 await http_client.close()
@@ -614,6 +758,12 @@ async def messages(
                 logger.error(f"HTTP 500 - POST /v1/messages - {str(e)[:100]}")
                 if debug_logger:
                     debug_logger.flush_on_error(500, str(e))
+                control_panel.finish_attempt(monitor_request_id, 500, str(e))
+                control_panel.finish_request(
+                    monitor_request_id,
+                    status="error",
+                    error=str(e),
+                )
                 
                 return JSONResponse(
                     status_code=500,
@@ -630,6 +780,11 @@ async def messages(
         if len(all_accounts) == 1:
             # Single account - return its original error
             # last_error_status and last_error_message are guaranteed to be set
+            control_panel.finish_request(
+                monitor_request_id,
+                status="error",
+                error=last_error_message,
+            )
             return JSONResponse(
                 status_code=last_error_status,
                 content={
@@ -645,6 +800,11 @@ async def messages(
             detail = "All accounts failed after full circle."
             if last_error_message:
                 detail += f" Last error: {last_error_message}"
+            control_panel.finish_request(
+                monitor_request_id,
+                status="error",
+                error=detail,
+            )
             return JSONResponse(
                 status_code=503,
                 content={
@@ -663,6 +823,11 @@ async def messages(
         account = request.app.state.account_manager.get_first_account()
         if not account.auth_manager:
             logger.error("No initialized accounts available (legacy mode)")
+            control_panel.finish_request(
+                monitor_request_id,
+                status="error",
+                error="No initialized accounts available",
+            )
             return JSONResponse(
                 status_code=503,
                 content={
@@ -694,10 +859,16 @@ async def messages(
         kiro_payload = anthropic_to_kiro(
             request_data,
             conversation_id,
-            profile_arn_for_payload
+            profile_arn_for_payload,
+            monitor_request_id=monitor_request_id,
         )
     except ValueError as e:
         logger.error(f"Conversion error: {e}")
+        control_panel.finish_request(
+            monitor_request_id,
+            status="error",
+            error=str(e),
+        )
         return JSONResponse(
             status_code=400,
             content={
@@ -714,6 +885,11 @@ async def messages(
         kiro_request_body = json.dumps(kiro_payload, ensure_ascii=False, indent=2).encode('utf-8')
         if debug_logger:
             debug_logger.log_kiro_request_body(kiro_request_body)
+        control_panel.record_payload(
+            monitor_request_id,
+            f"kiro_payload:{request_data.model}",
+            kiro_payload,
+        )
     except Exception as e:
         logger.warning(f"Failed to log Kiro request: {e}")
     
@@ -744,37 +920,69 @@ async def messages(
     
     try:
         # Make request to Kiro API
+        fallback_candidates = [
+            model for model in routing_decision.fallback_models
+            if model != request_data.model
+        ]
+        control_panel.start_attempt(monitor_request_id, request_data.model, account.id)
         response = await http_client.request_with_retry(
             "POST",
             url,
             kiro_payload,
             stream=True
         )
+        control_panel.finish_attempt(monitor_request_id, response.status_code)
         
-        # Determine actual model ID for logging (before potential fallback)
-        from kiro.config import HIDDEN_MODELS, MODEL_ALIASES, MODEL_FAMILY_ALIASES
-        from kiro.model_resolver import get_model_id_for_kiro
-        model_id_used = get_model_id_for_kiro(request_data.model, HIDDEN_MODELS, MODEL_ALIASES, MODEL_FAMILY_ALIASES)
-
-        
-        # Dynamic Fallback Logic (4.7 -> 4.6)
-        if response.status_code in (404, 403):
-            fallbacks = MODEL_FALLBACKS.get(request_data.model, [])
-            if fallbacks:
-                logger.warning(f"Model {request_data.model} unavailable (HTTP {response.status_code}). Trying fallback: {fallbacks[0]}")
-                fallback_name = fallbacks[0]
-                
-                # Update request and payload
-                request_data.model = fallback_name
-                kiro_payload = anthropic_to_kiro(request_data, conversation_id, profile_arn_for_payload)
-                model_id_used = get_model_id_for_kiro(fallback_name, HIDDEN_MODELS, MODEL_ALIASES, MODEL_FAMILY_ALIASES)
-                
-                # Retry
-                await response.aclose()
-                response = await http_client.request_with_retry("POST", url, kiro_payload, stream=True)
-                
-                if response.status_code == 200:
-                    logger.success(f"Dynamic fallback to {fallback_name} SUCCESSFUL")
+        while control_panel.should_retry_failure(response.status_code, fallback_candidates):
+            fallback_name = fallback_candidates.pop(0)
+            logger.warning(
+                f"Model {request_data.model} unavailable (HTTP {response.status_code}). "
+                f"Trying fallback: {fallback_name}"
+            )
+            await response.aclose()
+            request_data.model = fallback_name
+            try:
+                kiro_payload = anthropic_to_kiro(
+                    request_data,
+                    conversation_id,
+                    profile_arn_for_payload,
+                    monitor_request_id=monitor_request_id,
+                )
+            except ValueError as e:
+                logger.error(f"Conversion error: {e}")
+                await http_client.close()
+                control_panel.finish_request(
+                    monitor_request_id,
+                    status="error",
+                    error=str(e),
+                )
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "type": "error",
+                        "error": {
+                            "type": "invalid_request_error",
+                            "message": str(e)
+                        }
+                    }
+                )
+            
+            control_panel.record_payload(
+                monitor_request_id,
+                f"kiro_payload:{request_data.model}",
+                kiro_payload,
+            )
+            control_panel.start_attempt(monitor_request_id, request_data.model, account.id)
+            response = await http_client.request_with_retry(
+                "POST",
+                url,
+                kiro_payload,
+                stream=True
+            )
+            control_panel.finish_attempt(monitor_request_id, response.status_code)
+            
+            if response.status_code == 200:
+                logger.success(f"Runtime fallback to {fallback_name} successful")
         
         if response.status_code != 200:
             try:
@@ -806,6 +1014,12 @@ async def messages(
             # Flush debug logs on error
             if debug_logger:
                 debug_logger.flush_on_error(response.status_code, error_message)
+            
+            control_panel.finish_request(
+                monitor_request_id,
+                status="error",
+                error=error_message,
+            )
             
             # Return error in Anthropic format
             return JSONResponse(
@@ -841,7 +1055,9 @@ async def messages(
                         request_messages=messages_for_tokenizer,
                         request_tools=tools_for_tokenizer,
                         request_system=system_for_tokenizer,
+                        monitor_request_id=monitor_request_id,
                     ):
+                        control_panel.record_chunk(monitor_request_id, chunk)
                         yield chunk
                 except GeneratorExit:
                     client_disconnected = True
@@ -870,6 +1086,23 @@ async def messages(
                             debug_logger.flush_on_error(500, str(streaming_error))
                         else:
                             debug_logger.discard_buffers()
+                    
+                    if streaming_error:
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="error",
+                            error=str(streaming_error),
+                        )
+                    elif client_disconnected:
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="client_disconnected",
+                        )
+                    else:
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="completed",
+                        )
             
             return StreamingResponse(
                 stream_wrapper(),
@@ -899,6 +1132,12 @@ async def messages(
             if debug_logger:
                 debug_logger.discard_buffers()
             
+            control_panel.finish_request(
+                monitor_request_id,
+                status="completed",
+                response=anthropic_response,
+            )
+            
             return JSONResponse(content=anthropic_response)
     
     except HTTPException as e:
@@ -908,10 +1147,16 @@ async def messages(
         # In legacy mode, we still log them but re-raise (no failover available)
         if e.status_code in (502, 504):
             logger.warning(f"Network error (legacy mode, no failover available)")
+            control_panel.finish_attempt(monitor_request_id, e.status_code, str(e.detail))
         
         logger.error(f"HTTP {e.status_code} - POST /v1/messages - {e.detail}")
         if debug_logger:
             debug_logger.flush_on_error(e.status_code, str(e.detail))
+        control_panel.finish_request(
+            monitor_request_id,
+            status="error",
+            error=str(e.detail),
+        )
         raise
     except Exception as e:
         await http_client.close()
@@ -919,6 +1164,12 @@ async def messages(
         logger.error(f"HTTP 500 - POST /v1/messages - {str(e)[:100]}")
         if debug_logger:
             debug_logger.flush_on_error(500, str(e))
+        control_panel.finish_attempt(monitor_request_id, 500, str(e))
+        control_panel.finish_request(
+            monitor_request_id,
+            status="error",
+            error=str(e),
+        )
         
         return JSONResponse(
             status_code=500,

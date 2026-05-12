@@ -393,7 +393,9 @@ def extract_thinking_config_from_openai(request: ChatCompletionRequest) -> Think
 def build_kiro_payload(
     request_data: ChatCompletionRequest,
     conversation_id: str,
-    profile_arn: str
+    profile_arn: str,
+    *,
+    monitor_request_id: Optional[str] = None
 ) -> dict:
     """
     Builds complete payload for Kiro API from OpenAI request.
@@ -440,7 +442,8 @@ def build_kiro_payload(
         tools=unified_tools,
         conversation_id=conversation_id,
         profile_arn=profile_arn,
-        thinking_config=thinking_config
+        thinking_config=thinking_config,
+        monitor_request_id=monitor_request_id,
     )
     
     return result.payload

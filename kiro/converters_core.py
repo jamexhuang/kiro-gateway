@@ -1420,7 +1420,9 @@ def build_kiro_payload(
     tools: Optional[List[UnifiedTool]],
     conversation_id: str,
     profile_arn: str,
-    thinking_config: ThinkingConfig
+    thinking_config: ThinkingConfig,
+    *,
+    monitor_request_id: Optional[str] = None
 ) -> KiroPayloadResult:
     """
     Builds complete payload for Kiro API from unified data.
@@ -1604,5 +1606,17 @@ def build_kiro_payload(
                 f"Trimmed conversation history: {stats.original_entries} -> {stats.final_entries} messages "
                 f"({stats.original_bytes} -> {stats.final_bytes} bytes)"
             )
+            try:
+                from kiro.control_panel import control_panel as _cp
+                if monitor_request_id:
+                    _cp.record_trim(
+                        monitor_request_id,
+                        before=stats.original_entries,
+                        after=stats.final_entries,
+                        before_bytes=stats.original_bytes,
+                        after_bytes=stats.final_bytes,
+                    )
+            except Exception:
+                pass
 
     return KiroPayloadResult(payload=payload, tool_documentation=tool_documentation)

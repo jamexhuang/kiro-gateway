@@ -52,6 +52,7 @@ from kiro.http_client import KiroHttpClient
 from kiro.utils import generate_conversation_id
 from kiro.config import WEB_SEARCH_ENABLED
 from kiro.mcp_tools import handle_native_web_search
+from kiro.control_panel import control_panel
 
 # Import debug_logger
 try:
@@ -271,6 +272,34 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
             logger.debug("Auto-injected web_search tool for MCP emulation (Path B)")
     
     # ==============================================================================
+    # Runtime Dashboard: Model Routing + Monitoring
+    # ==============================================================================
+    
+    routing_decision = control_panel.route_model(request_data.model)
+    if routing_decision.routed_model != request_data.model:
+        logger.info(
+            f"Runtime routing: {routing_decision.original_model} -> "
+            f"{routing_decision.routed_model} ({routing_decision.reason})"
+        )
+        request_data.model = routing_decision.routed_model
+    
+    monitor_request_id = control_panel.start_request(
+        api_format="openai",
+        path="/v1/chat/completions",
+        stream=request_data.stream,
+        decision=routing_decision,
+    )
+    control_panel.record_payload(
+        monitor_request_id,
+        "client_request",
+        {
+            "original_model": routing_decision.original_model,
+            "effective_model": request_data.model,
+            "request": request_data.model_dump(),
+        },
+    )
+    
+    # ==============================================================================
     # Account System: Account System Failover or Legacy Mode
     # ==============================================================================
     
@@ -299,6 +328,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                 # All accounts unavailable
                 if len(all_accounts) == 1:
                     # Single account - return original error with original status code
+                    control_panel.finish_request(
+                        monitor_request_id,
+                        status="error",
+                        error=last_error_message or "Account unavailable",
+                    )
                     raise HTTPException(
                         status_code=last_error_status or 503,
                         detail=last_error_message or "Account unavailable"
@@ -308,6 +342,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                     detail = "No available accounts for this model."
                     if last_error_message:
                         detail += f" Last error: {last_error_message}"
+                    control_panel.finish_request(
+                        monitor_request_id,
+                        status="error",
+                        error=detail,
+                    )
                     raise HTTPException(status_code=503, detail=detail)
             
             # Mark account as tried in current failover loop
@@ -330,9 +369,15 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                 kiro_payload = build_kiro_payload(
                     request_data,
                     conversation_id,
-                    profile_arn_for_payload
+                    profile_arn_for_payload,
+                    monitor_request_id=monitor_request_id,
                 )
             except ValueError as e:
+                control_panel.finish_request(
+                    monitor_request_id,
+                    status="error",
+                    error=str(e),
+                )
                 raise HTTPException(status_code=400, detail=str(e))
             
             # Log Kiro payload
@@ -340,6 +385,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                 kiro_request_body = json.dumps(kiro_payload, ensure_ascii=False, indent=2).encode('utf-8')
                 if debug_logger:
                     debug_logger.log_kiro_request_body(kiro_request_body)
+                control_panel.record_payload(
+                    monitor_request_id,
+                    f"kiro_payload:{request_data.model}",
+                    kiro_payload,
+                )
             except Exception as e:
                 logger.warning(f"Failed to log Kiro request: {e}")
             
@@ -355,30 +405,53 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
             
             try:
                 # Make request to Kiro API
+                fallback_candidates = [
+                    model for model in routing_decision.fallback_models
+                    if model != request_data.model
+                ]
+                control_panel.start_attempt(monitor_request_id, request_data.model, account.id)
                 response = await http_client.request_with_retry(
                     "POST",
                     url,
                     kiro_payload,
                     stream=True
                 )
+                control_panel.finish_attempt(monitor_request_id, response.status_code)
                 
-                # Dynamic Fallback Logic (4.7 -> 4.6)
-                if response.status_code in (404, 403):
-                    fallbacks = MODEL_FALLBACKS.get(request_data.model, [])
-                    if fallbacks:
-                        logger.warning(f"Model {request_data.model} unavailable (HTTP {response.status_code}). Trying fallback: {fallbacks[0]}")
-                        fallback_name = fallbacks[0]
-                        
-                        # Update request and payload
-                        request_data.model = fallback_name
-                        kiro_payload = build_kiro_payload(request_data, conversation_id, profile_arn_for_payload)
-                        
-                        # Retry
-                        await response.aclose()
-                        response = await http_client.request_with_retry("POST", url, kiro_payload, stream=True)
-                        
-                        if response.status_code == 200:
-                            logger.success(f"Dynamic fallback to {fallback_name} SUCCESSFUL")
+                while control_panel.should_retry_failure(response.status_code, fallback_candidates):
+                    fallback_name = fallback_candidates.pop(0)
+                    logger.warning(
+                        f"Model {request_data.model} unavailable (HTTP {response.status_code}). "
+                        f"Trying fallback: {fallback_name}"
+                    )
+                    await response.aclose()
+                    request_data.model = fallback_name
+                    try:
+                        kiro_payload = build_kiro_payload(
+                            request_data,
+                            conversation_id,
+                            profile_arn_for_payload,
+                            monitor_request_id=monitor_request_id,
+                        )
+                    except ValueError as e:
+                        raise HTTPException(status_code=400, detail=str(e))
+                    
+                    control_panel.record_payload(
+                        monitor_request_id,
+                        f"kiro_payload:{request_data.model}",
+                        kiro_payload,
+                    )
+                    control_panel.start_attempt(monitor_request_id, request_data.model, account.id)
+                    response = await http_client.request_with_retry(
+                        "POST",
+                        url,
+                        kiro_payload,
+                        stream=True
+                    )
+                    control_panel.finish_attempt(monitor_request_id, response.status_code)
+                    
+                    if response.status_code == 200:
+                        logger.success(f"Runtime fallback to {fallback_name} successful")
                 
                 if response.status_code == 200:
                     # SUCCESS - report and return
@@ -407,8 +480,10 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                                     auth_manager=auth_manager,
                                     initial_response=response,
                                     request_messages=messages_for_tokenizer,
-                                    request_tools=tools_for_tokenizer
+                                    request_tools=tools_for_tokenizer,
+                                    monitor_request_id=monitor_request_id,
                                 ):
+                                    control_panel.record_chunk(monitor_request_id, chunk)
                                     yield chunk
                             except GeneratorExit:
                                 client_disconnected = True
@@ -435,6 +510,22 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                                         debug_logger.flush_on_error(500, str(streaming_error))
                                     else:
                                         debug_logger.discard_buffers()
+                                if streaming_error:
+                                    control_panel.finish_request(
+                                        monitor_request_id,
+                                        status="error",
+                                        error=str(streaming_error),
+                                    )
+                                elif client_disconnected:
+                                    control_panel.finish_request(
+                                        monitor_request_id,
+                                        status="client_disconnected",
+                                    )
+                                else:
+                                    control_panel.finish_request(
+                                        monitor_request_id,
+                                        status="completed",
+                                    )
                         
                         return StreamingResponse(stream_wrapper(), media_type="text/event-stream")
                     
@@ -455,6 +546,12 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                         
                         if debug_logger:
                             debug_logger.discard_buffers()
+                        
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="completed",
+                            response=openai_response,
+                        )
                         
                         return JSONResponse(content=openai_response)
                 
@@ -497,6 +594,12 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                         if debug_logger:
                             debug_logger.flush_on_error(response.status_code, last_error_message)
                         
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="error",
+                            error=last_error_message,
+                        )
+                        
                         return JSONResponse(
                             status_code=response.status_code,
                             content={
@@ -528,6 +631,7 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                 # These are thrown ONLY for network-level issues (timeouts, connection errors)
                 # NOT for HTTP-level errors (which are returned as response objects)
                 if e.status_code in (502, 504):
+                    control_panel.finish_attempt(monitor_request_id, e.status_code, str(e.detail))
                     # Network error → try next account
                     await account_manager.report_failure(
                         account.id, request_data.model, ErrorType.RECOVERABLE,
@@ -549,6 +653,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                 logger.error(f"HTTP {e.status_code} - POST /v1/chat/completions - {e.detail}")
                 if debug_logger:
                     debug_logger.flush_on_error(e.status_code, str(e.detail))
+                control_panel.finish_request(
+                    monitor_request_id,
+                    status="error",
+                    error=str(e.detail),
+                )
                 raise
             except Exception as e:
                 await http_client.close()
@@ -556,12 +665,23 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                 logger.error(f"HTTP 500 - POST /v1/chat/completions - {str(e)[:100]}")
                 if debug_logger:
                     debug_logger.flush_on_error(500, str(e))
+                control_panel.finish_attempt(monitor_request_id, 500, str(e))
+                control_panel.finish_request(
+                    monitor_request_id,
+                    status="error",
+                    error=str(e),
+                )
                 raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
         
         # All attempts exhausted
         if len(all_accounts) == 1:
             # Single account - return its original error
             # last_error_status and last_error_message are guaranteed to be set
+            control_panel.finish_request(
+                monitor_request_id,
+                status="error",
+                error=last_error_message,
+            )
             raise HTTPException(
                 status_code=last_error_status,
                 detail=last_error_message
@@ -571,6 +691,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
             detail = "All accounts failed after full circle."
             if last_error_message:
                 detail += f" Last error: {last_error_message}"
+            control_panel.finish_request(
+                monitor_request_id,
+                status="error",
+                error=detail,
+            )
             raise HTTPException(status_code=503, detail=detail)
     
     else:
@@ -580,6 +705,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         account = request.app.state.account_manager.get_first_account()
         if not account.auth_manager:
             logger.error("No initialized accounts available (legacy mode)")
+            control_panel.finish_request(
+                monitor_request_id,
+                status="error",
+                error="No initialized accounts available",
+            )
             raise HTTPException(503, "No initialized accounts available")
         auth_manager = account.auth_manager
         model_cache = account.model_cache
@@ -599,9 +729,15 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         kiro_payload = build_kiro_payload(
             request_data,
             conversation_id,
-            profile_arn_for_payload
+            profile_arn_for_payload,
+            monitor_request_id=monitor_request_id,
         )
     except ValueError as e:
+        control_panel.finish_request(
+            monitor_request_id,
+            status="error",
+            error=str(e),
+        )
         raise HTTPException(status_code=400, detail=str(e))
     
     # Log Kiro payload
@@ -609,6 +745,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         kiro_request_body = json.dumps(kiro_payload, ensure_ascii=False, indent=2).encode('utf-8')
         if debug_logger:
             debug_logger.log_kiro_request_body(kiro_request_body)
+        control_panel.record_payload(
+            monitor_request_id,
+            f"kiro_payload:{request_data.model}",
+            kiro_payload,
+        )
     except Exception as e:
         logger.warning(f"Failed to log Kiro request: {e}")
     
@@ -630,12 +771,53 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         # Make request to Kiro API (for both streaming and non-streaming modes)
         # Important: we wait for Kiro response BEFORE returning StreamingResponse,
         # so that 200 OK means Kiro accepted the request and started responding
+        fallback_candidates = [
+            model for model in routing_decision.fallback_models
+            if model != request_data.model
+        ]
+        control_panel.start_attempt(monitor_request_id, request_data.model, account.id)
         response = await http_client.request_with_retry(
             "POST",
             url,
             kiro_payload,
             stream=True
         )
+        control_panel.finish_attempt(monitor_request_id, response.status_code)
+        
+        while control_panel.should_retry_failure(response.status_code, fallback_candidates):
+            fallback_name = fallback_candidates.pop(0)
+            logger.warning(
+                f"Model {request_data.model} unavailable (HTTP {response.status_code}). "
+                f"Trying fallback: {fallback_name}"
+            )
+            await response.aclose()
+            request_data.model = fallback_name
+            try:
+                kiro_payload = build_kiro_payload(
+                    request_data,
+                    conversation_id,
+                    profile_arn_for_payload,
+                    monitor_request_id=monitor_request_id,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            
+            control_panel.record_payload(
+                monitor_request_id,
+                f"kiro_payload:{request_data.model}",
+                kiro_payload,
+            )
+            control_panel.start_attempt(monitor_request_id, request_data.model, account.id)
+            response = await http_client.request_with_retry(
+                "POST",
+                url,
+                kiro_payload,
+                stream=True
+            )
+            control_panel.finish_attempt(monitor_request_id, response.status_code)
+            
+            if response.status_code == 200:
+                logger.success(f"Runtime fallback to {fallback_name} successful")
         
         if response.status_code != 200:
             try:
@@ -667,6 +849,12 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
             # Flush debug logs on error ("errors" mode)
             if debug_logger:
                 debug_logger.flush_on_error(response.status_code, error_message)
+            
+            control_panel.finish_request(
+                monitor_request_id,
+                status="error",
+                error=error_message,
+            )
             
             # Return error in OpenAI API format
             return JSONResponse(
@@ -706,8 +894,10 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                         auth_manager=auth_manager,
                         initial_response=response,
                         request_messages=messages_for_tokenizer,
-                        request_tools=tools_for_tokenizer
+                        request_tools=tools_for_tokenizer,
+                        monitor_request_id=monitor_request_id,
                     ):
+                        control_panel.record_chunk(monitor_request_id, chunk)
                         yield chunk
                 except GeneratorExit:
                     # Client disconnected - this is normal
@@ -739,6 +929,22 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                             debug_logger.flush_on_error(500, str(streaming_error))
                         else:
                             debug_logger.discard_buffers()
+                    if streaming_error:
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="error",
+                            error=str(streaming_error),
+                        )
+                    elif client_disconnected:
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="client_disconnected",
+                        )
+                    else:
+                        control_panel.finish_request(
+                            monitor_request_id,
+                            status="completed",
+                        )
             
             return StreamingResponse(stream_wrapper(), media_type="text/event-stream")
         
@@ -764,6 +970,12 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
             if debug_logger:
                 debug_logger.discard_buffers()
             
+            control_panel.finish_request(
+                monitor_request_id,
+                status="completed",
+                response=openai_response,
+            )
+            
             return JSONResponse(content=openai_response)
     
     except HTTPException as e:
@@ -773,12 +985,18 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         # In legacy mode, we still log them but re-raise (no failover available)
         if e.status_code in (502, 504):
             logger.warning(f"Network error (legacy mode, no failover available)")
+            control_panel.finish_attempt(monitor_request_id, e.status_code, str(e.detail))
         
         # Log access log for HTTP error
         logger.error(f"HTTP {e.status_code} - POST /v1/chat/completions - {e.detail}")
         # Flush debug logs on HTTP error ("errors" mode)
         if debug_logger:
             debug_logger.flush_on_error(e.status_code, str(e.detail))
+        control_panel.finish_request(
+            monitor_request_id,
+            status="error",
+            error=str(e.detail),
+        )
         raise
     except Exception as e:
         await http_client.close()
@@ -788,4 +1006,10 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
         # Flush debug logs on internal error ("errors" mode)
         if debug_logger:
             debug_logger.flush_on_error(500, str(e))
+        control_panel.finish_attempt(monitor_request_id, 500, str(e))
+        control_panel.finish_request(
+            monitor_request_id,
+            status="error",
+            error=str(e),
+        )
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")

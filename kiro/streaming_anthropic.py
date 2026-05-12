@@ -135,7 +135,9 @@ async def stream_kiro_to_anthropic(
     request_messages: Optional[list] = None,
     request_tools: Optional[list] = None,
     request_system: Optional[Any] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    *,
+    monitor_request_id: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Generator for converting Kiro stream to Anthropic SSE format.
@@ -715,6 +717,15 @@ async def stream_kiro_to_anthropic(
             gen_time = time.time() - _first_token_time
             tps = output_tokens / gen_time if gen_time > 0 else 0
             logger.info(f"[{model}] Stream finished (Anthropic): TTFT={ttft:.2f}s, TPS={tps:.1f} tok/s, Total={total_dur:.2f}s, Tokens={output_tokens}")
+            try:
+                from kiro.control_panel import control_panel as _cp
+                if monitor_request_id:
+                    _cp.record_metrics(
+                        monitor_request_id, ttft=ttft, tps=tps, total_s=total_dur,
+                        output_tokens=output_tokens, input_tokens=input_tokens,
+                    )
+            except Exception:
+                pass
         
     except FirstTokenTimeoutError:
         raise
@@ -897,7 +908,9 @@ async def stream_with_first_token_retry_anthropic(
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
     request_tools: Optional[list] = None,
-    request_system: Optional[Any] = None
+    request_system: Optional[Any] = None,
+    *,
+    monitor_request_id: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Streaming with automatic retry on first token timeout for Anthropic API.
@@ -958,6 +971,7 @@ async def stream_with_first_token_retry_anthropic(
             request_messages=request_messages,
             request_tools=request_tools,
             request_system=request_system,
+            monitor_request_id=monitor_request_id,
         ):
             yield chunk
     

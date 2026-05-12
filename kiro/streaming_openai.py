@@ -78,7 +78,9 @@ async def stream_kiro_to_openai_internal(
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
     request_tools: Optional[list] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    *,
+    monitor_request_id: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Internal generator for converting Kiro stream to OpenAI format.
@@ -126,11 +128,18 @@ async def stream_kiro_to_openai_internal(
     streaming_error_occurred = False
     tool_calls_from_stream = []
     
+    # Speed monitoring (mirrors Anthropic streaming behavior)
+    _start_time = time.time()
+    _first_token_time = None
+    
     try:
         # Use streaming_core.parse_kiro_stream for unified event parsing
         # This handles AWS SSE parsing, first token timeout, and thinking parser
         async for event in parse_kiro_stream(response, first_token_timeout):
             if event.type == "content" and event.content:
+                if _first_token_time is None:
+                    _first_token_time = time.time()
+                
                 # Accumulate content for bracket tool call detection
                 full_content += event.content
                 
@@ -156,6 +165,9 @@ async def stream_kiro_to_openai_internal(
                 yield chunk_text
             
             elif event.type == "thinking" and event.thinking_content:
+                if _first_token_time is None:
+                    _first_token_time = time.time()
+                
                 # Accumulate thinking content
                 full_thinking_content += event.thinking_content
                 
@@ -420,6 +432,15 @@ async def stream_kiro_to_openai_internal(
             gen_time = time.time() - _first_token_time
             tps = completion_tokens / gen_time if gen_time > 0 else 0
             logger.info(f"[{model}] Stream finished: TTFT={ttft:.2f}s, TPS={tps:.1f} tok/s, Total={total_dur:.2f}s, Tokens={completion_tokens}")
+            try:
+                from kiro.control_panel import control_panel as _cp
+                if monitor_request_id:
+                    _cp.record_metrics(
+                        monitor_request_id, ttft=ttft, tps=tps, total_s=total_dur,
+                        output_tokens=completion_tokens, input_tokens=prompt_tokens if prompt_tokens else None,
+                    )
+            except Exception:
+                pass
 
         yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
@@ -462,14 +483,16 @@ async def stream_kiro_to_openai(
     model_cache: "ModelInfoCache",
     auth_manager: "KiroAuthManager",
     request_messages: Optional[list] = None,
-    request_tools: Optional[list] = None
+    request_tools: Optional[list] = None,
+    *,
+    monitor_request_id: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Generator for converting Kiro stream to OpenAI format.
-    
+
     This is a wrapper over stream_kiro_to_openai_internal that does NOT retry.
     Retry logic is implemented in stream_with_first_token_retry.
-    
+
     Args:
         client: HTTP client (for connection management)
         response: HTTP response with data stream
@@ -478,14 +501,16 @@ async def stream_kiro_to_openai(
         auth_manager: Authentication manager
         request_messages: Original request messages (for fallback token counting)
         request_tools: Original request tools (for fallback token counting)
-    
+        monitor_request_id: Control panel request ID for metrics recording.
+
     Yields:
         Strings in SSE format: "data: {...}\\n\\n" or "data: [DONE]\\n\\n"
     """
     async for chunk in stream_kiro_to_openai_internal(
         client, response, model, model_cache, auth_manager,
         request_messages=request_messages,
-        request_tools=request_tools
+        request_tools=request_tools,
+        monitor_request_id=monitor_request_id,
     ):
         yield chunk
 
@@ -500,7 +525,9 @@ async def stream_with_first_token_retry(
     max_retries: int = FIRST_TOKEN_MAX_RETRIES,
     first_token_timeout: float = FIRST_TOKEN_TIMEOUT,
     request_messages: Optional[list] = None,
-    request_tools: Optional[list] = None
+    request_tools: Optional[list] = None,
+    *,
+    monitor_request_id: Optional[str] = None
 ) -> AsyncGenerator[str, None]:
     """
     Streaming with automatic retry on first token timeout.
@@ -565,7 +592,8 @@ async def stream_with_first_token_retry(
             auth_manager,
             first_token_timeout=first_token_timeout,
             request_messages=request_messages,
-            request_tools=request_tools
+            request_tools=request_tools,
+            monitor_request_id=monitor_request_id,
         ):
             yield chunk
     
