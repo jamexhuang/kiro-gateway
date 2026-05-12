@@ -172,7 +172,8 @@ class KiroHttpClient:
         url: str,
         json_data: Optional[dict] = None,
         params: Optional[dict] = None,
-        stream: bool = False
+        stream: bool = False,
+        max_retries_override: Optional[int] = None,
     ) -> httpx.Response:
         """
         Executes an HTTP request with retry logic.
@@ -192,6 +193,7 @@ class KiroHttpClient:
             json_data: Optional JSON body (for POST/PUT/PATCH)
             params: Optional query parameters (for GET)
             stream: Use streaming (default False)
+            max_retries_override: Optional request-specific retry attempt count.
         
         Returns:
             httpx.Response with successful response
@@ -201,7 +203,10 @@ class KiroHttpClient:
         """
         # Determine the number of retry attempts
         # FIRST_TOKEN_TIMEOUT is used in streaming_openai.py, not here
-        max_retries = FIRST_TOKEN_MAX_RETRIES if stream else MAX_RETRIES
+        if max_retries_override is not None:
+            max_retries = max(1, max_retries_override)
+        else:
+            max_retries = FIRST_TOKEN_MAX_RETRIES if stream else MAX_RETRIES
         
         client = await self._get_client(stream=stream)
         last_error = None
@@ -245,15 +250,36 @@ class KiroHttpClient:
                 
                 # 429 - rate limit, wait and retry
                 if response.status_code == 429:
-                    last_response = response  # Сохраняем для возврата после exhaustion
+                    last_response = response
+                    fast_fail = False
+                    if not stream:
+                        try:
+                            body_bytes = await response.aread()
+                            import json as _json
+                            payload = _json.loads(body_bytes.decode("utf-8", errors="replace"))
+                            reason = payload.get("reason") or payload.get("error", {}).get("reason")
+                            if reason in ("INSUFFICIENT_MODEL_CAPACITY", "THROTTLING"):
+                                logger.warning(
+                                    f"429 {reason}: skipping retry, letting caller failover"
+                                )
+                                fast_fail = True
+                                response._content = body_bytes
+                        except Exception:
+                            pass
+                    if fast_fail or attempt >= max_retries - 1:
+                        break
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
-                    logger.warning(f"Received 429, waiting {delay}s (attempt {attempt + 1}/{max_retries})")
+                    logger.warning(
+                        f"Received 429, waiting {delay}s (attempt {attempt + 1}/{max_retries})"
+                    )
                     await asyncio.sleep(delay)
                     continue
                 
                 # 5xx - server error, wait and retry
                 if 500 <= response.status_code < 600:
                     last_response = response  # Сохраняем для возврата после exhaustion
+                    if attempt >= max_retries - 1:
+                        break
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
                     logger.warning(f"Received {response.status_code}, waiting {delay}s (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(delay)

@@ -277,6 +277,37 @@ class TestKiroHttpClientRequestWithRetry:
         print("Verification: sleep() called for backoff...")
         mock_sleep.assert_called_once()
         assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_429_exhaustion_returns_without_final_sleep(self, mock_auth_manager_for_http):
+        """
+        What it does: Exhausts 429 retries and returns the last response.
+        Purpose: Avoid waiting after the final failed attempt before account failover.
+        """
+        print("Setup: Creating KiroHttpClient with repeated 429 responses...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http)
+
+        mock_response_429 = AsyncMock()
+        mock_response_429.status_code = 429
+
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.request = AsyncMock(return_value=mock_response_429)
+
+        print("Action: Executing request until 429 retries are exhausted...")
+        with patch.object(http_client, '_get_client', return_value=mock_client):
+            with patch('kiro.http_client.get_kiro_headers', return_value={}):
+                with patch('kiro.http_client.asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+                    response = await http_client.request_with_retry(
+                        "POST",
+                        "https://api.example.com/test",
+                        {"data": "value"}
+                    )
+
+        print("Verification: Final 429 is returned without an extra sleep...")
+        assert response.status_code == 429
+        assert mock_client.request.call_count == MAX_RETRIES
+        assert mock_sleep.call_count == MAX_RETRIES - 1
     
     @pytest.mark.asyncio
     async def test_5xx_triggers_backoff(self, mock_auth_manager_for_http):
@@ -1156,6 +1187,155 @@ class TestKiroHttpClientConnectionCloseHeader:
         assert captured_headers["X-Custom-Header"] == "custom_value"
         assert captured_headers["Connection"] == "close"
         assert response.status_code == 200
+
+
+class TestKiroHttpClientCapacityFastFail:
+    """Tests for fast-fail on INSUFFICIENT_MODEL_CAPACITY / THROTTLING 429 responses."""
+
+    @pytest.mark.asyncio
+    async def test_429_insufficient_capacity_returns_immediately_without_retry(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies that 429 with INSUFFICIENT_MODEL_CAPACITY skips retry.
+        Purpose: Let the account failover loop handle capacity errors instead of wasting time on backoff.
+        """
+        print("Setup: Creating KiroHttpClient...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http)
+
+        mock_response_429 = MagicMock(spec=httpx.Response)
+        mock_response_429.status_code = 429
+        mock_response_429.aread = AsyncMock(
+            return_value=b'{"reason": "INSUFFICIENT_MODEL_CAPACITY"}'
+        )
+
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.request = AsyncMock(return_value=mock_response_429)
+
+        print("Action: Executing request expecting fast-fail...")
+        import time
+        with patch.object(http_client, '_get_client', return_value=mock_client):
+            with patch('kiro.http_client.get_kiro_headers', return_value={}):
+                t0 = time.time()
+                response = await http_client.request_with_retry(
+                    "POST",
+                    "https://api.example.com/test",
+                    {"data": "value"}
+                )
+                elapsed = time.time() - t0
+
+        print("Verification: Fast-fail without retry...")
+        assert response.status_code == 429
+        assert elapsed < 0.5, f"Fast-fail expected, took {elapsed:.2f}s"
+        assert mock_client.request.await_count == 1, "must not retry on INSUFFICIENT_MODEL_CAPACITY"
+
+    @pytest.mark.asyncio
+    async def test_429_throttling_returns_immediately_without_retry(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies that 429 with THROTTLING reason skips retry.
+        Purpose: THROTTLING is another capacity signal that should failover immediately.
+        """
+        print("Setup: Creating KiroHttpClient...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http)
+
+        mock_response_429 = MagicMock(spec=httpx.Response)
+        mock_response_429.status_code = 429
+        mock_response_429.aread = AsyncMock(
+            return_value=b'{"error": {"reason": "THROTTLING"}}'
+        )
+
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.request = AsyncMock(return_value=mock_response_429)
+
+        print("Action: Executing request expecting fast-fail...")
+        with patch.object(http_client, '_get_client', return_value=mock_client):
+            with patch('kiro.http_client.get_kiro_headers', return_value={}):
+                response = await http_client.request_with_retry(
+                    "POST",
+                    "https://api.example.com/test",
+                    {"data": "value"}
+                )
+
+        print("Verification: Fast-fail without retry...")
+        assert response.status_code == 429
+        assert mock_client.request.await_count == 1, "must not retry on THROTTLING"
+
+    @pytest.mark.asyncio
+    async def test_429_streaming_does_not_attempt_body_read(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies that stream=True 429 does NOT read body (would consume stream).
+        Purpose: Ensure streaming path still uses normal backoff even for capacity errors.
+        """
+        print("Setup: Creating KiroHttpClient...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http)
+
+        mock_response_429 = AsyncMock()
+        mock_response_429.status_code = 429
+        mock_response_429.aread = AsyncMock(
+            return_value=b'{"reason": "INSUFFICIENT_MODEL_CAPACITY"}'
+        )
+
+        mock_response_200 = AsyncMock()
+        mock_response_200.status_code = 200
+
+        mock_request = Mock()
+
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.build_request = Mock(return_value=mock_request)
+        mock_client.send = AsyncMock(side_effect=[mock_response_429, mock_response_200])
+
+        print("Action: Executing streaming request with 429...")
+        with patch.object(http_client, '_get_client', return_value=mock_client):
+            with patch('kiro.http_client.get_kiro_headers', return_value={}):
+                with patch('kiro.http_client.asyncio.sleep', new_callable=AsyncMock):
+                    response = await http_client.request_with_retry(
+                        "POST",
+                        "https://api.example.com/test",
+                        {"data": "value"},
+                        stream=True
+                    )
+
+        print("Verification: aread() NOT called on streaming 429, normal retry happened...")
+        mock_response_429.aread.assert_not_called()
+        assert response.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_429_normal_rate_limit_still_retries(self, mock_auth_manager_for_http):
+        """
+        What it does: Verifies that 429 without capacity reason still retries with backoff.
+        Purpose: Ensure normal rate-limit behavior is preserved.
+        """
+        print("Setup: Creating KiroHttpClient...")
+        http_client = KiroHttpClient(mock_auth_manager_for_http)
+
+        mock_response_429 = MagicMock(spec=httpx.Response)
+        mock_response_429.status_code = 429
+        mock_response_429.aread = AsyncMock(
+            return_value=b'{"reason": "RATE_LIMITED"}'
+        )
+
+        mock_response_200 = AsyncMock()
+        mock_response_200.status_code = 200
+
+        mock_client = AsyncMock()
+        mock_client.is_closed = False
+        mock_client.request = AsyncMock(side_effect=[mock_response_429, mock_response_200])
+
+        print("Action: Executing request with normal 429...")
+        with patch.object(http_client, '_get_client', return_value=mock_client):
+            with patch('kiro.http_client.get_kiro_headers', return_value={}):
+                with patch('kiro.http_client.asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+                    response = await http_client.request_with_retry(
+                        "POST",
+                        "https://api.example.com/test",
+                        {"data": "value"}
+                    )
+
+        print("Verification: Normal backoff retry happened...")
+        mock_sleep.assert_called_once()
+        assert response.status_code == 200
+        assert mock_client.request.await_count == 2
 
 
 class TestKiroHttpClientRequestParameters:
