@@ -630,6 +630,14 @@ class ControlPanelState:
             if response is not None and self._routing.capture_content:
                 record.response = _serialize_excerpt(response, self._routing.max_content_chars)
 
+            try:
+                from kiro.metrics import metrics_registry
+                duration = (record.ended_at or now) - record.started_at
+                is_error = status not in ("completed", "client_disconnected")
+                metrics_registry.record(now, duration, is_error)
+            except Exception:
+                pass
+
             self._completed_requests.appendleft(record)
 
     def clear_monitor(self) -> None:

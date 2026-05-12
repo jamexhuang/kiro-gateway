@@ -263,6 +263,18 @@ async def clear_dashboard_monitor() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/dashboard/api/metrics", dependencies=[Security(verify_dashboard_api_key)])
+async def get_dashboard_metrics() -> Dict[str, Any]:
+    """
+    Return rolling-window request metrics for dashboard sparklines.
+
+    Returns:
+        Metrics snapshot with RPS, P50, P95, error count, and time series.
+    """
+    from kiro.metrics import metrics_registry
+    return metrics_registry.snapshot(now=time.time())
+
+
 @router.get("/dashboard/api/logs", dependencies=[Security(verify_dashboard_api_key)])
 async def get_dashboard_logs(since: int = -1, limit: int = 500) -> Dict[str, Any]:
     """
