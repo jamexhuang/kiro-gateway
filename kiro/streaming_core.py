@@ -466,17 +466,31 @@ async def stream_with_first_token_retry(
                 f"[FirstTokenTimeout] Attempt {attempt + 1}/{max_retries} failed - "
                 f"model did not respond within {first_token_timeout}s"
             )
-            
+
             # Close current response if open
             if response:
                 try:
                     await response.aclose()
                 except Exception:
                     pass
-            
+
             # Continue to next attempt
             continue
-            
+
+        except httpx.RemoteProtocolError as e:
+            last_error = e
+            logger.warning(
+                f"[RemoteProtocolError] Attempt {attempt + 1}/{max_retries} upstream disconnected mid-stream: {e}"
+            )
+            if response:
+                try:
+                    await response.aclose()
+                except Exception:
+                    pass
+            if attempt >= max_retries - 1:
+                raise
+            continue
+
         except Exception as e:
             # Other errors - no retry, propagate
             # Use positional argument to avoid loguru interpreting curly braces in error message as format placeholders

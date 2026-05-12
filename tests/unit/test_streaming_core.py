@@ -15,6 +15,7 @@ Tests for:
 
 import pytest
 import asyncio
+import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 from dataclasses import asdict
 
@@ -1832,3 +1833,89 @@ class TestStreamWithFirstTokenRetryCore:
         assert make_request_call_count == 1
         assert len(chunks) == 1
         print("✓ make_request called immediately when initial_response is None")
+
+
+class TestRemoteProtocolErrorRetry:
+    """Tests for retrying httpx.RemoteProtocolError in stream_with_first_token_retry."""
+
+    @pytest.mark.asyncio
+    async def test_remote_protocol_error_is_retried(self):
+        """
+        What it does: Retries when upstream disconnects mid-stream (RemoteProtocolError).
+        Goal: Verify RemoteProtocolError is treated as retryable, not propagated as 500.
+        """
+        print("Setup: make_request that fails with RemoteProtocolError on first call...")
+
+        call_count = 0
+
+        async def mock_make_request():
+            nonlocal call_count
+            call_count += 1
+            response = AsyncMock()
+            response.status_code = 200
+            response.aclose = AsyncMock()
+            return response
+
+        attempt_count = 0
+
+        async def mock_stream_processor(response):
+            nonlocal attempt_count
+            attempt_count += 1
+
+            if attempt_count == 1:
+                raise httpx.RemoteProtocolError(
+                    "peer closed connection without sending complete message body (incomplete chunked read)"
+                )
+            else:
+                yield "data: success\n\n"
+
+        print("Action: Streaming with RemoteProtocolError on first attempt...")
+        chunks = []
+
+        async for chunk in stream_with_first_token_retry(
+            make_request=mock_make_request,
+            stream_processor=mock_stream_processor,
+            max_retries=3,
+            first_token_timeout=30,
+        ):
+            chunks.append(chunk)
+
+        print(f"make_request call count: {call_count}")
+        print(f"stream_processor attempt count: {attempt_count}")
+        print(f"Received chunks: {chunks}")
+
+        assert call_count == 2  # Called once initially, once on retry
+        assert attempt_count == 2
+        assert chunks == ["data: success\n\n"]
+        print("✓ RemoteProtocolError was retried and succeeded on second attempt")
+
+    @pytest.mark.asyncio
+    async def test_remote_protocol_error_exhausts_retries(self):
+        """
+        What it does: Raises RemoteProtocolError after all retries exhausted.
+        Goal: Verify that if every attempt hits RemoteProtocolError, it eventually raises.
+        """
+        print("Setup: make_request that always triggers RemoteProtocolError...")
+
+        async def mock_make_request():
+            response = AsyncMock()
+            response.status_code = 200
+            response.aclose = AsyncMock()
+            return response
+
+        async def mock_stream_processor(response):
+            raise httpx.RemoteProtocolError("peer closed connection")
+            yield  # make it a generator
+
+        print("Action: Streaming with persistent RemoteProtocolError...")
+
+        with pytest.raises(httpx.RemoteProtocolError):
+            async for _ in stream_with_first_token_retry(
+                make_request=mock_make_request,
+                stream_processor=mock_stream_processor,
+                max_retries=2,
+                first_token_timeout=30,
+            ):
+                pass
+
+        print("✓ RemoteProtocolError raised after all retries exhausted")
