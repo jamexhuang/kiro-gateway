@@ -40,7 +40,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import httpx
 from loguru import logger
@@ -133,6 +133,8 @@ class Account:
     last_failure_time: float = 0.0
     models_cached_at: float = 0.0
     stats: AccountStats = field(default_factory=AccountStats)
+    last_error_reason: Optional[str] = None
+    last_error_status: Optional[int] = None
 
 
 @dataclass
@@ -776,6 +778,8 @@ class AccountManager:
             if error_type == ErrorType.RECOVERABLE:
                 account.failures += 1
                 account.last_failure_time = time.time()
+                account.last_error_reason = reason
+                account.last_error_status = status_code
                 self._dirty = True
                 
                 # Calculate backoff for logging
@@ -826,3 +830,63 @@ class AccountManager:
             if account.model_resolver:
                 all_models.update(account.model_resolver.get_available_models())
         return sorted(all_models)
+
+    def get_accounts_snapshot(self) -> List[Dict[str, Any]]:
+        """
+        Return a snapshot of all accounts for the dashboard.
+
+        Returns:
+            List of account status dictionaries with cooldown and error info.
+        """
+        from dataclasses import asdict
+        now = time.time()
+        snapshot: List[Dict[str, Any]] = []
+        all_account_ids = list(self._accounts.keys())
+
+        for idx, account_id in enumerate(all_account_ids):
+            account = self._accounts[account_id]
+
+            display_id = account_id
+            if os.sep in account_id:
+                display_id = os.path.basename(account_id)
+            elif account_id.startswith("refresh_token_"):
+                display_id = "Token Account (" + account_id[-8:] + ")"
+
+            if account.failures > 0:
+                backoff_mult = min(
+                    2 ** (account.failures - 1),
+                    ACCOUNT_MAX_BACKOFF_MULTIPLIER,
+                )
+                cooldown_total = ACCOUNT_RECOVERY_TIMEOUT * backoff_mult
+                elapsed = now - account.last_failure_time
+                cooldown_remaining = max(0, int(cooldown_total - elapsed))
+            else:
+                backoff_mult = 0
+                cooldown_total = 0
+                cooldown_remaining = 0
+
+            current_models: List[str] = []
+            if account.model_resolver:
+                try:
+                    current_models = list(account.model_resolver.get_available_models())
+                except Exception:
+                    current_models = []
+
+            snapshot.append({
+                "id": account_id,
+                "display_id": display_id,
+                "failures": account.failures,
+                "last_failure_time": account.last_failure_time,
+                "models_cached_at": account.models_cached_at,
+                "stats": asdict(account.stats),
+                "is_initialized": account.auth_manager is not None,
+                "is_current": idx == self._current_account_index,
+                "backoff_tier": account.failures,
+                "backoff_multiplier": backoff_mult,
+                "cooldown_total_s": cooldown_total,
+                "cooldown_remaining_s": cooldown_remaining,
+                "last_error_reason": getattr(account, 'last_error_reason', None),
+                "last_error_status": getattr(account, 'last_error_status', None),
+                "available_models_count": len(current_models),
+            })
+        return snapshot

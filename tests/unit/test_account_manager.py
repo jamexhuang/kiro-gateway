@@ -1300,3 +1300,32 @@ class TestFormatDuration:
         """Test formatting days."""
         assert _format_duration(86400) == "1d"
         assert _format_duration(172800) == "2d"
+
+
+class TestAccountsSnapshotCooldown:
+    """Tests for cooldown/backoff/error fields in get_accounts_snapshot."""
+
+    def test_accounts_snapshot_has_cooldown_fields(self, tmp_path):
+        """Snapshot includes backoff tier, cooldown timing, and last error info."""
+        mgr = AccountManager(
+            credentials_file=str(tmp_path / "c.json"),
+            state_file=str(tmp_path / "s.json"),
+        )
+        acc = Account(id="acc1")
+        acc.failures = 2
+        acc.last_failure_time = time.time() - 30
+        acc.last_error_reason = "INSUFFICIENT_MODEL_CAPACITY"
+        acc.last_error_status = 429
+        mgr._accounts["acc1"] = acc
+        mgr._current_account_index = 0
+
+        snap = mgr.get_accounts_snapshot()
+        assert len(snap) == 1
+        entry = snap[0]
+        assert entry["failures"] == 2
+        assert entry["backoff_tier"] == 2
+        assert entry["cooldown_total_s"] > 0
+        assert entry["cooldown_remaining_s"] >= 0
+        assert entry["last_error_reason"] == "INSUFFICIENT_MODEL_CAPACITY"
+        assert entry["last_error_status"] == 429
+        assert "available_models_count" in entry
