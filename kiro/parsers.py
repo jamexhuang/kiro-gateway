@@ -204,8 +204,167 @@ def deduplicate_tool_calls(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, A
     
     if len(tool_calls) != len(unique):
         logger.debug(f"Deduplicated tool calls: {len(tool_calls)} -> {len(unique)}")
-    
+
     return unique
+
+
+def _repair_truncated_json(json_str: str) -> Optional[str]:
+    """
+    Attempt to repair truncated JSON from a tool call.
+
+    When Kiro API truncates a tool call mid-stream, the JSON is incomplete.
+    This function tries to close open strings, arrays, and objects to produce
+    valid JSON that preserves as much content as possible.
+
+    For Write tool calls, this means the file content will be partially written
+    rather than completely lost — partial content is better than empty content.
+
+    Args:
+        json_str: The truncated JSON string.
+
+    Returns:
+        Repaired JSON string if successful, None if repair is not possible.
+    """
+    stripped = json_str.strip()
+    if not stripped or not stripped.startswith('{'):
+        return None
+
+    # Strategy 1: Direct closure — close the string at truncation point,
+    # then close all open brackets/braces.
+    result = _try_direct_closure(stripped)
+    if result:
+        return result
+
+    # Strategy 2: Find longest valid prefix by cutting at top-level commas
+    return _find_longest_valid_prefix(stripped)
+
+
+def _try_direct_closure(json_str: str) -> Optional[str]:
+    """
+    Try to repair by closing the string at truncation point and closing brackets.
+    """
+    # Determine if we're inside a string at the end
+    in_string = False
+    escape_next = False
+    stack = []
+
+    for ch in json_str:
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in ('{', '['):
+            stack.append(ch)
+        elif ch == '}' and stack and stack[-1] == '{':
+            stack.pop()
+        elif ch == ']' and stack and stack[-1] == '[':
+            stack.pop()
+
+    if not stack and not in_string:
+        # Nothing to repair
+        return None
+
+    repair = json_str
+
+    # If inside a string, close it
+    if in_string:
+        # If the last char is a backslash (incomplete escape), remove it
+        if repair.endswith('\\'):
+            repair = repair[:-1]
+        repair += '"'
+
+    # Remove trailing comma if present (invalid before closing)
+    r = repair.rstrip()
+    if r.endswith(','):
+        r = r[:-1]
+    repair = r
+
+    # Re-scan to find what's still open after string closure
+    in_string2 = False
+    escape2 = False
+    stack2 = []
+    for ch in repair:
+        if escape2:
+            escape2 = False
+            continue
+        if ch == '\\' and in_string2:
+            escape2 = True
+            continue
+        if ch == '"':
+            in_string2 = not in_string2
+            continue
+        if in_string2:
+            continue
+        if ch in ('{', '['):
+            stack2.append(ch)
+        elif ch == '}' and stack2 and stack2[-1] == '{':
+            stack2.pop()
+        elif ch == ']' and stack2 and stack2[-1] == '[':
+            stack2.pop()
+
+    # Close in reverse order
+    for opener in reversed(stack2):
+        if opener == '{':
+            repair += '}'
+        elif opener == '[':
+            repair += ']'
+
+    # Validate
+    try:
+        json.loads(repair)
+        return repair
+    except json.JSONDecodeError:
+        return None
+
+
+def _find_longest_valid_prefix(json_str: str) -> Optional[str]:
+    """
+    Find the longest prefix of a JSON object that can be repaired to valid JSON.
+
+    Uses binary search on key-value boundaries to find where to cut.
+    """
+    # Find positions of top-level commas (potential cut points)
+    in_string = False
+    escape_next = False
+    depth = 0
+    cut_points = []
+
+    for i, ch in enumerate(json_str):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in ('{', '['):
+            depth += 1
+        elif ch in ('}', ']'):
+            depth -= 1
+        elif ch == ',' and depth == 1:
+            cut_points.append(i)
+
+    # Try from longest to shortest
+    for cut_pos in reversed(cut_points):
+        candidate = json_str[:cut_pos] + '}'
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            continue
+
+    return None
 
 
 class AwsEventStreamParser:
@@ -418,11 +577,11 @@ class AwsEventStreamParser:
                         # Mark for recovery system
                         self.current_tool_call['_truncation_detected'] = True
                         self.current_tool_call['_truncation_info'] = truncation_info
-                        
+
                         # Check if recovery is enabled
                         from kiro.config import TRUNCATION_RECOVERY
                         tool_id = self.current_tool_call.get('id', 'unknown')
-                        
+
                         # Clear error message: this is Kiro API's fault, not ours
                         logger.error(
                             f"Tool call truncated by Kiro API: "
@@ -430,11 +589,21 @@ class AwsEventStreamParser:
                             f"reason={truncation_info['reason']}. "
                             f"{'Model will be notified automatically about truncation.' if TRUNCATION_RECOVERY else 'Set TRUNCATION_RECOVERY=true in .env to auto-notify model about truncation.'}"
                         )
+
+                        # Attempt to repair truncated JSON so tool gets partial content
+                        repaired = _repair_truncated_json(args)
+                        if repaired:
+                            self.current_tool_call['function']['arguments'] = repaired
+                            logger.info(f"Repaired truncated JSON for tool '{tool_name}' ({truncation_info['size_bytes']} bytes)")
+                        else:
+                            self.current_tool_call['function']['arguments'] = "{}"
                     else:
                         # Regular JSON parse error
                         logger.warning(f"Failed to parse tool '{tool_name}' arguments: {e}. Raw: {args[:200]}")
-                    
-                    self.current_tool_call['function']['arguments'] = "{}"
+
+                    # If not already repaired above, set empty
+                    if self.current_tool_call['function']['arguments'] == args:
+                        self.current_tool_call['function']['arguments'] = "{}"
             else:
                 # Empty string - use empty object
                 # This is normal behavior for duplicate tool calls from Kiro
