@@ -30,4 +30,8 @@ requests/
 # Testing
 .pytest_cache/
 .coverage
-htmlcov/routing_state.json
+htmlcov/
+
+# Secrets - account tokens
+accounts/*.json
+routing_state.json
