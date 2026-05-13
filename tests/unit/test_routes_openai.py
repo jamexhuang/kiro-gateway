@@ -1276,6 +1276,9 @@ class TestTruncationRecoveryEdgeCases:
             assert modified_messages[0].content == "Result"
             assert "[API Limitation]" not in modified_messages[0].content
         
+        print("Cleanup: Restoring config after patched TRUNCATION_RECOVERY env...")
+        reload(config)
+        
         print("Checking: Cache entry still exists (not cleaned up)...")
         # Note: get_tool_truncation() was NOT called, so entry should still be there
         # But we can't verify this without calling get_tool_truncation again
