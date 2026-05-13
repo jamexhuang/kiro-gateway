@@ -1597,6 +1597,12 @@ def build_kiro_payload(
     if profile_arn:
         payload["profileArn"] = profile_arn
 
+    # Image eviction — replace old images with placeholders to reduce payload size
+    from kiro.image_eviction import evict_images_from_history
+    history_list = payload.get("conversationState", {}).get("history")
+    if history_list:
+        images_evicted, bytes_saved = evict_images_from_history(history_list)
+
     # Payload size guard — auto-trim if enabled
     if AUTO_TRIM_PAYLOAD:
         payload_size = check_payload_size(payload)

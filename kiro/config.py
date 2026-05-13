@@ -507,6 +507,26 @@ KIRO_MAX_PAYLOAD_BYTES: int = int(os.getenv("KIRO_MAX_PAYLOAD_BYTES", "600000"))
 AUTO_TRIM_PAYLOAD: bool = os.getenv("AUTO_TRIM_PAYLOAD", "false").lower() in ("true", "1", "yes")
 
 # ==================================================================================================
+# Image Eviction Settings (History Payload Optimization)
+# ==================================================================================================
+
+# Enable image eviction from older history entries to reduce payload size.
+# When enabled, base64 images in history entries older than IMAGE_KEEP_LAST_TURNS
+# are replaced with a text placeholder. Prevents PDF reading from triggering
+# aggressive history trimming.
+IMAGE_EVICTION_ENABLED: bool = os.getenv("IMAGE_EVICTION_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# Number of recent user messages to preserve images for.
+# Images in the most recent N user messages are kept intact; older ones are evicted.
+IMAGE_KEEP_LAST_TURNS: int = int(os.getenv("IMAGE_KEEP_LAST_TURNS", "2"))
+
+# Placeholder text inserted where evicted images were.
+IMAGE_EVICTION_PLACEHOLDER: str = os.getenv(
+    "IMAGE_EVICTION_PLACEHOLDER",
+    "[image was provided in earlier turn and has been processed]"
+)
+
+# ==================================================================================================
 # Burst Protection Settings (subagent team 429 prevention)
 # ==================================================================================================
 
