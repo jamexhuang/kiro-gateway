@@ -51,41 +51,49 @@ def generate_truncation_tool_result(
 ) -> Dict[str, Any]:
     """
     Generate synthetic tool_result for truncated tool call.
-    
+
     Message is carefully worded to:
     - Acknowledge API limitation (not model's fault)
-    - Warn against repeating same operation
-    - NOT give specific instructions (avoid micro-steps)
-    
+    - Indicate whether partial content was preserved (repaired)
+    - Guide model to complete the remaining content
+
     Args:
         tool_name: Name of the truncated tool
         tool_use_id: ID of the truncated tool call
         truncation_info: Diagnostic information about truncation
-    
+
     Returns:
         Synthetic tool_result in unified format
-    
-    Example:
-        >>> generate_truncation_tool_result("Write", "call_123", {"size_bytes": 5000, "reason": "missing 2 closing braces"})
-        {'type': 'tool_result', 'tool_use_id': 'call_123', 'content': '[API Limitation] ...', 'is_error': True}
     """
-    content = (
-        "[API Limitation] Your tool call was truncated by the upstream API due to output size limits.\n\n"
-        "If the tool result below shows an error or unexpected behavior, this is likely a CONSEQUENCE of the truncation, "
-        "not the root cause. The tool call itself was cut off before it could be fully transmitted.\n\n"
-        "Repeating the exact same operation will be truncated again. Consider adapting your approach."
-    )
-    
+    was_repaired = truncation_info.get("repaired", False)
+
+    if was_repaired:
+        content = (
+            "[API Limitation] Your tool call was truncated by the upstream API due to output size limits. "
+            "The content was PARTIALLY delivered — the file was written with truncated content.\n\n"
+            "Do NOT repeat the entire file. Instead, use the Edit tool to append or replace "
+            "only the missing portion at the end of the file."
+        )
+        is_error = False  # Partial success, not a failure
+    else:
+        content = (
+            "[API Limitation] Your tool call was truncated by the upstream API due to output size limits.\n\n"
+            "If the tool result below shows an error or unexpected behavior, this is likely a CONSEQUENCE of the truncation, "
+            "not the root cause. The tool call itself was cut off before it could be fully transmitted.\n\n"
+            "Repeating the exact same operation will be truncated again. Consider adapting your approach."
+        )
+        is_error = True
+
     logger.debug(
         f"Generated synthetic tool_result for truncated tool '{tool_name}' "
-        f"(id={tool_use_id}, {truncation_info['size_bytes']} bytes, {truncation_info['reason']})"
+        f"(id={tool_use_id}, {truncation_info['size_bytes']} bytes, {truncation_info['reason']}, repaired={was_repaired})"
     )
-    
+
     return {
         "type": "tool_result",
         "tool_use_id": tool_use_id,
         "content": content,
-        "is_error": True
+        "is_error": is_error
     }
 
 

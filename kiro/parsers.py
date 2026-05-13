@@ -594,9 +594,11 @@ class AwsEventStreamParser:
                         repaired = _repair_truncated_json(args)
                         if repaired:
                             self.current_tool_call['function']['arguments'] = repaired
+                            self.current_tool_call['_truncation_info']['repaired'] = True
                             logger.info(f"Repaired truncated JSON for tool '{tool_name}' ({truncation_info['size_bytes']} bytes)")
                         else:
                             self.current_tool_call['function']['arguments'] = "{}"
+                            self.current_tool_call['_truncation_info']['repaired'] = False
                     else:
                         # Regular JSON parse error
                         logger.warning(f"Failed to parse tool '{tool_name}' arguments: {e}. Raw: {args[:200]}")
