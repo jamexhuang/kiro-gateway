@@ -240,6 +240,13 @@ async def stream_kiro_to_anthropic(
                 # Capture first token time
                 if _first_token_time is None:
                     _first_token_time = time.time()
+                    # Update status to streaming
+                    if monitor_request_id:
+                        try:
+                            from kiro.control_panel import control_panel as _cp
+                            _cp.update_request_status(monitor_request_id, "streaming")
+                        except Exception:
+                            pass
 
                 content = event.content or ""
                 full_content += content

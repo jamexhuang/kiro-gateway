@@ -642,12 +642,16 @@ DASHBOARD_HTML = r"""<!doctype html>
         <div><label style="font-size:10.5px;color:var(--muted)">模式</label>
           <select id="mode" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"><option value="passthrough">直通</option><option value="manual">手動</option><option value="redirect">重導向</option></select></div>
         <div><label style="font-size:10.5px;color:var(--muted)">手動指定模型</label>
-          <input id="manualModel" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px" placeholder="claude-opus-4.6"></div>
+          <select id="manualModel" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"><option value="">載入中…</option></select></div>
         <div><label style="font-size:10.5px;color:var(--muted)">降級模型（逗號分隔）</label>
           <input id="fallbackModels" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"></div>
       </div>
-      <label style="font-size:10.5px;color:var(--muted);display:block;margin-top:8px">重導向規則 JSON</label>
-      <textarea id="redirects" style="width:100%;min-height:64px;padding:6px;border:1px solid var(--line);border-radius:6px;font:12px 'SF Mono',Menlo,monospace"></textarea>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <div><label style="font-size:10.5px;color:var(--muted)">重導向規則 JSON</label>
+          <textarea id="redirects" style="width:100%;min-height:64px;padding:6px;border:1px solid var(--line);border-radius:6px;font:12px 'SF Mono',Menlo,monospace"></textarea></div>
+        <div><label style="font-size:10.5px;color:var(--muted)">可用模型 <button class="btn ghost" onclick="fetchModels()" style="font-size:10px;padding:1px 4px">重新取得</button></label>
+          <div id="modelList" style="max-height:80px;overflow:auto;font:11px 'SF Mono',Menlo,monospace;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px">載入中…</div></div>
+      </div>
       <div style="margin-top:8px"><button class="btn primary" onclick="applyRouting()">套用</button><span id="saveResult" style="margin-left:10px;color:var(--muted)"></span></div>
     </section>
 
@@ -693,6 +697,7 @@ DASHBOARD_HTML = r"""<!doctype html>
       <header><h2>歷史紀錄</h2>
         <div class="toolbar">
           <input id="histFilter" class="search" placeholder="篩選：模型 / 狀態 / 帳號 / 錯誤">
+          <select id="histSort" style="padding:4px 6px;border:1px solid var(--line);border-radius:6px;font-size:11px"><option value="started">開始時間</option><option value="ended">完成時間</option></select>
           <button class="btn ghost" onclick="clearMonitor()">清除</button>
         </div>
       </header>
@@ -783,7 +788,7 @@ async function streamEvents(){
   try{
     const r=await fetch("/dashboard/api/events",{headers:authHeaders()});
     if(r.status===401){setConn(false,"驗證失敗");return;}
-    setConn(true,"已連線");
+    setConn(true,"已連線");fetchModels();
     const reader=r.body.getReader();const dec=new TextDecoder();let buf="";
     while(true){
       const{value,done}=await reader.read();if(done)break;
@@ -810,8 +815,23 @@ function handleEvent(ev,d){
     state.completed=d.completed_requests||[];
     writeRoutingForm(state.routing);if(d.throttle)writeThrottleForm(d.throttle);renderAll();
   }else if(ev==="request_started"){state.active[d.id]=d;renderActive();}
-   else if(ev==="attempt"){if(state.active[d.id]){state.active[d.id]=d;renderActive();}}
-   else if(ev==="request_finished"){delete state.active[d.id];state.expandedActive.delete(d.id);state.completed.unshift(d);if(state.completed.length>200)state.completed.pop();renderActive();renderHistory();}
+   else if(ev==="attempt"){
+     if(state.active[d.id]){state.active[d.id]=d;
+       const tr=document.querySelector(`#activeWrap tr[data-id="${d.id}"]`);
+       if(tr){
+         const cells=tr.querySelectorAll("td");
+         if(cells.length>=7){
+           const statusMap={"completed":"ok","active":"active","connecting":"active","waiting_first_token":"active","streaming":"ok","client_disconnected":"dis","error":"err"};
+           const statusLabel={"connecting":"連線中","waiting_first_token":"等待回應","streaming":"串流中","active":"處理中","completed":"完成","error":"錯誤","client_disconnected":"斷線"}[d.status]||d.status;
+           cells[1].innerHTML=`<span class="statusbadge ${statusMap[d.status]||"err"}">${statusLabel}</span>`;
+           cells[4].textContent=d.ttft_s!=null?fmtMs(d.ttft_s):(d.status==="waiting_first_token"?"…":"—");
+           cells[5].textContent=d.tps!=null?`${d.tps.toFixed(1)}t/s`:(d.status==="streaming"?"…":"—");
+           cells[6].textContent=d.output_tokens??"—";
+         }
+       }else{renderActive();}
+     }
+   }
+   else if(ev==="request_finished"){delete state.active[d.id];state.expandedActive.delete(d.id);state.completed.unshift(d);if(state.completed.length>1000)state.completed.pop();renderActive();renderHistory();}
    else if(ev==="stream_progress"){
      const r=state.active[d.id];if(r){
        if(d.ttft_s!=null)r.ttft_s=d.ttft_s;if(d.tps!=null)r.tps=d.tps;
@@ -895,12 +915,15 @@ function renderAccounts(){
 }
 
 function reqRow(r,isActive){
-  const statusCls=r.status==="completed"?"ok":(r.status==="active"?"active":(r.status==="client_disconnected"?"dis":"err"));
-  const ttft=r.ttft_s!=null?fmtMs(r.ttft_s):"—";const tps=r.tps!=null?`${r.tps.toFixed(1)}t/s`:"—";
+  const statusMap={"completed":"ok","active":"active","connecting":"active","waiting_first_token":"active","streaming":"ok","client_disconnected":"dis","error":"err"};
+  const statusCls=statusMap[r.status]||"err";
+  const statusLabel={"connecting":"連線中","waiting_first_token":"等待回應","streaming":"串流中","active":"處理中","completed":"完成","error":"錯誤","client_disconnected":"斷線"}[r.status]||r.status;
+  const ttft=r.ttft_s!=null?fmtMs(r.ttft_s):(isActive&&r.status==="waiting_first_token"?"…":"—");
+  const tps=r.tps!=null?`${r.tps.toFixed(1)}t/s`:(isActive&&r.status==="streaming"?"…":"—");
   const trim=r.trim_before_messages?`${r.trim_before_messages}→${r.trim_after_messages} msg`:"";
   const attempts=(r.attempts||[]).length;
   return `<tr class="row" data-id="${esc(r.id)}"><td>${fmtTime(r.started_at)}</td>
-    <td><span class="statusbadge ${statusCls}">${esc(r.status)}</span></td>
+    <td><span class="statusbadge ${statusCls}">${esc(statusLabel)}</span></td>
     <td>${esc(r.api_format)} ${r.stream?"⋯":""}</td>
     <td>${esc(r.original_model)}${r.original_model!==r.active_model?`→${esc(r.active_model)}`:""}</td>
     <td>${ttft}</td><td>${tps}</td><td>${r.output_tokens??"—"}</td><td>${attempts}</td><td>${esc(trim)}</td>
@@ -917,20 +940,39 @@ function renderActive(){
   wireRowExpand("#activeWrap","active");
 }
 
+let histPageSize=50,histRendered=0,histFiltered=[];
 function renderHistory(){
   const f=histFilterText.toLowerCase().trim();
-  const rows=state.completed.filter(r=>{
+  const sortBy=$("#histSort").value;
+  histFiltered=state.completed.filter(r=>{
     if(!f)return true;
     return JSON.stringify(r).toLowerCase().includes(f);
   });
+  if(sortBy==="ended"){histFiltered.sort((a,b)=>(b.ended_at||b.started_at)-(a.ended_at||a.started_at));}
+  else{histFiltered.sort((a,b)=>b.started_at-a.started_at);}
   const el=$("#historyWrap");
-  if(!rows.length){el.innerHTML=`<p style="color:var(--muted)">尚無已完成的請求。</p>`;return;}
+  if(!histFiltered.length){el.innerHTML=`<p style="color:var(--muted)">尚無已完成的請求。</p>`;histRendered=0;return;}
+  histRendered=Math.min(histPageSize,histFiltered.length);
   el.innerHTML=`<table class="reqs"><thead><tr><th>開始</th><th>狀態</th><th>格式</th><th>模型</th><th>首字</th><th>速度</th><th>token</th><th>重試</th><th>裁剪</th><th>錯誤</th></tr></thead>
-    <tbody>${rows.slice(0,300).map(r=>reqRow(r,false)).join("")}</tbody></table>`;
+    <tbody id="histBody">${histFiltered.slice(0,histRendered).map(r=>reqRow(r,false)).join("")}</tbody></table>${histRendered<histFiltered.length?`<div id="histMore" style="text-align:center;padding:8px;color:var(--muted);font-size:11px;cursor:pointer" onclick="loadMoreHistory()">顯示更多 (${histFiltered.length-histRendered} 筆)…</div>`:""}`;
   wireRowExpand("#historyWrap","completed");
+}
+function loadMoreHistory(){
+  const prev=histRendered;
+  histRendered=Math.min(histRendered+histPageSize,histFiltered.length);
+  const body=$("#histBody");if(!body)return;
+  const frag=document.createDocumentFragment();
+  const tmp=document.createElement("tbody");
+  tmp.innerHTML=histFiltered.slice(prev,histRendered).map(r=>reqRow(r,false)).join("");
+  while(tmp.firstChild)frag.appendChild(tmp.firstChild);
+  body.appendChild(frag);
+  wireRowExpand("#historyWrap","completed");
+  const more=$("#histMore");
+  if(more){if(histRendered>=histFiltered.length)more.remove();else more.textContent=`顯示更多 (${histFiltered.length-histRendered} 筆)…`;}
 }
 
 $("#histFilter").addEventListener("input",e=>{histFilterText=e.target.value;renderHistory();});
+$("#histSort").addEventListener("change",()=>{renderHistory();});
 
 function wireRowExpand(wrapSel,kind){
   const expandedSet=(kind==="active"?state.expandedActive:state.expandedCompleted);
@@ -969,8 +1011,8 @@ function renderDetail(r){
   let chunks="";
   if(isActive&&chunkText){
     chunks=`<div style="margin-top:4px"><strong>串流內容</strong> <span style="color:var(--muted);font-size:11px">(即時更新)</span></div><pre class="code" style="max-height:300px;overflow:auto">${esc(chunkText)}</pre>`;
-  }else if(!isActive&&(r.chunks||[]).length){
-    chunks=`<details class="payload"><summary>stream chunks (${r.chunks.length})</summary><pre class="code">${esc(chunkText)}</pre></details>`;
+  }else if(chunkText){
+    chunks=`<div style="margin-top:4px"><strong>串流內容</strong> <span style="color:var(--muted);font-size:11px">(${(r.chunks||[]).length} chunks)</span></div><pre class="code" style="max-height:300px;overflow:auto">${esc(chunkText)}</pre>`;
   }
   const resp=r.response?`<details class="payload"><summary>response</summary><pre class="code">${esc(r.response)}</pre></details>`:"";
   return `<div style="padding:6px 4px"><div style="color:var(--muted);margin-bottom:4px">id=${esc(r.id)} · reason=${esc(r.routing_reason||"")}</div>
@@ -1004,8 +1046,24 @@ function renderLogLine(e){
 function redrawLogs(){const b=$("#logBody");b.innerHTML="";state.logs.forEach(renderLogLine);}
 
 // -------- routing form (unchanged behavior) --------
+let _remoteModels=[];
+async function fetchModels(){
+  try{
+    const d=await api("/dashboard/api/models");
+    _remoteModels=(d.models||[]).map(m=>m.modelId||m.id||m).filter(Boolean).sort();
+    populateModelSelect();
+    $("#modelList").innerHTML=_remoteModels.map(m=>`<div>${esc(m)}</div>`).join("")||"無模型";
+  }catch(e){$("#modelList").textContent="取得失敗: "+e.message;}
+}
+function populateModelSelect(){
+  const sel=$("#manualModel");const cur=sel.value;
+  sel.innerHTML=_remoteModels.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join("");
+  if(cur&&_remoteModels.includes(cur))sel.value=cur;
+}
 function writeRoutingForm(r){if(!r)return;
-  $("#enabled").checked=r.enabled;$("#mode").value=r.mode;$("#manualModel").value=r.manual_model;
+  $("#enabled").checked=r.enabled;$("#mode").value=r.mode;
+  if(_remoteModels.length){$("#manualModel").value=r.manual_model;}
+  else{const sel=$("#manualModel");sel.innerHTML=`<option value="${esc(r.manual_model)}">${esc(r.manual_model||"(未設定)")}</option>`;sel.value=r.manual_model;}
   $("#redirects").value=JSON.stringify(r.redirects,null,2);
   $("#fallbackModels").value=r.fallback_models.join(", ");
   $("#fallbackEnabled").checked=r.fallback_enabled;$("#safeFallback").checked=r.safe_fallback_to_original;
@@ -1017,7 +1075,9 @@ function readRoutingForm(){let red={};try{red=JSON.parse($("#redirects").value||
     safe_fallback_to_original:$("#safeFallback").checked,capture_content:$("#captureContent").checked};}
 async function applyRouting(){try{const d=await api("/dashboard/api/routing",{method:"PUT",body:JSON.stringify(readRoutingForm())});
   writeRoutingForm(d.routing);$("#saveResult").textContent="已套用 "+new Date().toLocaleTimeString();}catch(e){$("#saveResult").textContent=e.message;}}
-async function quickSwap(m){$("#enabled").checked=true;$("#mode").value="manual";$("#manualModel").value=m;await applyRouting();}
+async function quickSwap(m){$("#enabled").checked=true;$("#mode").value="manual";
+  if(_remoteModels.length){$("#manualModel").value=m;}else{const sel=$("#manualModel");sel.innerHTML=`<option value="${esc(m)}">${esc(m)}</option>`;sel.value=m;}
+  await applyRouting();}
 async function resetRouting(){await api("/dashboard/api/routing/reset",{method:"POST",body:"{}"});$("#saveResult").textContent="已重設";}
 async function clearMonitor(){await api("/dashboard/api/monitor/clear",{method:"POST",body:"{}"});state.completed=[];renderHistory();}
 async function restartGateway(){if(!confirm("確定要重啟 Gateway？進行中的請求會中斷。"))return;

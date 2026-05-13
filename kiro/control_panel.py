@@ -11,6 +11,7 @@ monitoring writes while the server is already handling a request.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from collections import deque
@@ -261,20 +262,24 @@ def _serialize_excerpt(value: Any, max_chars: int) -> str:
 
 class ControlPanelState:
     """
-    In-memory control panel state.
+    In-memory control panel state with optional routing persistence.
 
-    The class is thread-safe for FastAPI's mixed sync/async access pattern and
-    deliberately avoids persistence so a server restart always returns to the
-    project defaults.
+    The class is thread-safe for FastAPI's mixed sync/async access pattern.
+    Routing config is persisted to disk so dashboard settings survive restarts.
     """
 
-    def __init__(self, max_completed_requests: int = 200, max_chunks_per_request: int = 80):
+    ROUTING_STATE_FILE = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "routing_state.json"
+    )
+
+    def __init__(self, max_completed_requests: int = 1000, max_chunks_per_request: int = 80, persist: bool = True):
         """
         Initialize the control panel state.
 
         Args:
             max_completed_requests: Number of completed records to keep.
             max_chunks_per_request: Number of stream chunks to keep per request.
+            persist: Whether to load/save routing state from disk.
         """
         self._lock = RLock()
         self._routing = RoutingConfig()
@@ -283,6 +288,44 @@ class ControlPanelState:
         self._completed_requests: Deque[RequestRecord] = deque(maxlen=max_completed_requests)
         self._max_chunks_per_request = max_chunks_per_request
         self._subscribers: List[Callable[[Dict[str, Any]], None]] = []
+        self._persist = persist
+        if persist:
+            self._load_routing_state()
+
+    def _load_routing_state(self) -> None:
+        """Load persisted routing config from disk if available."""
+        try:
+            if os.path.exists(self.ROUTING_STATE_FILE):
+                with open(self.ROUTING_STATE_FILE, "r") as f:
+                    data = json.load(f)
+                routing_data = data.get("routing")
+                if routing_data:
+                    allowed = set(RoutingConfig.__dataclass_fields__.keys())
+                    filtered = {k: v for k, v in routing_data.items() if k in allowed}
+                    self._routing = RoutingConfig(**filtered)
+                    logger.info(f"Loaded persisted routing: enabled={self._routing.enabled}, mode={self._routing.mode}")
+                throttle_data = data.get("throttle")
+                if throttle_data:
+                    allowed = set(ThrottleConfig.__dataclass_fields__.keys())
+                    filtered = {k: v for k, v in throttle_data.items() if k in allowed}
+                    self._throttle = ThrottleConfig(**filtered)
+                    logger.info(f"Loaded persisted throttle: enabled={self._throttle.enabled}")
+        except Exception as e:
+            logger.warning(f"Failed to load routing state: {e}")
+
+    def _save_routing_state(self) -> None:
+        """Persist routing + throttle config to disk."""
+        if not self._persist:
+            return
+        try:
+            data = {
+                "routing": asdict(self._routing),
+                "throttle": asdict(self._throttle),
+            }
+            with open(self.ROUTING_STATE_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to save routing state: {e}")
 
     def subscribe(self, fn: Callable[[Dict[str, Any]], None]) -> None:
         """Add a subscriber for real-time events."""
@@ -369,6 +412,7 @@ class ControlPanelState:
                 f"Runtime routing updated: enabled={self._routing.enabled}, "
                 f"mode={self._routing.mode}, manual_model={self._routing.manual_model}"
             )
+            self._save_routing_state()
             return self.get_routing_config()
 
     def reset_routing_config(self) -> RoutingConfig:
@@ -381,6 +425,7 @@ class ControlPanelState:
         with self._lock:
             self._routing = RoutingConfig()
             logger.info("Runtime routing reset to defaults")
+            self._save_routing_state()
             return self.get_routing_config()
 
     def get_throttle_config(self) -> ThrottleConfig:
@@ -418,6 +463,7 @@ class ControlPanelState:
                 f"jitter={self._throttle.jitter_ms}ms, fast_fail={self._throttle.throttle_fast_fail}, "
                 f"enabled={self._throttle.enabled}"
             )
+            self._save_routing_state()
             return self.get_throttle_config()
 
     def route_model(self, requested_model: str) -> RoutingDecision:
@@ -539,11 +585,28 @@ class ControlPanelState:
             if not record:
                 return
             record.active_model = model
-            record.status = "active"
+            record.status = "connecting"
             record.updated_at = time.time()
             record.attempts.append(
-                RequestAttempt(model=model, account_id=account_id, status="sending")
+                RequestAttempt(model=model, account_id=account_id, status="connecting")
             )
+        self._emit("attempt", asdict(record))
+
+    def update_request_status(self, request_id: str, status: str) -> None:
+        """
+        Update the status of an active request.
+
+        Valid statuses: connecting, waiting_first_token, streaming, active
+        """
+        with self._lock:
+            record = self._active_requests.get(request_id)
+            if not record:
+                return
+            record.status = status
+            record.updated_at = time.time()
+            if record.attempts:
+                record.attempts[-1].status = status
+        self._emit("attempt", asdict(record))
 
     def finish_attempt(
         self,

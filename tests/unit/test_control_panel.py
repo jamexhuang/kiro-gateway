@@ -22,7 +22,7 @@ class TestControlPanelRouting:
         Purpose: Ensure existing projects keep current behavior by default.
         """
         print("Setup: Creating fresh control panel state...")
-        state = ControlPanelState()
+        state = ControlPanelState(persist=False)
 
         print("Action: Routing claude-sonnet-4.5 with defaults...")
         decision = state.route_model("claude-sonnet-4.5")
@@ -38,7 +38,7 @@ class TestControlPanelRouting:
         Purpose: Ensure failed dashboard changes can retry the original client model.
         """
         print("Setup: Enabling manual routing from Opus 4.7 to Opus 4.6...")
-        state = ControlPanelState()
+        state = ControlPanelState(persist=False)
         state.update_routing_config(
             {
                 "enabled": True,
@@ -63,7 +63,7 @@ class TestControlPanelRouting:
         Purpose: Prevent automatic Opus downgrade while still allowing account failover.
         """
         print("Setup: Enabling manual Opus routing with lower-tier fallbacks...")
-        state = ControlPanelState()
+        state = ControlPanelState(persist=False)
         state.update_routing_config(
             {
                 "enabled": True,
@@ -87,7 +87,7 @@ class TestControlPanelRouting:
         Purpose: Support 4-7 and 4.7 style client model names.
         """
         print("Setup: Enabling redirect routing...")
-        state = ControlPanelState()
+        state = ControlPanelState(persist=False)
         state.update_routing_config(
             {
                 "enabled": True,
@@ -110,7 +110,7 @@ class TestControlPanelRouting:
         Purpose: Retry capacity/rate-limit model failures without retrying arbitrary server errors.
         """
         print("Setup: Creating fresh control panel state...")
-        state = ControlPanelState()
+        state = ControlPanelState(persist=False)
 
         print("Action: Checking retryable and non-retryable statuses...")
         assert state.should_retry_failure(404, ["claude-opus-4.6"]) is True
@@ -128,7 +128,7 @@ class TestControlPanelMonitoring:
         Purpose: Ensure sensitive content is not stored unless explicitly enabled.
         """
         print("Setup: Starting monitored request with default capture disabled...")
-        state = ControlPanelState()
+        state = ControlPanelState(persist=False)
         decision = state.route_model("claude-sonnet-4.5")
         request_id = state.start_request("openai", "/v1/chat/completions", False, decision)
 
@@ -147,7 +147,7 @@ class TestControlPanelMonitoring:
         Purpose: Ensure dashboard can inspect passing content without unbounded memory use.
         """
         print("Setup: Enabling content capture with small limit...")
-        state = ControlPanelState()
+        state = ControlPanelState(persist=False)
         state.update_routing_config({"capture_content": True, "max_content_chars": 1000})
         decision = state.route_model("claude-sonnet-4.5")
         request_id = state.start_request("anthropic", "/v1/messages", True, decision)
@@ -289,7 +289,7 @@ class TestDashboardRoutes:
 
 def test_record_metrics_and_trim_populate_record():
     from kiro.control_panel import ControlPanelState, RoutingDecision
-    cp = ControlPanelState()
+    cp = ControlPanelState(persist=False)
     decision = RoutingDecision(
         original_model="claude-opus-4-7",
         routed_model="claude-opus-4-7",

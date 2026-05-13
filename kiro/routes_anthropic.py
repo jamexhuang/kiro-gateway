@@ -489,6 +489,8 @@ async def messages(
                     stream=True
                 )
                 control_panel.finish_attempt(monitor_request_id, response.status_code)
+                if response.status_code == 200:
+                    control_panel.update_request_status(monitor_request_id, "waiting_first_token")
                 
                 while control_panel.should_retry_failure(response.status_code, fallback_candidates):
                     fallback_name = fallback_candidates.pop(0)
