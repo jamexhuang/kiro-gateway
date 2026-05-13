@@ -507,6 +507,19 @@ KIRO_MAX_PAYLOAD_BYTES: int = int(os.getenv("KIRO_MAX_PAYLOAD_BYTES", "600000"))
 AUTO_TRIM_PAYLOAD: bool = os.getenv("AUTO_TRIM_PAYLOAD", "false").lower() in ("true", "1", "yes")
 
 # ==================================================================================================
+# Burst Protection Settings (subagent team 429 prevention)
+# ==================================================================================================
+
+# Max concurrent upstream requests (semaphore size). Lower = less 429s but more queuing.
+MAX_CONCURRENT_UPSTREAM_REQUESTS: int = int(os.getenv("MAX_CONCURRENT_UPSTREAM_REQUESTS", "3"))
+
+# Max random startup delay in ms before each request fires (only applied when contention detected)
+REQUEST_JITTER_MS: int = int(os.getenv("REQUEST_JITTER_MS", "500"))
+
+# Fast-fail on THROTTLING 429? (false = retry with jitter, true = immediate failover to next account)
+THROTTLE_FAST_FAIL: bool = os.getenv("THROTTLE_FAST_FAIL", "false").lower() in ("true", "1", "yes")
+
+# ==================================================================================================
 # WebSearch Settings (MCP Tool Emulation)
 # ==================================================================================================
 

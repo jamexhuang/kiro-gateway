@@ -22,11 +22,26 @@ from loguru import logger
 
 from kiro.config import MODEL_FALLBACKS
 from kiro.model_resolver import normalize_model_name
+from kiro.config import (
+    MAX_CONCURRENT_UPSTREAM_REQUESTS,
+    REQUEST_JITTER_MS,
+    THROTTLE_FAST_FAIL,
+)
 
 
 ROUTING_MODES = {"passthrough", "manual", "redirect"}
 MODEL_FAILURE_STATUS_CODES = {400, 403, 404, 422, 429, 502, 504}
 MODEL_QUALITY_ORDER = {"haiku": 1, "sonnet": 2, "opus": 3}
+
+
+@dataclass
+class ThrottleConfig:
+    """Runtime burst protection configuration."""
+
+    max_concurrent: int = MAX_CONCURRENT_UPSTREAM_REQUESTS
+    jitter_ms: int = REQUEST_JITTER_MS
+    throttle_fast_fail: bool = THROTTLE_FAST_FAIL
+    enabled: bool = True
 
 
 @dataclass
@@ -263,6 +278,7 @@ class ControlPanelState:
         """
         self._lock = RLock()
         self._routing = RoutingConfig()
+        self._throttle = ThrottleConfig()
         self._active_requests: Dict[str, RequestRecord] = {}
         self._completed_requests: Deque[RequestRecord] = deque(maxlen=max_completed_requests)
         self._max_chunks_per_request = max_chunks_per_request
@@ -366,6 +382,43 @@ class ControlPanelState:
             self._routing = RoutingConfig()
             logger.info("Runtime routing reset to defaults")
             return self.get_routing_config()
+
+    def get_throttle_config(self) -> ThrottleConfig:
+        """Return a copy of current throttle configuration."""
+        with self._lock:
+            return ThrottleConfig(**asdict(self._throttle))
+
+    def update_throttle_config(self, updates: Dict[str, Any]) -> ThrottleConfig:
+        """
+        Update throttle configuration from dashboard API input.
+
+        Returns:
+            Updated ThrottleConfig copy.
+
+        Raises:
+            ValueError: If a field has an invalid value.
+        """
+        allowed = set(ThrottleConfig.__dataclass_fields__.keys())
+        unknown = sorted(set(updates.keys()) - allowed)
+        if unknown:
+            raise ValueError(f"Unknown throttle field(s): {', '.join(unknown)}")
+
+        with self._lock:
+            data = asdict(self._throttle)
+            data.update(updates)
+
+            if data["max_concurrent"] < 1:
+                raise ValueError("max_concurrent must be >= 1")
+            if data["jitter_ms"] < 0:
+                raise ValueError("jitter_ms must be >= 0")
+
+            self._throttle = ThrottleConfig(**data)
+            logger.info(
+                f"Throttle config updated: concurrent={self._throttle.max_concurrent}, "
+                f"jitter={self._throttle.jitter_ms}ms, fast_fail={self._throttle.throttle_fast_fail}, "
+                f"enabled={self._throttle.enabled}"
+            )
+            return self.get_throttle_config()
 
     def route_model(self, requested_model: str) -> RoutingDecision:
         """
@@ -598,6 +651,44 @@ class ControlPanelState:
                 record.input_tokens = input_tokens
             record.updated_at = time.time()
 
+    def record_stream_progress(
+        self,
+        request_id: str,
+        ttft: Optional[float] = None,
+        tps: Optional[float] = None,
+        output_tokens: Optional[int] = None,
+        content_delta: Optional[str] = None,
+    ) -> None:
+        """
+        Record live streaming progress and emit SSE event for dashboard.
+
+        Called periodically during streaming to provide real-time visibility.
+        """
+        with self._lock:
+            record = self._active_requests.get(request_id)
+            if not record:
+                return
+            if ttft is not None:
+                record.ttft_s = round(ttft, 3)
+            if tps is not None:
+                record.tps = round(tps, 2)
+            if output_tokens is not None:
+                record.output_tokens = output_tokens
+            if content_delta is not None:
+                record.chunks.append(content_delta)
+                if len(record.chunks) > self._max_chunks_per_request:
+                    record.chunks = record.chunks[-self._max_chunks_per_request:]
+            record.updated_at = time.time()
+
+        # Emit live update event for SSE subscribers
+        self._emit("stream_progress", {
+            "id": request_id,
+            "ttft_s": record.ttft_s,
+            "tps": record.tps,
+            "output_tokens": record.output_tokens,
+            "content_delta": content_delta,
+        })
+
     def record_trim(
         self,
         request_id: str,
@@ -684,8 +775,17 @@ class ControlPanelState:
             JSON-serializable dashboard snapshot.
         """
         with self._lock:
+            throttle_data = asdict(self._throttle)
+            # Merge live adaptive gate state
+            try:
+                from kiro.http_client import get_adaptive_gate
+                throttle_data["gate"] = get_adaptive_gate().snapshot()
+            except Exception:
+                throttle_data["gate"] = None
+
             return {
                 "routing": asdict(self._routing),
+                "throttle": throttle_data,
                 "active_requests": [asdict(record) for record in self._active_requests.values()],
                 "completed_requests": [asdict(record) for record in list(self._completed_requests)],
                 "server_time": time.time(),

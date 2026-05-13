@@ -210,7 +210,12 @@ async def stream_kiro_to_anthropic(
     # Speed monitoring
     _start_time = time.time()
     _first_token_time = None
-    
+
+    # Live progress reporting
+    _last_progress_time: float = 0.0
+    _progress_interval: float = 1.0  # Report every 1 second
+    _accumulated_content: str = ""
+
     try:
         # Send message_start event
         yield format_sse_event("message_start", {
@@ -271,6 +276,26 @@ async def stream_kiro_to_anthropic(
                             "text": content
                         }
                     })
+                    # Live progress reporting
+                    _accumulated_content += content
+                    now = time.time()
+                    if monitor_request_id and now - _last_progress_time >= _progress_interval:
+                        _last_progress_time = now
+                        _gen_time = now - _first_token_time if _first_token_time else 0
+                        _live_tokens = len(full_content) // 4  # rough estimate
+                        _live_tps = _live_tokens / _gen_time if _gen_time > 0.1 else 0
+                        try:
+                            from kiro.control_panel import control_panel as _cp
+                            _cp.record_stream_progress(
+                                monitor_request_id,
+                                ttft=(_first_token_time - _start_time) if _first_token_time else None,
+                                tps=round(_live_tps, 1),
+                                output_tokens=_live_tokens,
+                                content_delta=_accumulated_content[-200:],  # last 200 chars
+                            )
+                        except Exception:
+                            pass
+                        _accumulated_content = ""
             
             elif event.type == "thinking":
                 # Capture first token time

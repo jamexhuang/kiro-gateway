@@ -31,16 +31,140 @@ with connection pooling for better resource management.
 """
 
 import asyncio
+import random
+import time
 from typing import Optional
 
 import httpx
 from fastapi import HTTPException
 from loguru import logger
 
-from kiro.config import MAX_RETRIES, BASE_RETRY_DELAY, FIRST_TOKEN_MAX_RETRIES, STREAMING_READ_TIMEOUT
+from kiro.config import (
+    MAX_RETRIES, BASE_RETRY_DELAY, FIRST_TOKEN_MAX_RETRIES, STREAMING_READ_TIMEOUT,
+    MAX_CONCURRENT_UPSTREAM_REQUESTS, REQUEST_JITTER_MS, THROTTLE_FAST_FAIL,
+)
 from kiro.auth import KiroAuthManager
 from kiro.utils import get_kiro_headers
 from kiro.network_errors import classify_network_error, get_short_error_message, NetworkErrorInfo
+
+
+# --- Adaptive burst protection (AIMD on gap between connection establishments) ---
+class AdaptiveGate:
+    """
+    Single-slot gate that serializes connection establishment with adaptive gap.
+
+    Streaming continues in parallel — gate only holds during "send → status code".
+    On 429: gap doubles (multiplicative increase, capped at max_gap_ms).
+    On consecutive successes: gap shrinks (additive decrease, floored at min_gap_ms).
+    """
+
+    def __init__(
+        self,
+        min_gap_ms: int = 0,
+        max_gap_ms: int = 8000,
+        initial_gap_ms: int = 200,
+        success_threshold: int = 5,
+        decrease_step_ms: int = 100,
+    ):
+        self._lock = asyncio.Lock()
+        self._last_release_ts: float = 0.0
+        self._current_gap_ms: int = initial_gap_ms
+        self._min_gap_ms = min_gap_ms
+        self._max_gap_ms = max_gap_ms
+        self._success_threshold = success_threshold
+        self._decrease_step_ms = decrease_step_ms
+        self._consecutive_successes: int = 0
+        self._consecutive_429s: int = 0
+
+    async def acquire(self) -> float:
+        """Acquire gate, enforcing min gap since last release. Returns waited seconds."""
+        await self._lock.acquire()
+        elapsed_ms = (time.monotonic() - self._last_release_ts) * 1000 if self._last_release_ts > 0 else self._current_gap_ms
+        wait_ms = max(0, self._current_gap_ms - elapsed_ms)
+        if wait_ms > 0:
+            jitter_ms = random.uniform(0, min(wait_ms * 0.3, 200))
+            total_wait_s = (wait_ms + jitter_ms) / 1000
+            await asyncio.sleep(total_wait_s)
+            return total_wait_s
+        return 0.0
+
+    def release(self) -> None:
+        self._last_release_ts = time.monotonic()
+        if self._lock.locked():
+            self._lock.release()
+
+    def report_429(self) -> None:
+        """Multiplicative increase of gap on rate limit."""
+        self._consecutive_successes = 0
+        self._consecutive_429s += 1
+        old = self._current_gap_ms
+        self._current_gap_ms = min(self._max_gap_ms, max(self._current_gap_ms * 2, 500))
+        logger.info(f"AdaptiveGate: 429 detected, gap {old}ms → {self._current_gap_ms}ms (consecutive_429s={self._consecutive_429s})")
+
+    def report_success(self) -> None:
+        """Additive decrease of gap after consecutive successes."""
+        self._consecutive_429s = 0
+        self._consecutive_successes += 1
+        if self._consecutive_successes >= self._success_threshold and self._current_gap_ms > self._min_gap_ms:
+            old = self._current_gap_ms
+            self._current_gap_ms = max(self._min_gap_ms, self._current_gap_ms - self._decrease_step_ms)
+            self._consecutive_successes = 0
+            logger.debug(f"AdaptiveGate: {self._success_threshold} successes, gap {old}ms → {self._current_gap_ms}ms")
+
+    def snapshot(self) -> dict:
+        return {
+            "current_gap_ms": self._current_gap_ms,
+            "min_gap_ms": self._min_gap_ms,
+            "max_gap_ms": self._max_gap_ms,
+            "consecutive_successes": self._consecutive_successes,
+            "consecutive_429s": self._consecutive_429s,
+            "locked": self._lock.locked(),
+        }
+
+    def update_bounds(self, min_gap_ms: Optional[int] = None, max_gap_ms: Optional[int] = None) -> None:
+        if min_gap_ms is not None:
+            self._min_gap_ms = max(0, min_gap_ms)
+        if max_gap_ms is not None:
+            self._max_gap_ms = max(self._min_gap_ms, max_gap_ms)
+        self._current_gap_ms = max(self._min_gap_ms, min(self._max_gap_ms, self._current_gap_ms))
+
+
+_adaptive_gate: Optional[AdaptiveGate] = None
+_burst_enabled: bool = True
+_throttle_fast_fail: bool = THROTTLE_FAST_FAIL
+
+
+def get_adaptive_gate() -> AdaptiveGate:
+    global _adaptive_gate
+    if _adaptive_gate is None:
+        _adaptive_gate = AdaptiveGate(
+            min_gap_ms=0,
+            max_gap_ms=8000,
+            initial_gap_ms=REQUEST_JITTER_MS,
+        )
+    return _adaptive_gate
+
+
+def update_burst_settings(
+    max_concurrent: Optional[int] = None,  # kept for API compat, ignored
+    jitter_ms: Optional[int] = None,        # repurposed as initial gap
+    throttle_fast_fail: Optional[bool] = None,
+    enabled: Optional[bool] = None,
+    min_gap_ms: Optional[int] = None,
+    max_gap_ms: Optional[int] = None,
+) -> None:
+    """Called by dashboard route when user changes settings."""
+    global _throttle_fast_fail, _burst_enabled
+    gate = get_adaptive_gate()
+    if jitter_ms is not None and min_gap_ms is None and max_gap_ms is None:
+        # Treat jitter_ms as both min and current gap on first set
+        gate.update_bounds(min_gap_ms=0, max_gap_ms=max(jitter_ms * 16, 8000))
+    if min_gap_ms is not None or max_gap_ms is not None:
+        gate.update_bounds(min_gap_ms=min_gap_ms, max_gap_ms=max_gap_ms)
+    if throttle_fast_fail is not None:
+        _throttle_fast_fail = throttle_fast_fail
+    if enabled is not None:
+        _burst_enabled = enabled
 
 
 class KiroHttpClient:
@@ -218,39 +342,60 @@ class KiroHttpClient:
                 # Get current token
                 token = await self.auth_manager.get_access_token()
                 headers = get_kiro_headers(self.auth_manager, token)
-                
+
                 # Build request kwargs based on parameters
                 request_kwargs = {"headers": headers}
-                
+
                 if json_data is not None:
                     request_kwargs["json"] = json_data
-                
+
                 if params is not None:
                     request_kwargs["params"] = params
-                
-                if stream:
-                    # Prevent CLOSE_WAIT connection leak (issue #38)
-                    headers["Connection"] = "close"
-                    req = client.build_request(method, url, **request_kwargs)
-                    logger.debug("Sending request to Kiro API...")
-                    response = await client.send(req, stream=True)
+
+                # --- Adaptive gate: serialize connection establishment ---
+                if _burst_enabled:
+                    gate = get_adaptive_gate()
+                    waited = await gate.acquire()
+                    if waited > 0:
+                        logger.debug(f"AdaptiveGate: waited {waited:.3f}s before sending (gap={gate._current_gap_ms}ms)")
+                    try:
+                        if stream:
+                            headers["Connection"] = "close"
+                            req = client.build_request(method, url, **request_kwargs)
+                            logger.debug("Sending request to Kiro API...")
+                            response = await client.send(req, stream=True)
+                        else:
+                            logger.debug("Sending request to Kiro API...")
+                            response = await client.request(method, url, **request_kwargs)
+                    finally:
+                        gate.release()
                 else:
-                    logger.debug("Sending request to Kiro API...")
-                    response = await client.request(method, url, **request_kwargs)
-                
+                    if stream:
+                        headers["Connection"] = "close"
+                        req = client.build_request(method, url, **request_kwargs)
+                        logger.debug("Sending request to Kiro API...")
+                        response = await client.send(req, stream=True)
+                    else:
+                        logger.debug("Sending request to Kiro API...")
+                        response = await client.request(method, url, **request_kwargs)
+
                 # Check status
                 if response.status_code == 200:
+                    if _burst_enabled:
+                        get_adaptive_gate().report_success()
                     return response
-                
+
                 # 403 - token expired, refresh and retry
                 if response.status_code == 403:
                     logger.warning(f"Received 403, refreshing token (attempt {attempt + 1}/{MAX_RETRIES})")
                     await self.auth_manager.force_refresh()
                     continue
-                
+
                 # 429 - rate limit, wait and retry
                 if response.status_code == 429:
                     last_response = response
+                    if _burst_enabled:
+                        get_adaptive_gate().report_429()
                     fast_fail = False
                     if not stream:
                         try:
@@ -258,9 +403,15 @@ class KiroHttpClient:
                             import json as _json
                             payload = _json.loads(body_bytes.decode("utf-8", errors="replace"))
                             reason = payload.get("reason") or payload.get("error", {}).get("reason")
-                            if reason in ("INSUFFICIENT_MODEL_CAPACITY", "THROTTLING"):
+                            if reason == "INSUFFICIENT_MODEL_CAPACITY":
                                 logger.warning(
                                     f"429 {reason}: skipping retry, letting caller failover"
+                                )
+                                fast_fail = True
+                                response._content = body_bytes
+                            elif reason == "THROTTLING" and _throttle_fast_fail:
+                                logger.warning(
+                                    f"429 {reason}: fast-fail enabled, letting caller failover"
                                 )
                                 fast_fail = True
                                 response._content = body_bytes
@@ -269,58 +420,62 @@ class KiroHttpClient:
                     if fast_fail or attempt >= max_retries - 1:
                         break
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
+                    jitter = delay * random.uniform(0, 0.5)
                     logger.warning(
-                        f"Received 429, waiting {delay}s (attempt {attempt + 1}/{max_retries})"
+                        f"Received 429, waiting {delay + jitter:.1f}s (attempt {attempt + 1}/{max_retries})"
                     )
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(delay + jitter)
                     continue
-                
+
                 # 5xx - server error, wait and retry
                 if 500 <= response.status_code < 600:
-                    last_response = response  # Сохраняем для возврата после exhaustion
+                    last_response = response
                     if attempt >= max_retries - 1:
                         break
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
-                    logger.warning(f"Received {response.status_code}, waiting {delay}s (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(delay)
+                    jitter = delay * random.uniform(0, 0.3)
+                    logger.warning(f"Received {response.status_code}, waiting {delay + jitter:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(delay + jitter)
                     continue
-                
+
                 # Other errors - return as is
                 return response
                 
             except httpx.TimeoutException as e:
                 last_error = e
-                
+
                 # Classify timeout error for user-friendly messaging
                 error_info = classify_network_error(e)
                 last_error_info = error_info
-                
+
                 # Log with user-friendly message
                 short_msg = get_short_error_message(error_info)
-                
+
                 if error_info.is_retryable and attempt < max_retries - 1:
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
-                    logger.warning(f"{short_msg} - waiting {delay}s (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(delay)
+                    jitter = delay * random.uniform(0, 0.3)
+                    logger.warning(f"{short_msg} - waiting {delay + jitter:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(delay + jitter)
                 else:
                     logger.error(f"{short_msg} - no more retries (attempt {attempt + 1}/{max_retries})")
                     if not error_info.is_retryable:
                         break  # Don't retry non-retryable errors
-                
+
             except httpx.RequestError as e:
                 last_error = e
-                
+
                 # Classify the error for user-friendly messaging
                 error_info = classify_network_error(e)
                 last_error_info = error_info
-                
+
                 # Log with user-friendly message
                 short_msg = get_short_error_message(error_info)
-                
+
                 if error_info.is_retryable and attempt < max_retries - 1:
                     delay = BASE_RETRY_DELAY * (2 ** attempt)
-                    logger.warning(f"{short_msg} - waiting {delay}s (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(delay)
+                    jitter = delay * random.uniform(0, 0.3)
+                    logger.warning(f"{short_msg} - waiting {delay + jitter:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(delay + jitter)
                 else:
                     logger.error(f"{short_msg} - no more retries (attempt {attempt + 1}/{max_retries})")
                     if not error_info.is_retryable:

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json as _json
+import os
+import sys
 import time
 from dataclasses import asdict
 from typing import Any, Dict, Optional
@@ -22,7 +24,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from kiro.config import PROXY_API_KEY, APP_VERSION
-from kiro.control_panel import RoutingConfig, control_panel
+from kiro.control_panel import RoutingConfig, ThrottleConfig, control_panel
 
 
 router = APIRouter(tags=["Dashboard"])
@@ -55,6 +57,14 @@ class RoutingPreviewRequest(BaseModel):
     """
 
     model: str = Field(default="claude-opus-4-7", min_length=1)
+
+
+class ThrottleUpdateRequest(BaseModel):
+    """Partial burst protection update."""
+
+    throttle_fast_fail: Optional[bool] = None
+    enabled: Optional[bool] = None
+    max_gap_ms: Optional[int] = Field(default=None, ge=500, le=30000)
 
 
 async def verify_dashboard_api_key(
@@ -253,6 +263,49 @@ async def test_dashboard_routing(request_data: RoutingPreviewRequest) -> Dict[st
     return {"decision": decision.__dict__}
 
 
+@router.get("/dashboard/api/throttle", dependencies=[Security(verify_dashboard_api_key)])
+async def get_throttle_config() -> Dict[str, Any]:
+    """Return current burst protection configuration."""
+    from kiro.http_client import get_adaptive_gate
+    result = asdict(control_panel.get_throttle_config())
+    result["gate"] = get_adaptive_gate().snapshot()
+    return {"throttle": result}
+
+
+@router.put("/dashboard/api/throttle", dependencies=[Security(verify_dashboard_api_key)])
+async def update_throttle_config(request_data: ThrottleUpdateRequest) -> Dict[str, Any]:
+    """
+    Update burst protection configuration.
+
+    Changes take effect immediately — no restart needed.
+    """
+    updates = request_data.model_dump(exclude_none=True)
+
+    # Separate gate-level settings from config-level settings
+    max_gap_ms = updates.pop("max_gap_ms", None)
+
+    if updates:
+        try:
+            config = control_panel.update_throttle_config(updates)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        config = control_panel.get_throttle_config()
+
+    from kiro.http_client import update_burst_settings
+    update_burst_settings(
+        throttle_fast_fail=config.throttle_fast_fail,
+        enabled=config.enabled,
+        max_gap_ms=max_gap_ms,
+    )
+
+    # Return config + live gate state
+    from kiro.http_client import get_adaptive_gate
+    result = asdict(config)
+    result["gate"] = get_adaptive_gate().snapshot()
+    return {"throttle": result}
+
+
 @router.post("/dashboard/api/monitor/clear", dependencies=[Security(verify_dashboard_api_key)])
 async def clear_dashboard_monitor() -> Dict[str, str]:
     """
@@ -263,6 +316,25 @@ async def clear_dashboard_monitor() -> Dict[str, str]:
     """
     control_panel.clear_monitor()
     return {"status": "ok"}
+
+
+@router.post("/dashboard/api/restart", dependencies=[Security(verify_dashboard_api_key)])
+async def restart_gateway() -> Dict[str, str]:
+    """
+    Restart the gateway process to reload code.
+
+    Uses os.execv to replace the current process with a fresh one.
+    Active requests will be interrupted.
+    """
+    logger.warning("Gateway restart requested via dashboard")
+
+    async def _do_restart():
+        await asyncio.sleep(0.5)  # Let the response flush
+        python = sys.executable
+        os.execv(python, [python] + sys.argv)
+
+    asyncio.ensure_future(_do_restart())
+    return {"status": "restarting"}
 
 
 @router.get("/dashboard/api/metrics", dependencies=[Security(verify_dashboard_api_key)])
@@ -526,6 +598,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     <div class="ver">vAPP_VERSION_PLACEHOLDER · <span id="connStatus"><span class="status-dot off"></span>未連線</span></div>
     <a data-jump="panel-status" class="active">總覽</a>
     <a data-jump="panel-routing">路由設定</a>
+    <a data-jump="panel-throttle">流量控制</a>
     <a data-jump="panel-accounts">帳號</a>
     <a data-jump="panel-active">進行中</a>
     <a data-jump="panel-history">歷史紀錄</a>
@@ -535,6 +608,7 @@ DASHBOARD_HTML = r"""<!doctype html>
       <label>代理 API 金鑰</label>
       <input id="apiKey" type="password" placeholder="輸入 Bearer 金鑰">
       <div style="margin-top:6px"><button class="btn primary" onclick="saveKey()">連線</button><button class="btn ghost" onclick="forgetKey()">清除</button></div>
+      <div style="margin-top:10px"><button class="btn warn" onclick="restartGateway()">重啟 Gateway</button></div>
     </div>
   </nav>
   <main>
@@ -575,6 +649,32 @@ DASHBOARD_HTML = r"""<!doctype html>
       <label style="font-size:10.5px;color:var(--muted);display:block;margin-top:8px">重導向規則 JSON</label>
       <textarea id="redirects" style="width:100%;min-height:64px;padding:6px;border:1px solid var(--line);border-radius:6px;font:12px 'SF Mono',Menlo,monospace"></textarea>
       <div style="margin-top:8px"><button class="btn primary" onclick="applyRouting()">套用</button><span id="saveResult" style="margin-left:10px;color:var(--muted)"></span></div>
+    </section>
+
+    <section id="panel-throttle" class="panel">
+      <header><h2>流量控制</h2>
+        <div class="toolbar">
+          <button class="btn primary" onclick="applyThrottle()">套用</button>
+          <span id="throttleResult" style="font-size:11px;color:var(--muted)"></span>
+        </div>
+      </header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">控制上游請求並發數和啟動抖動，防止 subagent 團隊同時發送請求觸發 429。調整後即時生效，無需重啟。</p>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr) auto;gap:8px;align-items:end">
+        <div><label style="font-size:10.5px;color:var(--muted)">目前間隔 (ms)</label>
+          <div id="gateGap" style="font:700 16px 'SF Mono',Menlo,monospace;padding:5px 0">—</div></div>
+        <div><label style="font-size:10.5px;color:var(--muted)">連續成功</label>
+          <div id="gateSuccesses" style="font:700 16px 'SF Mono',Menlo,monospace;padding:5px 0">—</div></div>
+        <div><label style="font-size:10.5px;color:var(--muted)">連續 429</label>
+          <div id="gate429s" style="font:700 16px 'SF Mono',Menlo,monospace;padding:5px 0;color:var(--danger)">—</div></div>
+        <label class="chip"><input id="burstEnabled" type="checkbox" checked> 啟用</label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;align-items:end">
+        <div><label style="font-size:10.5px;color:var(--muted)">最大間隔 (ms)</label>
+          <input id="maxGapMs" type="number" min="500" max="30000" value="8000" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"></div>
+        <div><label style="font-size:10.5px;color:var(--muted)">THROTTLING 策略</label>
+          <select id="throttleStrategy" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"><option value="retry">重試 + 自適應</option><option value="fastfail">快速失敗 → 換帳號</option></select></div>
+        <div><button class="btn primary" onclick="applyThrottle()">套用</button><span id="throttleResult" style="margin-left:8px;font-size:11px;color:var(--muted)"></span></div>
+      </div>
     </section>
 
     <section id="panel-accounts" class="panel">
@@ -656,7 +756,7 @@ $$(".sidebar a[data-jump]").forEach(el=>el.addEventListener("click",()=>{
 }));
 
 // -------- state --------
-const state={routing:null,accounts:[],active:{},completed:[],metrics:null,logs:[],logSeq:-1};
+const state={routing:null,accounts:[],active:{},completed:[],metrics:null,logs:[],logSeq:-1,expandedActive:new Set(),expandedCompleted:new Set()};
 const LOG_MAX_VIEW=2000;let logLevelFilter="ALL";let histFilterText="";
 
 function fmtTime(ts){if(!ts)return"";return new Date(ts*1000).toLocaleTimeString();}
@@ -708,10 +808,33 @@ function handleEvent(ev,d){
     state.routing=d.routing;state.accounts=d.accounts||[];
     (d.active_requests||[]).forEach(r=>state.active[r.id]=r);
     state.completed=d.completed_requests||[];
-    writeRoutingForm(state.routing);renderAll();
+    writeRoutingForm(state.routing);if(d.throttle)writeThrottleForm(d.throttle);renderAll();
   }else if(ev==="request_started"){state.active[d.id]=d;renderActive();}
    else if(ev==="attempt"){if(state.active[d.id]){state.active[d.id]=d;renderActive();}}
-   else if(ev==="request_finished"){delete state.active[d.id];state.completed.unshift(d);if(state.completed.length>200)state.completed.pop();renderActive();renderHistory();}
+   else if(ev==="request_finished"){delete state.active[d.id];state.expandedActive.delete(d.id);state.completed.unshift(d);if(state.completed.length>200)state.completed.pop();renderActive();renderHistory();}
+   else if(ev==="stream_progress"){
+     const r=state.active[d.id];if(r){
+       if(d.ttft_s!=null)r.ttft_s=d.ttft_s;if(d.tps!=null)r.tps=d.tps;
+       if(d.output_tokens!=null)r.output_tokens=d.output_tokens;
+       if(d.content_delta){r.chunks=r.chunks||[];r.chunks.push(d.content_delta);if(r.chunks.length>80)r.chunks=r.chunks.slice(-80);}
+       // In-place update: find the row and patch cells without rebuilding
+       const tr=document.querySelector(`#activeWrap tr[data-id="${d.id}"]`);
+       if(tr){
+         const cells=tr.querySelectorAll("td");
+         if(cells.length>=7){
+           cells[4].textContent=r.ttft_s!=null?r.ttft_s.toFixed(2)+"s":"…";
+           cells[5].textContent=r.tps!=null?r.tps.toFixed(1)+" t/s":"…";
+           cells[6].textContent=r.output_tokens??"…";
+         }
+         // Update expanded detail content if open
+         const exp=tr.nextElementSibling;
+         if(exp&&exp.classList.contains("exp")){
+           const pre=exp.querySelector("pre.code");
+           if(pre&&d.content_delta){pre.textContent+=d.content_delta;pre.scrollTop=pre.scrollHeight;}
+         }
+       }else{renderActive();}
+     }
+   }
    else if(ev==="log"){pushLog(d);}
 }
 
@@ -810,15 +933,27 @@ function renderHistory(){
 $("#histFilter").addEventListener("input",e=>{histFilterText=e.target.value;renderHistory();});
 
 function wireRowExpand(wrapSel,kind){
+  const expandedSet=(kind==="active"?state.expandedActive:state.expandedCompleted);
+  // Restore expanded rows after table rebuild
   $(wrapSel).querySelectorAll("tr.row").forEach(tr=>{
+    const id=tr.dataset.id;
+    if(expandedSet.has(id)){
+      const r=(kind==="active"?state.active[id]:state.completed.find(x=>x.id===id));
+      if(r){
+        const exp=document.createElement("tr");exp.className="exp";exp.dataset.expFor=id;
+        exp.innerHTML=`<td colspan="10">${renderDetail(r)}</td>`;
+        tr.after(exp);
+      }
+    }
     tr.addEventListener("click",()=>{
       const next=tr.nextElementSibling;
-      if(next&&next.classList.contains("exp")){next.remove();return;}
-      const id=tr.dataset.id;const r=(kind==="active"?state.active[id]:state.completed.find(x=>x.id===id));
+      if(next&&next.classList.contains("exp")){next.remove();expandedSet.delete(id);return;}
+      const r=(kind==="active"?state.active[id]:state.completed.find(x=>x.id===id));
       if(!r)return;
-      const exp=document.createElement("tr");exp.className="exp";
+      const exp=document.createElement("tr");exp.className="exp";exp.dataset.expFor=id;
       exp.innerHTML=`<td colspan="10">${renderDetail(r)}</td>`;
       tr.after(exp);
+      expandedSet.add(id);
     });
   });
 }
@@ -829,7 +964,14 @@ function renderDetail(r){
     const big=b&&b.length>40000;
     return `<details class="payload"><summary>${esc(n)}${big?" (large)":""}</summary>${big?`<p style="color:var(--muted)">${b.length} chars — open to load</p><button class="btn" onclick="this.nextElementSibling.classList.remove('hidden');this.remove()">Show</button><pre class="code hidden">${esc(b)}</pre>`:`<pre class="code">${esc(b)}</pre>`}</details>`;
   }).join("");
-  const chunks=(r.chunks||[]).length?`<details class="payload"><summary>stream chunks (${r.chunks.length})</summary><pre class="code">${esc(r.chunks.join("\n\n"))}</pre></details>`:"";
+  const isActive=!!state.active[r.id];
+  const chunkText=(r.chunks||[]).join("");
+  let chunks="";
+  if(isActive&&chunkText){
+    chunks=`<div style="margin-top:4px"><strong>串流內容</strong> <span style="color:var(--muted);font-size:11px">(即時更新)</span></div><pre class="code" style="max-height:300px;overflow:auto">${esc(chunkText)}</pre>`;
+  }else if(!isActive&&(r.chunks||[]).length){
+    chunks=`<details class="payload"><summary>stream chunks (${r.chunks.length})</summary><pre class="code">${esc(chunkText)}</pre></details>`;
+  }
   const resp=r.response?`<details class="payload"><summary>response</summary><pre class="code">${esc(r.response)}</pre></details>`:"";
   return `<div style="padding:6px 4px"><div style="color:var(--muted);margin-bottom:4px">id=${esc(r.id)} · reason=${esc(r.routing_reason||"")}</div>
     <div style="margin-bottom:4px"><strong>嘗試紀錄</strong>${attempts||" —"}</div>${payloads}${chunks}${resp}</div>`;
@@ -878,6 +1020,25 @@ async function applyRouting(){try{const d=await api("/dashboard/api/routing",{me
 async function quickSwap(m){$("#enabled").checked=true;$("#mode").value="manual";$("#manualModel").value=m;await applyRouting();}
 async function resetRouting(){await api("/dashboard/api/routing/reset",{method:"POST",body:"{}"});$("#saveResult").textContent="已重設";}
 async function clearMonitor(){await api("/dashboard/api/monitor/clear",{method:"POST",body:"{}"});state.completed=[];renderHistory();}
+async function restartGateway(){if(!confirm("確定要重啟 Gateway？進行中的請求會中斷。"))return;
+  try{await api("/dashboard/api/restart",{method:"POST",body:"{}"});setConn(null,"重啟中…");setTimeout(()=>location.reload(),3000);}catch(e){alert(e.message);}}
+
+// -------- throttle form --------
+function writeThrottleForm(t){if(!t)return;
+  $("#throttleStrategy").value=t.throttle_fast_fail?"fastfail":"retry";
+  $("#burstEnabled").checked=t.enabled;
+  if(t.gate){
+    $("#gateGap").textContent=t.gate.current_gap_ms+"ms";
+    $("#gateSuccesses").textContent=t.gate.consecutive_successes;
+    $("#gate429s").textContent=t.gate.consecutive_429s;
+    $("#maxGapMs").value=t.gate.max_gap_ms;
+  }}
+function readThrottleForm(){return{
+  throttle_fast_fail:$("#throttleStrategy").value==="fastfail",
+  enabled:$("#burstEnabled").checked,
+  max_gap_ms:parseInt($("#maxGapMs").value)||8000};}
+async function applyThrottle(){try{const d=await api("/dashboard/api/throttle",{method:"PUT",body:JSON.stringify(readThrottleForm())});
+  writeThrottleForm(d.throttle);$("#throttleResult").textContent="已套用 "+new Date().toLocaleTimeString();}catch(e){$("#throttleResult").textContent=e.message;}}
 
 if(hasKey())connect();else setConn(false,"未輸入金鑰");
 
