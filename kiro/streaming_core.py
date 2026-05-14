@@ -418,21 +418,22 @@ async def stream_with_first_token_retry(
         ...     print(chunk)
     """
     last_error: Optional[Exception] = None
-    
+    any_chunk_yielded = False
+
     for attempt in range(max_retries):
         response: Optional[httpx.Response] = None
         try:
             # Make request
             if attempt > 0:
                 logger.warning(f"Retry attempt {attempt + 1}/{max_retries} after first token timeout")
-            
+
             # On first attempt, reuse initial_response if provided
             if attempt == 0 and initial_response is not None:
                 response = initial_response
                 logger.debug("Reusing initial response for first attempt")
             else:
                 response = await make_request()
-            
+
             if response.status_code != 200:
                 # Error from API - close response and raise exception
                 try:
@@ -440,26 +441,27 @@ async def stream_with_first_token_retry(
                     error_text = error_content.decode('utf-8', errors='replace')
                 except Exception:
                     error_text = "Unknown error"
-                
+
                 try:
                     await response.aclose()
                 except Exception:
                     pass
-                
+
                 logger.error(f"Error from Kiro API: {response.status_code} - {error_text}")
-                
+
                 if on_http_error:
                     raise on_http_error(response.status_code, error_text)
                 else:
                     raise Exception(f"Upstream API error ({response.status_code}): {error_text}")
-            
+
             # Try to stream with first token timeout
             async for chunk in stream_processor(response):
+                any_chunk_yielded = True
                 yield chunk
-            
+
             # Successfully completed - exit
             return
-            
+
         except FirstTokenTimeoutError as e:
             last_error = e
             logger.warning(
@@ -479,14 +481,21 @@ async def stream_with_first_token_retry(
 
         except httpx.RemoteProtocolError as e:
             last_error = e
-            logger.warning(
-                f"[RemoteProtocolError] Attempt {attempt + 1}/{max_retries} upstream disconnected mid-stream: {e}"
-            )
             if response:
                 try:
                     await response.aclose()
                 except Exception:
                     pass
+            # Only retry if no data was sent to client yet;
+            # once chunks are yielded, retrying would corrupt the SSE stream
+            if any_chunk_yielded:
+                logger.error(
+                    f"[RemoteProtocolError] Upstream disconnected after data was already sent to client: {e}"
+                )
+                raise
+            logger.warning(
+                f"[RemoteProtocolError] Attempt {attempt + 1}/{max_retries} upstream disconnected before first chunk: {e}"
+            )
             if attempt >= max_retries - 1:
                 raise
             continue

@@ -498,9 +498,8 @@ FAKE_REASONING_INITIAL_BUFFER_SIZE: int = int(os.getenv("FAKE_REASONING_INITIAL_
 # ==================================================================================================
 
 # Payload size limit in bytes (Kiro API rejects > ~615KB with cryptic 400 error)
-# Default 400KB leaves sufficient output token budget for tool calls.
-# At 600KB the API has almost no room for output, causing 130-byte truncation.
-KIRO_MAX_PAYLOAD_BYTES: int = int(os.getenv("KIRO_MAX_PAYLOAD_BYTES", "400000"))
+# 600KB maximises context; if payload still exceeds after trim, user should /compact.
+KIRO_MAX_PAYLOAD_BYTES: int = int(os.getenv("KIRO_MAX_PAYLOAD_BYTES", "600000"))
 
 # Auto-trim payload when over limit (default: true - enabled)
 # Removes oldest message pairs until payload fits under KIRO_MAX_PAYLOAD_BYTES.
