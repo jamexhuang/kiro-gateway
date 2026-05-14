@@ -498,13 +498,14 @@ FAKE_REASONING_INITIAL_BUFFER_SIZE: int = int(os.getenv("FAKE_REASONING_INITIAL_
 # ==================================================================================================
 
 # Payload size limit in bytes (Kiro API rejects > ~615KB with cryptic 400 error)
-# Default 600KB provides safety margin below the ~615KB hard limit
-KIRO_MAX_PAYLOAD_BYTES: int = int(os.getenv("KIRO_MAX_PAYLOAD_BYTES", "600000"))
+# Default 400KB leaves sufficient output token budget for tool calls.
+# At 600KB the API has almost no room for output, causing 130-byte truncation.
+KIRO_MAX_PAYLOAD_BYTES: int = int(os.getenv("KIRO_MAX_PAYLOAD_BYTES", "400000"))
 
-# Auto-trim payload when over limit (default: false - disabled)
-# Enable this if you use many tools (30+) and hit "Improperly formed request" errors
-# When false, returns a clear error instead of trimming
-AUTO_TRIM_PAYLOAD: bool = os.getenv("AUTO_TRIM_PAYLOAD", "false").lower() in ("true", "1", "yes")
+# Auto-trim payload when over limit (default: true - enabled)
+# Removes oldest message pairs until payload fits under KIRO_MAX_PAYLOAD_BYTES.
+# Image eviction runs first (removes old images), trim is the fallback.
+AUTO_TRIM_PAYLOAD: bool = os.getenv("AUTO_TRIM_PAYLOAD", "true").lower() in ("true", "1", "yes")
 
 # ==================================================================================================
 # Image Eviction Settings (History Payload Optimization)

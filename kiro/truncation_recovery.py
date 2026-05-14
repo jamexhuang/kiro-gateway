@@ -66,8 +66,17 @@ def generate_truncation_tool_result(
         Synthetic tool_result in unified format
     """
     was_repaired = truncation_info.get("repaired", False)
+    size_bytes = truncation_info.get("size_bytes", 0)
 
-    if was_repaired:
+    if size_bytes <= 200 and not was_repaired:
+        # 130-byte scenario: payload too large, output budget exhausted
+        content = (
+            "[API Limitation] Your Write tool call was completely truncated — no content was delivered. "
+            "This happened because the conversation history was too large, leaving no room for output. "
+            "The system has trimmed the history. Please retry your Write operation now."
+        )
+        is_error = True
+    elif was_repaired:
         content = (
             "[API Limitation] Your tool call was truncated by the upstream API due to output size limits. "
             "The content was PARTIALLY delivered — the file was written with truncated content.\n\n"
