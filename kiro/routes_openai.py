@@ -414,10 +414,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                     "POST",
                     url,
                     kiro_payload,
-                    stream=True
+                    stream=True,
+                    monitor_request_id=monitor_request_id,
                 )
                 control_panel.finish_attempt(monitor_request_id, response.status_code)
-                
+
                 while control_panel.should_retry_failure(response.status_code, fallback_candidates):
                     fallback_name = fallback_candidates.pop(0)
                     logger.warning(
@@ -446,10 +447,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                         "POST",
                         url,
                         kiro_payload,
-                        stream=True
+                        stream=True,
+                        monitor_request_id=monitor_request_id,
                     )
                     control_panel.finish_attempt(monitor_request_id, response.status_code)
-                    
+
                     if response.status_code == 200:
                         logger.success(f"Runtime fallback to {fallback_name} successful")
                 
@@ -469,7 +471,8 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                             try:
                                 async def make_retry_request():
                                     return await http_client.request_with_retry(
-                                        "POST", url, kiro_payload, stream=True
+                                        "POST", url, kiro_payload, stream=True,
+                                        monitor_request_id=monitor_request_id,
                                     )
                                 
                                 async for chunk in stream_with_first_token_retry(
@@ -780,10 +783,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
             "POST",
             url,
             kiro_payload,
-            stream=True
+            stream=True,
+            monitor_request_id=monitor_request_id,
         )
         control_panel.finish_attempt(monitor_request_id, response.status_code)
-        
+
         while control_panel.should_retry_failure(response.status_code, fallback_candidates):
             fallback_name = fallback_candidates.pop(0)
             logger.warning(
@@ -812,10 +816,11 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                 "POST",
                 url,
                 kiro_payload,
-                stream=True
+                stream=True,
+                monitor_request_id=monitor_request_id,
             )
             control_panel.finish_attempt(monitor_request_id, response.status_code)
-            
+
             if response.status_code == 200:
                 logger.success(f"Runtime fallback to {fallback_name} successful")
         
@@ -882,7 +887,8 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                     # Create retry request function for retries
                     async def make_retry_request():
                         return await http_client.request_with_retry(
-                            "POST", url, kiro_payload, stream=True
+                            "POST", url, kiro_payload, stream=True,
+                            monitor_request_id=monitor_request_id,
                         )
                     
                     # Use retry wrapper with initial response

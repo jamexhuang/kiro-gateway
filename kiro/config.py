@@ -358,6 +358,19 @@ TRUNCATION_RECOVERY: bool = os.getenv("TRUNCATION_RECOVERY", "true").lower() in 
 LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # ==================================================================================================
+# Latency Tracing Settings
+# ==================================================================================================
+
+# Enable per-stage latency tracing (auth / gate / upstream connect / ttft / streaming).
+# When disabled (default), tracer is a no-op singleton with negligible hot-path cost.
+# When enabled, every request's RequestRecord gets a `trace` field with stage-level timings,
+# and dashboard receives a `latency_summary` SSE event every LATENCY_SUMMARY_INTERVAL_S seconds.
+LATENCY_TRACING_ENABLED: bool = os.getenv("LATENCY_TRACING", "false").lower() in ("true", "1", "yes")
+
+# Push interval for latency_summary SSE events (seconds).
+LATENCY_SUMMARY_INTERVAL_S: float = float(os.getenv("LATENCY_SUMMARY_INTERVAL_S", "5.0"))
+
+# ==================================================================================================
 # First Token Timeout Settings (Streaming Retry)
 # ==================================================================================================
 

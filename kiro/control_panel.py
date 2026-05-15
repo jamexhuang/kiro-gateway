@@ -28,6 +28,7 @@ from kiro.config import (
     REQUEST_JITTER_MS,
     THROTTLE_FAST_FAIL,
 )
+from kiro.latency_tracer import LatencyTracer, get_tracer, is_enabled as latency_enabled
 
 
 ROUTING_MODES = {"passthrough", "manual", "redirect"}
@@ -177,6 +178,8 @@ class RequestRecord:
     trim_after_messages: Optional[int] = None
     trim_before_bytes: Optional[int] = None
     trim_after_bytes: Optional[int] = None
+    # Per-stage latency breakdown (populated when LATENCY_TRACING is enabled).
+    trace: Optional[Dict[str, Any]] = None
 
 
 def _dedupe_models(models: List[str]) -> List[str]:
@@ -288,6 +291,8 @@ class ControlPanelState:
         self._completed_requests: Deque[RequestRecord] = deque(maxlen=max_completed_requests)
         self._max_chunks_per_request = max_chunks_per_request
         self._subscribers: List[Callable[[Dict[str, Any]], None]] = []
+        # Per-request latency tracers (only populated when LATENCY_TRACING enabled)
+        self._tracers: Dict[str, LatencyTracer] = {}
         self._persist = persist
         if persist:
             self._load_routing_state()
@@ -568,8 +573,27 @@ class ControlPanelState:
         )
         with self._lock:
             self._active_requests[request_id] = record
+            if latency_enabled():
+                self._tracers[request_id] = get_tracer(request_id, t0=record.started_at)
         self._emit("request_started", asdict(record))
         return request_id
+
+    def add_trace_stage(
+        self,
+        request_id: str,
+        stage: str,
+        duration_s: float,
+        start_ts: Optional[float] = None,
+    ) -> None:
+        """
+        Record a latency stage on the in-flight request's tracer.
+
+        No-op when tracing is disabled or the request isn't tracked.
+        """
+        with self._lock:
+            tracer = self._tracers.get(request_id)
+        if tracer is not None:
+            tracer.add(stage, duration_s, start_ts)
 
     def start_attempt(self, request_id: str, model: str, account_id: Optional[str]) -> None:
         """
@@ -798,6 +822,7 @@ class ControlPanelState:
         """
         with self._lock:
             record = self._active_requests.pop(request_id, None)
+            tracer = self._tracers.pop(request_id, None)
             if not record:
                 return
 
@@ -809,6 +834,19 @@ class ControlPanelState:
 
             if response is not None and self._routing.capture_content:
                 record.response = _serialize_excerpt(response, self._routing.max_content_chars)
+
+            # Finalize latency trace (if tracing was enabled when this request started)
+            if tracer is not None:
+                try:
+                    if record.ttft_s is not None:
+                        tracer.set_ttft(record.ttft_s)
+                    tracer.set_total((record.ended_at or now) - record.started_at)
+                    trace_obj = tracer.finalize()
+                    record.trace = trace_obj.to_dict()
+                    from kiro.metrics import stage_metrics_registry
+                    stage_metrics_registry.record(now, trace_obj.per_stage_durations())
+                except Exception:
+                    pass
 
             try:
                 from kiro.metrics import metrics_registry

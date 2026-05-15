@@ -144,23 +144,29 @@ async def dashboard_page(request: Request) -> str:
     Returns:
         HTML dashboard.
     """
-    # Check if request is from localhost to auto-bring cred
+    # Check if request is from localhost or private network to auto-bring cred
     host = request.headers.get("host", "")
     client_host = request.client.host if request.client else ""
-    
-    is_localhost = (
+
+    is_local_or_private = (
         client_host in ("127.0.0.1", "::1", "localhost") or
         "127.0.0.1" in host or
         "localhost" in host or
-        "::1" in host
+        "::1" in host or
+        # Private network ranges (RFC 1918 + link-local)
+        client_host.startswith("10.") or
+        client_host.startswith("172.") or
+        client_host.startswith("192.168.") or
+        client_host.startswith("fe80:") or
+        client_host.startswith("fd")
     )
-    
-    # Debug log for localhost detection (only if not localhost to see why)
-    if not is_localhost:
+
+    # Debug log for non-private access
+    if not is_local_or_private:
         logger.debug(f"Dashboard access from non-local source: client={client_host}, host_header={host}")
 
     html = DASHBOARD_HTML
-    if is_localhost:
+    if is_local_or_private:
         # Inject the key into the HTML so the JS can pick it up
         # Escape quotes in key just in case
         escaped_key = PROXY_API_KEY.replace('"', '\\"')
@@ -476,6 +482,27 @@ async def dashboard_events(
     account_manager = getattr(request.app.state, "account_manager", None)
 
     async def gen():
+        from kiro.metrics import stage_metrics_registry
+        from kiro.config import LATENCY_TRACING_ENABLED, LATENCY_SUMMARY_INTERVAL_S
+
+        async def push_summaries():
+            while True:
+                try:
+                    await asyncio.sleep(max(1.0, LATENCY_SUMMARY_INTERVAL_S))
+                    if not LATENCY_TRACING_ENABLED:
+                        continue
+                    snap = stage_metrics_registry.snapshot(time.time())
+                    queue.put_nowait({"event": "latency_summary", "data": snap})
+                except asyncio.CancelledError:
+                    raise
+                except asyncio.QueueFull:
+                    pass
+                except Exception:
+                    pass
+
+        summary_task = (
+            asyncio.create_task(push_summaries()) if LATENCY_TRACING_ENABLED else None
+        )
         try:
             snap = control_panel.snapshot()
             snap["accounts"] = (
@@ -489,6 +516,8 @@ async def dashboard_events(
                 except asyncio.TimeoutError:
                     yield ": keep-alive\n\n"
         finally:
+            if summary_task is not None:
+                summary_task.cancel()
             control_panel.unsubscribe(on_panel_event)
             log_buffer.unsubscribe(on_log_event)
 
@@ -588,7 +617,35 @@ DASHBOARD_HTML = r"""<!doctype html>
     .filter-chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:11px;color:var(--muted);cursor:pointer}
     .filter-chip.on{background:var(--ink);color:#fffaf0;border-color:var(--ink)}
     .hidden{display:none!important}
-    @media (max-width: 960px){.app{grid-template-columns:1fr}nav.sidebar{position:static;height:auto}}
+    /* Mobile responsive */
+    @media (max-width: 960px){
+      .app{grid-template-columns:1fr}
+      nav.sidebar{position:fixed;bottom:0;left:0;right:0;top:auto;height:auto;z-index:100;
+        border-right:none;border-top:1px solid var(--line);padding:8px 12px;
+        display:flex;flex-wrap:wrap;gap:4px;align-items:center;overflow-x:auto}
+      nav h1{margin:0 8px 0 0;font-size:13px}
+      nav .ver{display:none}
+      nav .key{display:none}
+      nav a{padding:5px 8px;font-size:11.5px;margin:0;white-space:nowrap}
+      main{padding:10px 10px 70px;overflow-x:auto}
+      .stripe{grid-template-columns:repeat(3,1fr);gap:6px}
+      .spark{display:none}
+      .stat .val{font-size:14px}
+      section.panel{padding:10px}
+      section.panel>header{flex-wrap:wrap}
+      .toolbar{flex-wrap:wrap}
+      .search{width:100%;min-width:0}
+      table.reqs{font-size:11px;display:block;overflow-x:auto;white-space:nowrap}
+      table.reqs th,table.reqs td{padding:3px 4px}
+      .accounts{grid-template-columns:1fr}
+      .log-console{height:240px}
+      pre.code{font-size:10px;max-height:180px}
+    }
+    @media (max-width: 480px){
+      .stripe{grid-template-columns:1fr 1fr}
+      section.panel h2{font-size:11.5px}
+      .btn{padding:3px 7px;font-size:11px}
+    }
   </style>
 </head>
 <body>
@@ -597,11 +654,11 @@ DASHBOARD_HTML = r"""<!doctype html>
     <h1>Kiro Gateway</h1>
     <div class="ver">vAPP_VERSION_PLACEHOLDER · <span id="connStatus"><span class="status-dot off"></span>未連線</span></div>
     <a data-jump="panel-status" class="active">總覽</a>
+    <a data-jump="panel-latency">延遲分析</a>
     <a data-jump="panel-routing">路由設定</a>
     <a data-jump="panel-throttle">流量控制</a>
     <a data-jump="panel-accounts">帳號</a>
-    <a data-jump="panel-active">進行中</a>
-    <a data-jump="panel-history">歷史紀錄</a>
+    <a data-jump="panel-requests">請求總覽</a>
     <a data-jump="panel-logs">即時日誌</a>
     <a data-jump="panel-models">遠端模型</a>
     <div class="key">
@@ -642,16 +699,12 @@ DASHBOARD_HTML = r"""<!doctype html>
         <div><label style="font-size:10.5px;color:var(--muted)">模式</label>
           <select id="mode" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"><option value="passthrough">直通</option><option value="manual">手動</option><option value="redirect">重導向</option></select></div>
         <div><label style="font-size:10.5px;color:var(--muted)">手動指定模型</label>
-          <select id="manualModel" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"><option value="">載入中…</option></select></div>
+          <input id="manualModel" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px" placeholder="claude-opus-4.6"></div>
         <div><label style="font-size:10.5px;color:var(--muted)">降級模型（逗號分隔）</label>
           <input id="fallbackModels" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-        <div><label style="font-size:10.5px;color:var(--muted)">重導向規則 JSON</label>
-          <textarea id="redirects" style="width:100%;min-height:64px;padding:6px;border:1px solid var(--line);border-radius:6px;font:12px 'SF Mono',Menlo,monospace"></textarea></div>
-        <div><label style="font-size:10.5px;color:var(--muted)">可用模型 <button class="btn ghost" onclick="fetchModels()" style="font-size:10px;padding:1px 4px">重新取得</button></label>
-          <div id="modelList" style="max-height:80px;overflow:auto;font:11px 'SF Mono',Menlo,monospace;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px">載入中…</div></div>
-      </div>
+      <label style="font-size:10.5px;color:var(--muted);display:block;margin-top:8px">重導向規則 JSON</label>
+      <textarea id="redirects" style="width:100%;min-height:64px;padding:6px;border:1px solid var(--line);border-radius:6px;font:12px 'SF Mono',Menlo,monospace"></textarea>
       <div style="margin-top:8px"><button class="btn primary" onclick="applyRouting()">套用</button><span id="saveResult" style="margin-left:10px;color:var(--muted)"></span></div>
     </section>
 
@@ -687,22 +740,23 @@ DASHBOARD_HTML = r"""<!doctype html>
       <div id="accounts" class="accounts"><p style="color:var(--muted)">等待資料…</p></div>
     </section>
 
-    <section id="panel-active" class="panel">
-      <header><h2>進行中的請求</h2><span id="activeCount" class="tag">0</span></header>
-      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">正在處理的串流/非串流請求。點擊列可展開查看嘗試明細、路由原因和原始 payload。「首字」= 首 token 延遲 (TTFT)，「速度」= 每秒 token 數 (TPS)。</p>
-      <div id="activeWrap"><p style="color:var(--muted)">目前沒有進行中的請求。</p></div>
+    <section id="panel-latency" class="panel">
+      <header><h2>延遲分析（每段 P50/P95）</h2><span id="latencyMeta" class="tag" style="font-size:11px;color:var(--muted)">未啟用</span></header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">每段請求延遲的滾動窗口分位數（單位 ms）。設定環境變數 <code>LATENCY_TRACING=true</code> 啟用。<br>
+        <strong>auth</strong> = 取 token / <strong>gate_wait</strong> = burst 節流等候 / <strong>upstream_connect</strong> = 上游連線握手 / <strong>ttft</strong> = 首 token / <strong>streaming</strong> = 首 token 後串流耗時。</p>
+      <div id="latencyTable"><p style="color:var(--muted)">等待資料…</p></div>
     </section>
 
-    <section id="panel-history" class="panel">
-      <header><h2>歷史紀錄</h2>
+    <section id="panel-requests" class="panel">
+      <header><h2>請求總覽（進行中 + 歷史）</h2>
         <div class="toolbar">
-          <input id="histFilter" class="search" placeholder="篩選：模型 / 狀態 / 帳號 / 錯誤">
-          <select id="histSort" style="padding:4px 6px;border:1px solid var(--line);border-radius:6px;font-size:11px"><option value="started">開始時間</option><option value="ended">完成時間</option></select>
-          <button class="btn ghost" onclick="clearMonitor()">清除</button>
+          <span id="activeCount" class="tag">0 進行中</span>
+          <input id="reqFilter" class="search" placeholder="篩選：模型 / 狀態 / 帳號 / 錯誤">
+          <button class="btn ghost" onclick="clearMonitor()">清除歷史</button>
         </div>
       </header>
-      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">最近 200 筆已完成請求。支援全文篩選（模型名稱、狀態碼、帳號 ID、錯誤訊息）。點擊列展開詳情。「裁剪」欄顯示 context window 自動截斷前後的訊息數。</p>
-      <div id="historyWrap" style="max-height:520px;overflow:auto"></div>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">進行中與最近 200 筆已完成請求合併在同一表中，依時間倒序。狀態徽章：<span class="statusbadge active">active</span> = 串流中、<span class="statusbadge ok">completed</span> = 已完成、<span class="statusbadge dis">client_disconnected</span> = 客戶端斷線、<span class="statusbadge err">error</span> = 失敗。點擊列展開查看 latency trace、嘗試明細、payload。</p>
+      <div id="requestsWrap" style="max-height:680px;overflow:auto"><p style="color:var(--muted)">尚無請求。</p></div>
     </section>
 
     <section id="panel-logs" class="panel">
@@ -761,8 +815,8 @@ $$(".sidebar a[data-jump]").forEach(el=>el.addEventListener("click",()=>{
 }));
 
 // -------- state --------
-const state={routing:null,accounts:[],active:{},completed:[],metrics:null,logs:[],logSeq:-1,expandedActive:new Set(),expandedCompleted:new Set()};
-const LOG_MAX_VIEW=2000;let logLevelFilter="ALL";let histFilterText="";
+const state={routing:null,accounts:[],active:{},completed:[],metrics:null,latencySummary:null,logs:[],logSeq:-1,expanded:new Set()};
+const LOG_MAX_VIEW=2000;let logLevelFilter="ALL";let reqFilterText="";
 
 function fmtTime(ts){if(!ts)return"";return new Date(ts*1000).toLocaleTimeString();}
 function fmtMs(s){if(s==null)return"—";return s<1?`${(s*1000).toFixed(0)}ms`:`${s.toFixed(2)}s`;}
@@ -788,7 +842,7 @@ async function streamEvents(){
   try{
     const r=await fetch("/dashboard/api/events",{headers:authHeaders()});
     if(r.status===401){setConn(false,"驗證失敗");return;}
-    setConn(true,"已連線");fetchModels();
+    setConn(true,"已連線");
     const reader=r.body.getReader();const dec=new TextDecoder();let buf="";
     while(true){
       const{value,done}=await reader.read();if(done)break;
@@ -814,48 +868,46 @@ function handleEvent(ev,d){
     (d.active_requests||[]).forEach(r=>state.active[r.id]=r);
     state.completed=d.completed_requests||[];
     writeRoutingForm(state.routing);if(d.throttle)writeThrottleForm(d.throttle);renderAll();
-  }else if(ev==="request_started"){state.active[d.id]=d;renderActive();}
-   else if(ev==="attempt"){
-     if(state.active[d.id]){state.active[d.id]=d;
-       const tr=document.querySelector(`#activeWrap tr[data-id="${d.id}"]`);
-       if(tr){
-         const cells=tr.querySelectorAll("td");
-         if(cells.length>=7){
-           const statusMap={"completed":"ok","active":"active","connecting":"active","waiting_first_token":"active","streaming":"ok","client_disconnected":"dis","error":"err"};
-           const statusLabel={"connecting":"連線中","waiting_first_token":"等待回應","streaming":"串流中","active":"處理中","completed":"完成","error":"錯誤","client_disconnected":"斷線"}[d.status]||d.status;
-           cells[1].innerHTML=`<span class="statusbadge ${statusMap[d.status]||"err"}">${statusLabel}</span>`;
-           cells[4].textContent=d.ttft_s!=null?fmtMs(d.ttft_s):(d.status==="waiting_first_token"?"…":"—");
-           cells[5].textContent=d.tps!=null?`${d.tps.toFixed(1)}t/s`:(d.status==="streaming"?"…":"—");
-           cells[6].textContent=d.output_tokens??"—";
-         }
-       }else{renderActive();}
-     }
+  }else if(ev==="request_started"){state.active[d.id]=d;renderRequests();}
+   else if(ev==="attempt"){if(state.active[d.id]){state.active[d.id]=d;patchRow(d)||renderRequests();}}
+   else if(ev==="request_finished"){
+     delete state.active[d.id];state.completed.unshift(d);
+     if(state.completed.length>200)state.completed.pop();
+     renderRequests();
    }
-   else if(ev==="request_finished"){delete state.active[d.id];state.expandedActive.delete(d.id);state.completed.unshift(d);if(state.completed.length>1000)state.completed.pop();renderActive();renderHistory();}
    else if(ev==="stream_progress"){
      const r=state.active[d.id];if(r){
        if(d.ttft_s!=null)r.ttft_s=d.ttft_s;if(d.tps!=null)r.tps=d.tps;
        if(d.output_tokens!=null)r.output_tokens=d.output_tokens;
        if(d.content_delta){r.chunks=r.chunks||[];r.chunks.push(d.content_delta);if(r.chunks.length>80)r.chunks=r.chunks.slice(-80);}
-       // In-place update: find the row and patch cells without rebuilding
-       const tr=document.querySelector(`#activeWrap tr[data-id="${d.id}"]`);
+       const tr=document.querySelector(`#requestsWrap tr[data-id="${d.id}"]`);
        if(tr){
          const cells=tr.querySelectorAll("td");
-         if(cells.length>=7){
-           cells[4].textContent=r.ttft_s!=null?r.ttft_s.toFixed(2)+"s":"…";
-           cells[5].textContent=r.tps!=null?r.tps.toFixed(1)+" t/s":"…";
-           cells[6].textContent=r.output_tokens??"…";
+         if(cells.length>=8){
+           cells[5].textContent=r.ttft_s!=null?r.ttft_s.toFixed(2)+"s":"…";
+           cells[6].textContent=r.tps!=null?r.tps.toFixed(1)+" t/s":"…";
+           cells[7].textContent=r.output_tokens??"…";
          }
-         // Update expanded detail content if open
          const exp=tr.nextElementSibling;
-         if(exp&&exp.classList.contains("exp")){
-           const pre=exp.querySelector("pre.code");
-           if(pre&&d.content_delta){pre.textContent+=d.content_delta;pre.scrollTop=pre.scrollHeight;}
+         if(exp&&exp.classList.contains("exp")&&d.content_delta){
+           const pre=exp.querySelector("pre.code.streamlive");
+           if(pre){pre.textContent+=d.content_delta;pre.scrollTop=pre.scrollHeight;}
          }
-       }else{renderActive();}
+       }else{renderRequests();}
      }
    }
+   else if(ev==="latency_summary"){state.latencySummary=d;renderLatency();}
    else if(ev==="log"){pushLog(d);}
+}
+
+function patchRow(r){
+  const tr=document.querySelector(`#requestsWrap tr[data-id="${r.id}"]`);
+  if(!tr)return false;
+  const newHtml=reqRow(r);
+  const tmp=document.createElement("tbody");tmp.innerHTML=newHtml;
+  const fresh=tmp.firstElementChild;
+  tr.replaceWith(fresh);
+  return true;
 }
 
 async function pullMetrics(){
@@ -875,7 +927,7 @@ function pushLog(e){
 }
 
 // -------- rendering --------
-function renderAll(){renderStripe();renderAccounts();renderActive();renderHistory();}
+function renderAll(){renderStripe();renderAccounts();renderRequests();renderLatency();}
 
 function renderStripe(){
   const m=state.metrics;
@@ -914,88 +966,74 @@ function renderAccounts(){
   }).join("");
 }
 
-function reqRow(r,isActive){
-  const statusMap={"completed":"ok","active":"active","connecting":"active","waiting_first_token":"active","streaming":"ok","client_disconnected":"dis","error":"err"};
-  const statusCls=statusMap[r.status]||"err";
-  const statusLabel={"connecting":"連線中","waiting_first_token":"等待回應","streaming":"串流中","active":"處理中","completed":"完成","error":"錯誤","client_disconnected":"斷線"}[r.status]||r.status;
-  const ttft=r.ttft_s!=null?fmtMs(r.ttft_s):(isActive&&r.status==="waiting_first_token"?"…":"—");
-  const tps=r.tps!=null?`${r.tps.toFixed(1)}t/s`:(isActive&&r.status==="streaming"?"…":"—");
+function reqRow(r){
+  const statusCls=r.status==="completed"?"ok":(r.status==="active"?"active":(r.status==="client_disconnected"?"dis":"err"));
+  const ttft=r.ttft_s!=null?fmtMs(r.ttft_s):"—";const tps=r.tps!=null?`${r.tps.toFixed(1)}t/s`:"—";
   const trim=r.trim_before_messages?`${r.trim_before_messages}→${r.trim_after_messages} msg`:"";
   const attempts=(r.attempts||[]).length;
+  const totalCell=r.total_s!=null?fmtMs(r.total_s):(r.trace&&r.trace.total_ms!=null?(r.trace.total_ms/1000).toFixed(2)+"s":"—");
+  const traceBadge=r.trace?`<span class="tag" style="font-size:9.5px;padding:0 4px;background:#1d6f68;color:#fff" title="auth=${(r.trace.auth_ms||0).toFixed(0)} gate=${(r.trace.gate_wait_ms||0).toFixed(0)} up=${(r.trace.upstream_connect_ms||0).toFixed(0)} ttft=${(r.trace.ttft_ms||0).toFixed(0)} stream=${(r.trace.streaming_ms||0).toFixed(0)} ms">trace</span>`:"";
   return `<tr class="row" data-id="${esc(r.id)}"><td>${fmtTime(r.started_at)}</td>
-    <td><span class="statusbadge ${statusCls}">${esc(statusLabel)}</span></td>
+    <td><span class="statusbadge ${statusCls}">${esc(r.status)}</span> ${traceBadge}</td>
     <td>${esc(r.api_format)} ${r.stream?"⋯":""}</td>
     <td>${esc(r.original_model)}${r.original_model!==r.active_model?`→${esc(r.active_model)}`:""}</td>
+    <td>${totalCell}</td>
     <td>${ttft}</td><td>${tps}</td><td>${r.output_tokens??"—"}</td><td>${attempts}</td><td>${esc(trim)}</td>
     <td>${r.error?`<span class="statusbadge err">${esc(r.error.slice(0,60))}</span>`:""}</td></tr>`;
 }
 
-function renderActive(){
-  const rows=Object.values(state.active).sort((a,b)=>b.started_at-a.started_at);
-  $("#activeCount").textContent=rows.length;
-  const el=$("#activeWrap");
-  if(!rows.length){el.innerHTML=`<p style="color:var(--muted)">目前沒有進行中的請求。</p>`;return;}
-  el.innerHTML=`<table class="reqs"><thead><tr><th>開始</th><th>狀態</th><th>格式</th><th>模型</th><th>首字</th><th>速度</th><th>token</th><th>重試</th><th>裁剪</th><th>錯誤</th></tr></thead>
-    <tbody>${rows.map(r=>reqRow(r,true)).join("")}</tbody></table>`;
-  wireRowExpand("#activeWrap","active");
+function renderRequests(){
+  const activeRows=Object.values(state.active);
+  $("#activeCount").textContent=`${activeRows.length} 進行中`;
+  const f=reqFilterText.toLowerCase().trim();
+  const all=[...activeRows,...state.completed].sort((a,b)=>b.started_at-a.started_at);
+  const rows=all.filter(r=>!f||JSON.stringify(r).toLowerCase().includes(f));
+  const el=$("#requestsWrap");
+  if(!rows.length){el.innerHTML=`<p style="color:var(--muted)">${f?"沒有符合篩選的請求。":"尚無請求。"}</p>`;return;}
+  el.innerHTML=`<table class="reqs"><thead><tr><th>開始</th><th>狀態</th><th>格式</th><th>模型</th><th>總耗時</th><th>首字</th><th>速度</th><th>token</th><th>重試</th><th>裁剪</th><th>錯誤</th></tr></thead>
+    <tbody>${rows.slice(0,500).map(r=>reqRow(r)).join("")}</tbody></table>`;
+  wireRowExpand();
 }
 
-let histPageSize=50,histRendered=0,histFiltered=[];
-function renderHistory(){
-  const f=histFilterText.toLowerCase().trim();
-  const sortBy=$("#histSort").value;
-  histFiltered=state.completed.filter(r=>{
-    if(!f)return true;
-    return JSON.stringify(r).toLowerCase().includes(f);
-  });
-  if(sortBy==="ended"){histFiltered.sort((a,b)=>(b.ended_at||b.started_at)-(a.ended_at||a.started_at));}
-  else{histFiltered.sort((a,b)=>b.started_at-a.started_at);}
-  const el=$("#historyWrap");
-  if(!histFiltered.length){el.innerHTML=`<p style="color:var(--muted)">尚無已完成的請求。</p>`;histRendered=0;return;}
-  histRendered=Math.min(histPageSize,histFiltered.length);
-  el.innerHTML=`<table class="reqs"><thead><tr><th>開始</th><th>狀態</th><th>格式</th><th>模型</th><th>首字</th><th>速度</th><th>token</th><th>重試</th><th>裁剪</th><th>錯誤</th></tr></thead>
-    <tbody id="histBody">${histFiltered.slice(0,histRendered).map(r=>reqRow(r,false)).join("")}</tbody></table>${histRendered<histFiltered.length?`<div id="histMore" style="text-align:center;padding:8px;color:var(--muted);font-size:11px;cursor:pointer" onclick="loadMoreHistory()">顯示更多 (${histFiltered.length-histRendered} 筆)…</div>`:""}`;
-  wireRowExpand("#historyWrap","completed");
-}
-function loadMoreHistory(){
-  const prev=histRendered;
-  histRendered=Math.min(histRendered+histPageSize,histFiltered.length);
-  const body=$("#histBody");if(!body)return;
-  const frag=document.createDocumentFragment();
-  const tmp=document.createElement("tbody");
-  tmp.innerHTML=histFiltered.slice(prev,histRendered).map(r=>reqRow(r,false)).join("");
-  while(tmp.firstChild)frag.appendChild(tmp.firstChild);
-  body.appendChild(frag);
-  wireRowExpand("#historyWrap","completed");
-  const more=$("#histMore");
-  if(more){if(histRendered>=histFiltered.length)more.remove();else more.textContent=`顯示更多 (${histFiltered.length-histRendered} 筆)…`;}
+function renderLatency(){
+  const m=state.latencySummary;
+  if(!m){$("#latencyMeta").textContent="未啟用";$("#latencyTable").innerHTML=`<p style="color:var(--muted)">設 <code>LATENCY_TRACING=true</code> 啟用後，每 5 秒更新。</p>`;return;}
+  const ps=m.per_stage||{};
+  const order=["auth_ms","gate_wait_ms","upstream_connect_ms","ttft_ms","streaming_ms"];
+  const labels={auth_ms:"Auth (取 token)",gate_wait_ms:"Gate Wait (節流等候)",upstream_connect_ms:"Upstream Connect (上游連線)",ttft_ms:"TTFT (首 token)",streaming_ms:"Streaming (首 token 後)"};
+  $("#latencyMeta").textContent=`窗口 ${m.window_s}s · 樣本 ${m.count}`;
+  let rows=order.filter(n=>ps[n]).map(n=>{
+    const s=ps[n];
+    const max=Math.max(...order.filter(k=>ps[k]).map(k=>ps[k].p95));
+    const barW=max>0?(s.p95/max*100):0;
+    return`<tr><td>${labels[n]}</td><td style="text-align:right">${s.count}</td><td style="text-align:right">${s.p50.toFixed(1)} ms</td><td style="text-align:right">${s.p95.toFixed(1)} ms</td><td><div style="background:#efe9dc;border-radius:3px;height:14px;width:100%;position:relative"><div style="background:var(--accent);height:100%;width:${barW.toFixed(1)}%;border-radius:3px"></div></div></td></tr>`;
+  }).join("");
+  if(!rows){$("#latencyTable").innerHTML=`<p style="color:var(--muted)">尚無延遲資料。發幾個請求後會出現。</p>`;return;}
+  $("#latencyTable").innerHTML=`<table class="reqs"><thead><tr><th>階段</th><th>樣本數</th><th>P50</th><th>P95</th><th style="width:35%">P95 視覺化</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-$("#histFilter").addEventListener("input",e=>{histFilterText=e.target.value;renderHistory();});
-$("#histSort").addEventListener("change",()=>{renderHistory();});
+$("#reqFilter").addEventListener("input",e=>{reqFilterText=e.target.value;renderRequests();});
 
-function wireRowExpand(wrapSel,kind){
-  const expandedSet=(kind==="active"?state.expandedActive:state.expandedCompleted);
-  // Restore expanded rows after table rebuild
-  $(wrapSel).querySelectorAll("tr.row").forEach(tr=>{
+function wireRowExpand(){
+  $("#requestsWrap").querySelectorAll("tr.row").forEach(tr=>{
     const id=tr.dataset.id;
-    if(expandedSet.has(id)){
-      const r=(kind==="active"?state.active[id]:state.completed.find(x=>x.id===id));
+    if(state.expanded.has(id)){
+      const r=state.active[id]||state.completed.find(x=>x.id===id);
       if(r){
         const exp=document.createElement("tr");exp.className="exp";exp.dataset.expFor=id;
-        exp.innerHTML=`<td colspan="10">${renderDetail(r)}</td>`;
+        exp.innerHTML=`<td colspan="11">${renderDetail(r)}</td>`;
         tr.after(exp);
       }
     }
     tr.addEventListener("click",()=>{
       const next=tr.nextElementSibling;
-      if(next&&next.classList.contains("exp")){next.remove();expandedSet.delete(id);return;}
-      const r=(kind==="active"?state.active[id]:state.completed.find(x=>x.id===id));
+      if(next&&next.classList.contains("exp")){next.remove();state.expanded.delete(id);return;}
+      const r=state.active[id]||state.completed.find(x=>x.id===id);
       if(!r)return;
       const exp=document.createElement("tr");exp.className="exp";exp.dataset.expFor=id;
-      exp.innerHTML=`<td colspan="10">${renderDetail(r)}</td>`;
+      exp.innerHTML=`<td colspan="11">${renderDetail(r)}</td>`;
       tr.after(exp);
-      expandedSet.add(id);
+      state.expanded.add(id);
     });
   });
 }
@@ -1010,13 +1048,37 @@ function renderDetail(r){
   const chunkText=(r.chunks||[]).join("");
   let chunks="";
   if(isActive&&chunkText){
-    chunks=`<div style="margin-top:4px"><strong>串流內容</strong> <span style="color:var(--muted);font-size:11px">(即時更新)</span></div><pre class="code" style="max-height:300px;overflow:auto">${esc(chunkText)}</pre>`;
-  }else if(chunkText){
-    chunks=`<div style="margin-top:4px"><strong>串流內容</strong> <span style="color:var(--muted);font-size:11px">(${(r.chunks||[]).length} chunks)</span></div><pre class="code" style="max-height:300px;overflow:auto">${esc(chunkText)}</pre>`;
+    chunks=`<div style="margin-top:4px"><strong>串流內容</strong> <span style="color:var(--muted);font-size:11px">(即時更新)</span></div><pre class="code streamlive" style="max-height:300px;overflow:auto">${esc(chunkText)}</pre>`;
+  }else if(isActive){
+    chunks=`<div style="margin-top:4px"><strong>串流內容</strong> <span style="color:var(--muted);font-size:11px">(等待中…)</span></div><pre class="code streamlive" style="max-height:300px;overflow:auto"></pre>`;
+  }else if((r.chunks||[]).length){
+    chunks=`<details class="payload"><summary>stream chunks (${r.chunks.length})</summary><pre class="code">${esc(chunkText)}</pre></details>`;
+  }
+  let trace="";
+  if(r.trace){
+    const t=r.trace;
+    const fmt=v=>v==null?"—":v.toFixed(1)+"ms";
+    const stages=[
+      {k:"auth_ms",label:"auth"},
+      {k:"gate_wait_ms",label:"gate"},
+      {k:"upstream_connect_ms",label:"connect"},
+      {k:"ttft_ms",label:"ttft"},
+      {k:"streaming_ms",label:"stream"},
+    ];
+    const total=t.total_ms||0;
+    const segs=stages.map(s=>{
+      const v=t[s.k];if(v==null||total<=0)return"";
+      const pct=Math.max(1,(v/total*100));
+      const colors={auth:"#c45f2c",gate:"#9b2d20",connect:"#1d6f68",ttft:"#5a4fcf",stream:"#3a8a3f"};
+      return `<div title="${s.label}=${fmt(v)}" style="background:${colors[s.label]};width:${pct.toFixed(1)}%;color:#fff;padding:2px 4px;font-size:10px;text-align:center;overflow:hidden;white-space:nowrap">${s.label} ${fmt(v)}</div>`;
+    }).join("");
+    trace=`<div style="margin-bottom:6px"><strong>Latency Trace</strong> · 總計 ${fmt(t.total_ms)}
+      <div style="display:flex;margin-top:4px;border-radius:4px;overflow:hidden;border:1px solid var(--line);min-height:20px">${segs}</div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:3px">auth=${fmt(t.auth_ms)} · gate_wait=${fmt(t.gate_wait_ms)} · upstream_connect=${fmt(t.upstream_connect_ms)} · ttft=${fmt(t.ttft_ms)} · streaming=${fmt(t.streaming_ms)}</div></div>`;
   }
   const resp=r.response?`<details class="payload"><summary>response</summary><pre class="code">${esc(r.response)}</pre></details>`:"";
   return `<div style="padding:6px 4px"><div style="color:var(--muted);margin-bottom:4px">id=${esc(r.id)} · reason=${esc(r.routing_reason||"")}</div>
-    <div style="margin-bottom:4px"><strong>嘗試紀錄</strong>${attempts||" —"}</div>${payloads}${chunks}${resp}</div>`;
+    ${trace}<div style="margin-bottom:4px"><strong>嘗試紀錄</strong>${attempts||" —"}</div>${payloads}${chunks}${resp}</div>`;
 }
 
 // -------- logs UI --------
@@ -1046,24 +1108,8 @@ function renderLogLine(e){
 function redrawLogs(){const b=$("#logBody");b.innerHTML="";state.logs.forEach(renderLogLine);}
 
 // -------- routing form (unchanged behavior) --------
-let _remoteModels=[];
-async function fetchModels(){
-  try{
-    const d=await api("/dashboard/api/models");
-    _remoteModels=(d.models||[]).map(m=>m.modelId||m.id||m).filter(Boolean).sort();
-    populateModelSelect();
-    $("#modelList").innerHTML=_remoteModels.map(m=>`<div>${esc(m)}</div>`).join("")||"無模型";
-  }catch(e){$("#modelList").textContent="取得失敗: "+e.message;}
-}
-function populateModelSelect(){
-  const sel=$("#manualModel");const cur=sel.value;
-  sel.innerHTML=_remoteModels.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join("");
-  if(cur&&_remoteModels.includes(cur))sel.value=cur;
-}
 function writeRoutingForm(r){if(!r)return;
-  $("#enabled").checked=r.enabled;$("#mode").value=r.mode;
-  if(_remoteModels.length){$("#manualModel").value=r.manual_model;}
-  else{const sel=$("#manualModel");sel.innerHTML=`<option value="${esc(r.manual_model)}">${esc(r.manual_model||"(未設定)")}</option>`;sel.value=r.manual_model;}
+  $("#enabled").checked=r.enabled;$("#mode").value=r.mode;$("#manualModel").value=r.manual_model;
   $("#redirects").value=JSON.stringify(r.redirects,null,2);
   $("#fallbackModels").value=r.fallback_models.join(", ");
   $("#fallbackEnabled").checked=r.fallback_enabled;$("#safeFallback").checked=r.safe_fallback_to_original;
@@ -1075,11 +1121,9 @@ function readRoutingForm(){let red={};try{red=JSON.parse($("#redirects").value||
     safe_fallback_to_original:$("#safeFallback").checked,capture_content:$("#captureContent").checked};}
 async function applyRouting(){try{const d=await api("/dashboard/api/routing",{method:"PUT",body:JSON.stringify(readRoutingForm())});
   writeRoutingForm(d.routing);$("#saveResult").textContent="已套用 "+new Date().toLocaleTimeString();}catch(e){$("#saveResult").textContent=e.message;}}
-async function quickSwap(m){$("#enabled").checked=true;$("#mode").value="manual";
-  if(_remoteModels.length){$("#manualModel").value=m;}else{const sel=$("#manualModel");sel.innerHTML=`<option value="${esc(m)}">${esc(m)}</option>`;sel.value=m;}
-  await applyRouting();}
+async function quickSwap(m){$("#enabled").checked=true;$("#mode").value="manual";$("#manualModel").value=m;await applyRouting();}
 async function resetRouting(){await api("/dashboard/api/routing/reset",{method:"POST",body:"{}"});$("#saveResult").textContent="已重設";}
-async function clearMonitor(){await api("/dashboard/api/monitor/clear",{method:"POST",body:"{}"});state.completed=[];renderHistory();}
+async function clearMonitor(){await api("/dashboard/api/monitor/clear",{method:"POST",body:"{}"});state.completed=[];renderRequests();}
 async function restartGateway(){if(!confirm("確定要重啟 Gateway？進行中的請求會中斷。"))return;
   try{await api("/dashboard/api/restart",{method:"POST",body:"{}"});setConn(null,"重啟中…");setTimeout(()=>location.reload(),3000);}catch(e){alert(e.message);}}
 

@@ -298,6 +298,8 @@ class KiroHttpClient:
         params: Optional[dict] = None,
         stream: bool = False,
         max_retries_override: Optional[int] = None,
+        *,
+        monitor_request_id: Optional[str] = None,
     ) -> httpx.Response:
         """
         Executes an HTTP request with retry logic.
@@ -339,8 +341,16 @@ class KiroHttpClient:
         
         for attempt in range(max_retries):
             try:
-                # Get current token
+                # Get current token (auth_ms hook)
+                _auth_t0 = time.monotonic()
                 token = await self.auth_manager.get_access_token()
+                _auth_dur = time.monotonic() - _auth_t0
+                if monitor_request_id:
+                    try:
+                        from kiro.control_panel import control_panel as _cp
+                        _cp.add_trace_stage(monitor_request_id, "auth_ms", _auth_dur, start_ts=_auth_t0)
+                    except Exception:
+                        pass
                 headers = get_kiro_headers(self.auth_manager, token)
 
                 # Build request kwargs based on parameters
@@ -358,7 +368,14 @@ class KiroHttpClient:
                     waited = await gate.acquire()
                     if waited > 0:
                         logger.debug(f"AdaptiveGate: waited {waited:.3f}s before sending (gap={gate._current_gap_ms}ms)")
+                        if monitor_request_id:
+                            try:
+                                from kiro.control_panel import control_panel as _cp
+                                _cp.add_trace_stage(monitor_request_id, "gate_wait_ms", waited)
+                            except Exception:
+                                pass
                     try:
+                        _conn_t0 = time.monotonic()
                         if stream:
                             headers["Connection"] = "close"
                             req = client.build_request(method, url, **request_kwargs)
@@ -367,9 +384,17 @@ class KiroHttpClient:
                         else:
                             logger.debug("Sending request to Kiro API...")
                             response = await client.request(method, url, **request_kwargs)
+                        _conn_dur = time.monotonic() - _conn_t0
+                        if monitor_request_id:
+                            try:
+                                from kiro.control_panel import control_panel as _cp
+                                _cp.add_trace_stage(monitor_request_id, "upstream_connect_ms", _conn_dur, start_ts=_conn_t0)
+                            except Exception:
+                                pass
                     finally:
                         gate.release()
                 else:
+                    _conn_t0 = time.monotonic()
                     if stream:
                         headers["Connection"] = "close"
                         req = client.build_request(method, url, **request_kwargs)
@@ -378,6 +403,13 @@ class KiroHttpClient:
                     else:
                         logger.debug("Sending request to Kiro API...")
                         response = await client.request(method, url, **request_kwargs)
+                    _conn_dur = time.monotonic() - _conn_t0
+                    if monitor_request_id:
+                        try:
+                            from kiro.control_panel import control_panel as _cp
+                            _cp.add_trace_stage(monitor_request_id, "upstream_connect_ms", _conn_dur, start_ts=_conn_t0)
+                        except Exception:
+                            pass
 
                 # Check status
                 if response.status_code == 200:

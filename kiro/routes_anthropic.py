@@ -486,7 +486,8 @@ async def messages(
                     "POST",
                     url,
                     kiro_payload,
-                    stream=True
+                    stream=True,
+                    monitor_request_id=monitor_request_id,
                 )
                 control_panel.finish_attempt(monitor_request_id, response.status_code)
                 if response.status_code == 200:
@@ -536,7 +537,8 @@ async def messages(
                         "POST",
                         url,
                         kiro_payload,
-                        stream=True
+                        stream=True,
+                        monitor_request_id=monitor_request_id,
                     )
                     control_panel.finish_attempt(monitor_request_id, response.status_code)
                     
@@ -555,7 +557,8 @@ async def messages(
                             try:
                                 async def make_retry_request():
                                     return await http_client.request_with_retry(
-                                        "POST", url, kiro_payload, stream=True
+                                        "POST", url, kiro_payload, stream=True,
+                                        monitor_request_id=monitor_request_id,
                                     )
                                 
                                 async for chunk in stream_with_first_token_retry_anthropic(
@@ -931,7 +934,8 @@ async def messages(
             "POST",
             url,
             kiro_payload,
-            stream=True
+            stream=True,
+            monitor_request_id=monitor_request_id,
         )
         control_panel.finish_attempt(monitor_request_id, response.status_code)
         
@@ -979,7 +983,8 @@ async def messages(
                 "POST",
                 url,
                 kiro_payload,
-                stream=True
+                stream=True,
+                monitor_request_id=monitor_request_id,
             )
             control_panel.finish_attempt(monitor_request_id, response.status_code)
             
@@ -1044,7 +1049,8 @@ async def messages(
                     # Create retry request function for retries
                     async def make_retry_request():
                         return await http_client.request_with_retry(
-                            "POST", url, kiro_payload, stream=True
+                            "POST", url, kiro_payload, stream=True,
+                            monitor_request_id=monitor_request_id,
                         )
                     
                     # Use retry wrapper with initial response
