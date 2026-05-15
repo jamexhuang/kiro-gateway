@@ -324,6 +324,24 @@ async def clear_dashboard_monitor() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/dashboard/api/latency-tracing", dependencies=[Security(verify_dashboard_api_key)])
+async def get_latency_tracing() -> Dict[str, bool]:
+    """Return current latency tracing toggle state (runtime-mutable)."""
+    import kiro.config
+    return {"enabled": bool(kiro.config.LATENCY_TRACING_ENABLED)}
+
+
+@router.put("/dashboard/api/latency-tracing", dependencies=[Security(verify_dashboard_api_key)])
+async def set_latency_tracing(request: Request) -> Dict[str, bool]:
+    """Toggle latency tracing at runtime without restart."""
+    import kiro.config
+    body = await request.json()
+    enabled = bool(body.get("enabled", False))
+    kiro.config.LATENCY_TRACING_ENABLED = enabled
+    logger.info(f"Latency tracing toggled at runtime: {enabled}")
+    return {"enabled": enabled}
+
+
 @router.post("/dashboard/api/restart", dependencies=[Security(verify_dashboard_api_key)])
 async def restart_gateway() -> Dict[str, str]:
     """
@@ -741,8 +759,13 @@ DASHBOARD_HTML = r"""<!doctype html>
     </section>
 
     <section id="panel-latency" class="panel">
-      <header><h2>延遲分析（每段 P50/P95）</h2><span id="latencyMeta" class="tag" style="font-size:11px;color:var(--muted)">未啟用</span></header>
-      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">每段請求延遲的滾動窗口分位數（單位 ms）。設定環境變數 <code>LATENCY_TRACING=true</code> 啟用。<br>
+      <header><h2>延遲分析（每段 P50/P95）</h2>
+        <div class="toolbar">
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input id="latencyToggle" type="checkbox"> 啟用追蹤</label>
+          <span id="latencyMeta" class="tag" style="font-size:11px;color:var(--muted)">未啟用</span>
+        </div>
+      </header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">每段請求延遲的滾動窗口分位數（單位 ms）。勾選「啟用追蹤」即時開關，無需重啟。<br>
         <strong>auth</strong> = 取 token / <strong>gate_wait</strong> = burst 節流等候 / <strong>upstream_connect</strong> = 上游連線握手 / <strong>ttft</strong> = 首 token / <strong>streaming</strong> = 首 token 後串流耗時。</p>
       <div id="latencyTable"><p style="color:var(--muted)">等待資料…</p></div>
     </section>
@@ -836,6 +859,7 @@ function connect(){
   streamEvents();
   pullMetrics();setInterval(pullMetrics,5000);
   pullLogs();
+  initLatencyToggle();
 }
 async function streamEvents(){
   setConn(null,"連線中");
@@ -1025,18 +1049,21 @@ function wireRowExpand(){
         tr.after(exp);
       }
     }
-    tr.addEventListener("click",()=>{
-      const next=tr.nextElementSibling;
-      if(next&&next.classList.contains("exp")){next.remove();state.expanded.delete(id);return;}
-      const r=state.active[id]||state.completed.find(x=>x.id===id);
-      if(!r)return;
-      const exp=document.createElement("tr");exp.className="exp";exp.dataset.expFor=id;
-      exp.innerHTML=`<td colspan="11">${renderDetail(r)}</td>`;
-      tr.after(exp);
-      state.expanded.add(id);
-    });
   });
 }
+// Event delegation — survives DOM rebuilds from stream_progress/attempt events
+$("#requestsWrap").addEventListener("click",e=>{
+  const tr=e.target.closest("tr.row");if(!tr)return;
+  const id=tr.dataset.id;
+  const next=tr.nextElementSibling;
+  if(next&&next.classList.contains("exp")){next.remove();state.expanded.delete(id);return;}
+  const r=state.active[id]||state.completed.find(x=>x.id===id);
+  if(!r)return;
+  const exp=document.createElement("tr");exp.className="exp";exp.dataset.expFor=id;
+  exp.innerHTML=`<td colspan="11">${renderDetail(r)}</td>`;
+  tr.after(exp);
+  state.expanded.add(id);
+});
 
 function renderDetail(r){
   const attempts=(r.attempts||[]).map(a=>`<div>${esc(a.model)} · ${a.account_id||"-"} · ${a.http_status||"-"} · ${esc(a.status)}${a.error?` · ${esc(a.error)}`:""}</div>`).join("");
@@ -1124,6 +1151,16 @@ async function applyRouting(){try{const d=await api("/dashboard/api/routing",{me
 async function quickSwap(m){$("#enabled").checked=true;$("#mode").value="manual";$("#manualModel").value=m;await applyRouting();}
 async function resetRouting(){await api("/dashboard/api/routing/reset",{method:"POST",body:"{}"});$("#saveResult").textContent="已重設";}
 async function clearMonitor(){await api("/dashboard/api/monitor/clear",{method:"POST",body:"{}"});state.completed=[];renderRequests();}
+
+// -------- latency tracing toggle --------
+async function initLatencyToggle(){
+  try{const d=await api("/dashboard/api/latency-tracing");$("#latencyToggle").checked=d.enabled;}catch{}
+}
+$("#latencyToggle").addEventListener("change",async()=>{
+  try{await api("/dashboard/api/latency-tracing",{method:"PUT",body:JSON.stringify({enabled:$("#latencyToggle").checked})});}
+  catch(e){$("#latencyToggle").checked=!$("#latencyToggle").checked;}
+});
+
 async function restartGateway(){if(!confirm("確定要重啟 Gateway？進行中的請求會中斷。"))return;
   try{await api("/dashboard/api/restart",{method:"POST",body:"{}"});setConn(null,"重啟中…");setTimeout(()=>location.reload(),3000);}catch(e){alert(e.message);}}
 
