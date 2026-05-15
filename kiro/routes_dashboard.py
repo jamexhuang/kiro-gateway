@@ -130,6 +130,20 @@ def _is_valid_dashboard_api_key(
     return False
 
 
+
+
+def _is_private_172(ip: str) -> bool:
+    """Check if IP is in 172.16.0.0/12 (RFC 1918)."""
+    if not ip.startswith("172."):
+        return False
+    parts = ip.split(".")
+    if len(parts) < 2:
+        return False
+    try:
+        return 16 <= int(parts[1]) <= 31
+    except ValueError:
+        return False
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request) -> str:
     """
@@ -155,7 +169,7 @@ async def dashboard_page(request: Request) -> str:
         "::1" in host or
         # Private network ranges (RFC 1918 + link-local)
         client_host.startswith("10.") or
-        client_host.startswith("172.") or
+        _is_private_172(client_host) or
         client_host.startswith("192.168.") or
         client_host.startswith("fe80:") or
         client_host.startswith("fd")
@@ -335,7 +349,12 @@ async def get_latency_tracing() -> Dict[str, bool]:
 async def set_latency_tracing(request: Request) -> Dict[str, bool]:
     """Toggle latency tracing at runtime without restart."""
     import kiro.config
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
     enabled = bool(body.get("enabled", False))
     kiro.config.LATENCY_TRACING_ENABLED = enabled
     logger.info(f"Latency tracing toggled at runtime: {enabled}")
@@ -518,9 +537,7 @@ async def dashboard_events(
                 except Exception:
                     pass
 
-        summary_task = (
-            asyncio.create_task(push_summaries()) if LATENCY_TRACING_ENABLED else None
-        )
+        summary_task = asyncio.create_task(push_summaries())  # Always create; loop checks enabled flag
         try:
             snap = control_panel.snapshot()
             snap["accounts"] = (
