@@ -574,7 +574,7 @@ class ControlPanelState:
         with self._lock:
             self._active_requests[request_id] = record
             if latency_enabled():
-                self._tracers[request_id] = get_tracer(request_id, t0=record.started_at)
+                self._tracers[request_id] = get_tracer(request_id)
         self._emit("request_started", asdict(record))
         return request_id
 

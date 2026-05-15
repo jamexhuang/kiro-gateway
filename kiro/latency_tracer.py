@@ -65,7 +65,7 @@ class LatencyTracer:
 
     def __init__(self, request_id: str, t0: Optional[float] = None):
         self._request_id = request_id
-        self._t0 = t0 if t0 is not None else time.time()
+        self._t0 = t0 if t0 is not None else time.monotonic()
         self._lock = Lock()
         self._durations: Dict[str, float] = {}
         self._stages: List[Dict[str, Any]] = []
