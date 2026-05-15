@@ -45,7 +45,7 @@ from typing import Dict, List, Optional, Any
 import httpx
 from loguru import logger
 
-from kiro.auth import KiroAuthManager, AuthType
+from kiro.auth import KiroAuthManager, AuthType, _extract_supported_json_credentials
 from kiro.cache import ModelInfoCache
 from kiro.model_resolver import ModelResolver, normalize_model_name
 from kiro.config import (
@@ -93,6 +93,45 @@ def _format_duration(seconds: float) -> str:
         return f"{int(seconds / 3600)}h"
     else:
         return f"{int(seconds / 86400)}d"
+
+
+def _is_supported_json_credentials_payload(data: Dict[str, Any]) -> bool:
+    """
+    Check whether a JSON payload contains supported credential fields.
+
+    Args:
+        data: Parsed JSON payload
+
+    Returns:
+        True when the payload can be consumed by ``KiroAuthManager``
+    """
+    normalized_data = _extract_supported_json_credentials(data)
+    return "refreshToken" in normalized_data or "clientId" in normalized_data
+
+
+def _resolve_credential_path(path: str, fallback_path: Optional[str] = None) -> Path:
+    """
+    Resolve a credential path, optionally falling back to an external backup path.
+
+    Args:
+        path: Preferred credential path
+        fallback_path: Optional fallback path used when preferred path is missing
+
+    Returns:
+        Path to the preferred file when it exists, otherwise the fallback path when available,
+        otherwise the preferred path as originally resolved
+    """
+    preferred_path = Path(path).expanduser()
+    if preferred_path.exists():
+        return preferred_path
+
+    if fallback_path:
+        backup_path = Path(fallback_path).expanduser()
+        if backup_path.exists():
+            logger.info(f"Preferred credential path missing, using fallback: {path} -> {fallback_path}")
+            return backup_path
+
+    return preferred_path
 
 
 @dataclass
@@ -211,6 +250,7 @@ class AccountManager:
         for entry in self._credentials_config:
             cred_type = entry.get("type")
             path = entry.get("path")
+            fallback_path = entry.get("fallback_path")
             enabled = entry.get("enabled", True)
             
             if not enabled:
@@ -242,9 +282,10 @@ class AccountManager:
                 continue  # Skip path processing for refresh_token
             
             # Handle folder scanning for json/sqlite types
-            expanded_path = Path(path).expanduser()
+            preferred_path = Path(path).expanduser()
+            expanded_path = _resolve_credential_path(path, fallback_path)
             if expanded_path.is_dir():
-                logger.info(f"Scanning folder for credentials: {path}")
+                logger.info(f"Scanning folder for credentials: {expanded_path}")
                 for file_path in expanded_path.iterdir():
                     if not file_path.is_file():
                         continue
@@ -258,8 +299,7 @@ class AccountManager:
                         try:
                             with open(file_path, 'r', encoding='utf-8') as f:
                                 data = json.load(f)
-                                # Valid if has refreshToken or clientId
-                                if 'refreshToken' in data or 'clientId' in data:
+                                if _is_supported_json_credentials_payload(data):
                                     is_valid = True
                         except Exception as e:
                             logger.warning(f"Invalid JSON credentials file {file_path.name}: {e}")
@@ -291,7 +331,7 @@ class AccountManager:
                     token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
                     account_id = f"refresh_token_{token_hash}"
                 else:
-                    account_id = str(expanded_path.resolve())
+                    account_id = str(preferred_path.resolve())
                 self._accounts[account_id] = Account(id=account_id)
                 logger.debug(f"Added account: {account_id}")
             else:
@@ -424,7 +464,9 @@ class AccountManager:
             creds_config = None
             for entry in self._credentials_config:
                 path = entry.get("path", "")
-                expanded_path = Path(path).expanduser()
+                fallback_path = entry.get("fallback_path")
+                preferred_path = Path(path).expanduser()
+                expanded_path = _resolve_credential_path(path, fallback_path)
                 
                 if entry.get("type") == "refresh_token":
                     # Match by deterministic hash for refresh_token type
@@ -433,7 +475,7 @@ class AccountManager:
                     if account_id == f"refresh_token_{token_hash}":
                         creds_config = entry
                         break
-                elif str(expanded_path.resolve()) == account_id or (expanded_path.is_dir() and account_id.startswith(str(expanded_path.resolve()) + os.sep)):
+                elif str(preferred_path.resolve()) == account_id or (preferred_path.is_dir() and account_id.startswith(str(preferred_path.resolve()) + os.sep)):
                     creds_config = entry
                     break
             
@@ -444,15 +486,23 @@ class AccountManager:
             # Create KiroAuthManager based on type
             cred_type = creds_config.get("type")
             if cred_type == "json":
+                creds_file_path = _resolve_credential_path(
+                    creds_config.get("path", ""),
+                    creds_config.get("fallback_path")
+                )
                 auth_manager = KiroAuthManager(
-                    creds_file=account_id,
+                    creds_file=str(creds_file_path),
                     profile_arn=creds_config.get("profile_arn"),
                     region=creds_config.get("region", "us-east-1"),
                     api_region=creds_config.get("api_region")
                 )
             elif cred_type == "sqlite":
+                sqlite_db_path = _resolve_credential_path(
+                    creds_config.get("path", ""),
+                    creds_config.get("fallback_path")
+                )
                 auth_manager = KiroAuthManager(
-                    sqlite_db=account_id,
+                    sqlite_db=str(sqlite_db_path),
                     profile_arn=creds_config.get("profile_arn"),
                     region=creds_config.get("region", "us-east-1"),
                     api_region=creds_config.get("api_region")

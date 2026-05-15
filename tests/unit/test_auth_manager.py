@@ -122,6 +122,33 @@ class TestKiroAuthManagerCredentialsFile:
         print(f"Comparing refresh_token: Expected 'fallback_token', Got '{manager._refresh_token}'")
         assert manager._refresh_token == "fallback_token"
 
+    def test_load_credentials_from_cockpit_wrapper_file(self, tmp_path):
+        """
+        What it does: Verifies loading credentials from cockpit wrapper JSON.
+        Purpose: Ensure nested kiro_auth_token_raw payloads are supported.
+        """
+        print("Setup: Creating cockpit wrapper credentials file...")
+        wrapper_file = tmp_path / "cockpit_account.json"
+        wrapper_file.write_text(json.dumps({
+            "email": "user@example.com",
+            "kiro_auth_token_raw": {
+                "accessToken": "wrapped_access_token",
+                "refreshToken": "wrapped_refresh_token",
+                "expiresAt": "2099-01-01T00:00:00+00:00",
+                "profileArn": "arn:aws:codewhisperer:us-east-1:123456789:profile/test"
+            }
+        }))
+
+        print("Action: Creating KiroAuthManager from cockpit wrapper file...")
+        manager = KiroAuthManager(creds_file=str(wrapper_file))
+
+        print("Verification: Nested credentials loaded correctly...")
+        assert manager._access_token == "wrapped_access_token"
+        assert manager._refresh_token == "wrapped_refresh_token"
+        assert manager._profile_arn == "arn:aws:codewhisperer:us-east-1:123456789:profile/test"
+        assert manager._region == "us-east-1"
+        assert manager._expires_at is not None
+
 
 class TestKiroAuthManagerTokenExpiration:
     """Tests for token expiration checking."""
@@ -4250,4 +4277,3 @@ class TestAPIRegionPriorityHierarchy:
         print(f"  - default=ap-south-1 (parameter)")
         print(f"Result: api_host={manager5._api_host}")
         assert "ap-south-1" in manager5._api_host
-

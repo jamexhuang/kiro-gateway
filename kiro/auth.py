@@ -35,7 +35,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import httpx
 from loguru import logger
@@ -63,6 +63,42 @@ SQLITE_REGISTRATION_KEYS = [
     "kirocli:odic:device-registration",
     "codewhisperer:odic:device-registration",
 ]
+
+
+def _extract_supported_json_credentials(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize supported JSON credential wrapper formats.
+
+    Supported formats:
+    - Native Kiro Desktop/Auth JSON with top-level camelCase fields
+    - Cockpit wrapper JSON with nested ``kiro_auth_token_raw``
+
+    Args:
+        data: Parsed JSON credentials payload
+
+    Returns:
+        Normalized credential payload matching the native Kiro JSON shape
+    """
+    nested_token_data = data.get("kiro_auth_token_raw")
+    if not isinstance(nested_token_data, dict):
+        return data
+
+    normalized_data = dict(nested_token_data)
+
+    if "profileArn" not in normalized_data:
+        profile_data = data.get("kiro_profile_raw")
+        if isinstance(profile_data, dict) and isinstance(profile_data.get("arn"), str):
+            normalized_data["profileArn"] = profile_data["arn"]
+
+    if "region" not in normalized_data and isinstance(data.get("region"), str):
+        normalized_data["region"] = data["region"]
+
+    if "region" not in normalized_data and isinstance(normalized_data.get("profileArn"), str):
+        arn_parts = normalized_data["profileArn"].split(":")
+        if len(arn_parts) > 3 and arn_parts[3]:
+            normalized_data["region"] = arn_parts[3]
+
+    return normalized_data
 
 
 class AuthType(Enum):
@@ -408,7 +444,7 @@ class KiroAuthManager:
                 return
             
             with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+                data = _extract_supported_json_credentials(json.load(f))
             
             # Load common data from file
             if 'refreshToken' in data:

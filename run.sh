@@ -5,6 +5,7 @@
 SHUTDOWN_TIMEOUT=5
 AUTO_RESTART=true
 SERVER_PID=""
+START_TIME=0
 
 if [[ "$1" == "--no-restart" ]]; then
   AUTO_RESTART=false
@@ -38,6 +39,7 @@ cleanup() {
 trap 'AUTO_RESTART=false; cleanup; exit 0' INT TERM
 
 start_server() {
+  START_TIME=$(date +%s)
   .venv/bin/python3 main.py &
   SERVER_PID=$!
   echo "[supervisor] Server started (PID $SERVER_PID) | LATENCY_TRACING=$LATENCY_TRACING"
@@ -49,10 +51,17 @@ while true; do
   start_server
   wait "$SERVER_PID"
   EXIT_CODE=$?
+  RUNTIME=$(( $(date +%s) - START_TIME ))
   echo "[supervisor] Server exited with code $EXIT_CODE"
 
   if [[ "$AUTO_RESTART" == "false" ]]; then
     echo "[supervisor] Auto-restart disabled. Exiting."
+    exit $EXIT_CODE
+  fi
+
+  if [[ "$EXIT_CODE" -eq 3 && "$RUNTIME" -lt 10 ]]; then
+    echo "[supervisor] Startup failed quickly. This usually means a configuration error."
+    echo "[supervisor] Not restarting automatically."
     exit $EXIT_CODE
   fi
 

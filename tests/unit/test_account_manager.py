@@ -263,6 +263,96 @@ class TestAccountManagerLoadCredentials:
         print(f"Loaded accounts: {len(manager._accounts)}")
         
         assert len(manager._accounts) == 2
+
+    @pytest.mark.asyncio
+    async def test_load_credentials_folder_scanning_cockpit_wrapper_json(self, tmp_path):
+        """
+        Test folder scanning for cockpit wrapper credential files.
+
+        What it does: Scans a folder containing cockpit-managed account JSON
+        Purpose: Verify wrapper JSON files are accepted as valid credentials
+        """
+        print("\n=== Test: load_credentials with cockpit wrapper folder scanning ===")
+
+        # Arrange
+        folder = tmp_path / "kiro_accounts"
+        folder.mkdir()
+
+        wrapped_file = folder / "wrapped_account.json"
+        wrapped_file.write_text(json.dumps({
+            "email": "user@example.com",
+            "kiro_auth_token_raw": {
+                "refreshToken": "wrapped_refresh_token",
+                "accessToken": "wrapped_access_token",
+                "profileArn": "arn:aws:codewhisperer:us-east-1:123456789:profile/test"
+            }
+        }))
+
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text(json.dumps([
+            {
+                "type": "json",
+                "path": str(folder),
+                "enabled": True
+            }
+        ]))
+
+        manager = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(tmp_path / "state.json")
+        )
+
+        # Act
+        await manager.load_credentials()
+
+        # Assert
+        print(f"Loaded accounts: {len(manager._accounts)}")
+        assert len(manager._accounts) == 1
+        assert str(wrapped_file.resolve()) in manager._accounts
+
+    @pytest.mark.asyncio
+    async def test_load_credentials_prefers_primary_path_and_falls_back_when_missing(self, tmp_path):
+        """
+        Test fallback_path support for missing preferred credential files.
+
+        What it does: Loads credentials from fallback_path when accounts/*.json is missing
+        Purpose: Verify repo-local paths stay preferred while external backups remain usable
+        """
+        print("\n=== Test: load_credentials fallback_path support ===")
+
+        # Arrange
+        fallback_file = tmp_path / "cockpit_account.json"
+        fallback_file.write_text(json.dumps({
+            "kiro_auth_token_raw": {
+                "refreshToken": "wrapped_refresh_token",
+                "accessToken": "wrapped_access_token"
+            }
+        }))
+
+        missing_primary = tmp_path / "accounts" / "account_1.json"
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text(json.dumps([
+            {
+                "type": "json",
+                "path": str(missing_primary),
+                "fallback_path": str(fallback_file),
+                "enabled": True
+            }
+        ]))
+
+        manager = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(tmp_path / "state.json")
+        )
+
+        # Act
+        await manager.load_credentials()
+
+        # Assert
+        expected_account_id = str(missing_primary.resolve())
+        print(f"Loaded accounts: {list(manager._accounts.keys())}")
+        assert len(manager._accounts) == 1
+        assert expected_account_id in manager._accounts
     
     @pytest.mark.asyncio
     async def test_load_credentials_skip_invalid_files(self, tmp_path):
