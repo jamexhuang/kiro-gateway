@@ -360,6 +360,41 @@ async def set_latency_tracing(request: Request) -> Dict[str, bool]:
     return {"enabled": enabled}
 
 
+@router.get("/dashboard/api/account-strategy", dependencies=[Security(verify_dashboard_api_key)])
+async def get_account_strategy(request: Request) -> Dict[str, str]:
+    """Return current account selection strategy (runtime-mutable)."""
+    manager = request.app.state.account_manager
+    return {"strategy": manager.get_strategy()}
+
+
+@router.put("/dashboard/api/account-strategy", dependencies=[Security(verify_dashboard_api_key)])
+async def set_account_strategy(request: Request) -> Dict[str, str]:
+    """Switch account selection strategy at runtime (sticky | round_robin).
+
+    Does NOT affect in-flight requests — only the next call to
+    AccountManager.get_next_account() observes the new value.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    value = body.get("strategy")
+    if value not in ("sticky", "round_robin"):
+        raise HTTPException(
+            status_code=400,
+            detail="strategy must be 'sticky' or 'round_robin'",
+        )
+    manager = request.app.state.account_manager
+    try:
+        await manager.set_strategy(value)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"Account strategy toggled at runtime: {value}")
+    return {"strategy": manager.get_strategy()}
+
+
 @router.post("/dashboard/api/restart", dependencies=[Security(verify_dashboard_api_key)])
 async def restart_gateway() -> Dict[str, str]:
     """
@@ -769,8 +804,19 @@ DASHBOARD_HTML = r"""<!doctype html>
     </section>
 
     <section id="panel-accounts" class="panel">
-      <header><h2>帳號 <span id="accountCount" class="tag">0</span></h2></header>
-      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">顯示所有 API 帳號的即時狀態。「使用中」為當前輪轉到的帳號；「冷卻中」表示該帳號因錯誤觸發指數退避，倒數結束後自動恢復。</p>
+      <header>
+        <h2>帳號 <span id="accountCount" class="tag">0</span></h2>
+        <div class="toolbar" style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:11px;color:var(--muted)">選擇策略：</span>
+          <div id="strategySegmented" role="group" style="display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+            <button type="button" class="btn ghost strategy-btn" data-strategy="sticky" style="border:none;border-radius:0;font-size:11px;padding:4px 10px">Sticky</button>
+            <button type="button" class="btn ghost strategy-btn" data-strategy="round_robin" style="border:none;border-radius:0;font-size:11px;padding:4px 10px;border-left:1px solid var(--border)">Round-Robin</button>
+          </div>
+          <span id="strategyMeta" class="tag" style="font-size:11px;color:var(--muted)">—</span>
+        </div>
+      </header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">顯示所有 API 帳號的即時狀態。「使用中」為當前輪轉到的帳號；「冷卻中」表示該帳號因錯誤觸發指數退避，倒數結束後自動恢復。<br>
+        策略 <strong>Sticky</strong>＝沿用上次成功帳號；<strong>Round-Robin</strong>＝每次請求輪換。切換即時生效，不影響進行中的連線。</p>
       <div id="accounts" class="accounts"><p style="color:var(--muted)">等待資料…</p></div>
     </section>
 
@@ -876,6 +922,7 @@ function connect(){
   pullMetrics();setInterval(pullMetrics,5000);
   pullLogs();
   initLatencyToggle();
+  initAccountStrategy();
 }
 async function streamEvents(){
   setConn(null,"連線中");
@@ -1175,6 +1222,42 @@ async function initLatencyToggle(){
 $("#latencyToggle").addEventListener("change",async()=>{
   try{await api("/dashboard/api/latency-tracing",{method:"PUT",body:JSON.stringify({enabled:$("#latencyToggle").checked})});}
   catch(e){$("#latencyToggle").checked=!$("#latencyToggle").checked;}
+});
+
+// -------- account strategy toggle --------
+async function initAccountStrategy(){
+  try{
+    const d=await api("/dashboard/api/account-strategy");
+    setStrategyButtons(d.strategy);
+  }catch{}
+}
+function setStrategyButtons(strategy){
+  document.querySelectorAll(".strategy-btn").forEach(btn=>{
+    if(btn.dataset.strategy===strategy){
+      btn.classList.remove("ghost");
+      btn.style.background="var(--accent)";
+      btn.style.color="#fff";
+    }else{
+      btn.classList.add("ghost");
+      btn.style.background="";
+      btn.style.color="";
+    }
+  });
+  $("#strategyMeta").textContent=strategy==="round_robin"?"輪換中":"黏滯中";
+}
+document.querySelectorAll(".strategy-btn").forEach(btn=>{
+  btn.addEventListener("click",async()=>{
+    const target=btn.dataset.strategy;
+    const prev=document.querySelector(".strategy-btn:not(.ghost)")?.dataset.strategy;
+    setStrategyButtons(target);  // optimistic
+    try{
+      const d=await api("/dashboard/api/account-strategy",{method:"PUT",body:JSON.stringify({strategy:target})});
+      setStrategyButtons(d.strategy);
+    }catch(e){
+      if(prev) setStrategyButtons(prev);
+      alert("切換失敗："+(e.message||"unknown"));
+    }
+  });
 });
 
 async function restartGateway(){if(!confirm("確定要重啟 Gateway？進行中的請求會中斷。"))return;
