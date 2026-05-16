@@ -146,3 +146,64 @@ class StageMetricsRegistry:
 
 
 stage_metrics_registry = StageMetricsRegistry(window_s=300, bucket_s=5)
+
+
+import time as _time
+from typing import Any, Optional
+
+
+class UsageStatsRegistry:
+    """Process-lifetime cumulative usage counters with per-model breakdown.
+
+    Session-scoped (resets on process restart). All increments under a lock for thread safety.
+    """
+
+    def __init__(self) -> None:
+        self._lock = RLock()
+        self._since: float = _time.time()
+        self._total_requests: int = 0
+        self._total_input_tokens: int = 0
+        self._total_output_tokens: int = 0
+        self._total_payload_bytes: int = 0
+        self._by_model: Dict[str, Dict[str, int]] = {}
+
+    def record_completion(
+        self,
+        model: Optional[str],
+        input_tokens: Optional[int],
+        output_tokens: Optional[int],
+        payload_bytes: Optional[int],
+    ) -> None:
+        """Increment cumulative counters. None values are treated as 0."""
+        i = int(input_tokens) if input_tokens else 0
+        o = int(output_tokens) if output_tokens else 0
+        b = int(payload_bytes) if payload_bytes else 0
+        key = model if model else "(unknown)"
+        with self._lock:
+            self._total_requests += 1
+            self._total_input_tokens += i
+            self._total_output_tokens += o
+            self._total_payload_bytes += b
+            bucket = self._by_model.setdefault(
+                key, {"requests": 0, "input_tokens": 0, "output_tokens": 0, "payload_bytes": 0}
+            )
+            bucket["requests"] += 1
+            bucket["input_tokens"] += i
+            bucket["output_tokens"] += o
+            bucket["payload_bytes"] += b
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            return {
+                "since": self._since,
+                "total": {
+                    "requests": self._total_requests,
+                    "input_tokens": self._total_input_tokens,
+                    "output_tokens": self._total_output_tokens,
+                    "payload_bytes": self._total_payload_bytes,
+                },
+                "by_model": {k: dict(v) for k, v in self._by_model.items()},
+            }
+
+
+usage_stats_registry = UsageStatsRegistry()

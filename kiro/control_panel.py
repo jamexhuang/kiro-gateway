@@ -916,6 +916,18 @@ class ControlPanelState:
             except Exception:
                 pass
 
+            try:
+                from kiro.metrics import usage_stats_registry
+                if status == "completed":
+                    usage_stats_registry.record_completion(
+                        model=record.active_model,
+                        input_tokens=record.input_tokens,
+                        output_tokens=record.output_tokens,
+                        payload_bytes=record.request_bytes,
+                    )
+            except Exception:
+                pass
+
             self._emit("request_finished", asdict(record))
             self._completed_requests.appendleft(record)
 

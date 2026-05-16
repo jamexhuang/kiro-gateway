@@ -429,6 +429,13 @@ async def set_payload_settings(request: Request) -> Dict[str, Any]:
     return cp.get_payload_settings()
 
 
+@router.get("/dashboard/api/totals", dependencies=[Security(verify_dashboard_api_key)])
+async def get_totals() -> Dict[str, Any]:
+    """Return cumulative usage totals + per-model breakdown for this process."""
+    from kiro.metrics import usage_stats_registry
+    return usage_stats_registry.snapshot()
+
+
 @router.post("/dashboard/api/restart", dependencies=[Security(verify_dashboard_api_key)])
 async def restart_gateway() -> Dict[str, str]:
     """
