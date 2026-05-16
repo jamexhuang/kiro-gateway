@@ -768,6 +768,7 @@ DASHBOARD_HTML = r"""<!doctype html>
     <a data-jump="panel-routing">路由設定</a>
     <a data-jump="panel-throttle">流量控制</a>
     <a data-jump="panel-accounts">帳號</a>
+    <a data-jump="panel-totals">累計用量</a>
     <a data-jump="panel-requests">請求總覽</a>
     <a data-jump="panel-logs">即時日誌</a>
     <a data-jump="panel-models">遠端模型</a>
@@ -867,6 +868,16 @@ DASHBOARD_HTML = r"""<!doctype html>
         <button class="btn" onclick="applyPayloadSettings()" style="font-size:11px;padding:4px 10px">套用</button>
         <span id="payloadSaveResult" style="font-size:11px;color:var(--muted)"></span>
       </div>
+    </section>
+
+    <section id="panel-totals" class="panel">
+      <header>
+        <h2>累計用量</h2>
+        <span id="totalsSince" class="tag" style="font-size:11px;color:var(--muted)">—</span>
+      </header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">本進程啟動至今的累計使用量。重啟後歸零（不持久化）。</p>
+      <div id="totalsCards" style="display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:8px;margin-bottom:10px"></div>
+      <div id="totalsByModel"><p style="color:var(--muted)">等待資料…</p></div>
     </section>
 
     <section id="panel-latency" class="panel">
@@ -970,6 +981,7 @@ function connect(){
   // fall back to fetch+reader because EventSource can't set headers
   streamEvents();
   pullMetrics();setInterval(pullMetrics,5000);
+  pullTotals();setInterval(pullTotals,5000);
   pullLogs();
   initLatencyToggle();
   initAccountStrategy();
@@ -1336,6 +1348,29 @@ async function applyPayloadSettings(){
     $("#payloadSaveResult").textContent=e.message||"套用失敗";
     initPayloadSettings();
   }
+}
+
+// -------- usage totals --------
+async function pullTotals(){
+  try{const d=await api("/dashboard/api/totals");state.totals=d;renderTotals();}catch{}
+}
+function fmtNum(n){if(n<1000)return String(n);if(n<1_000_000)return (n/1000).toFixed(1)+"k";if(n<1_000_000_000)return (n/1_000_000).toFixed(2)+"M";return (n/1_000_000_000).toFixed(2)+"G";}
+function renderTotals(){
+  const d=state.totals;if(!d)return;
+  const since=new Date(d.since*1000);
+  $("#totalsSince").textContent="since "+since.toLocaleString();
+  const t=d.total;
+  $("#totalsCards").innerHTML=[
+    {label:"總請求",value:t.requests.toLocaleString()},
+    {label:"Input tokens",value:fmtNum(t.input_tokens)},
+    {label:"Output tokens",value:fmtNum(t.output_tokens)},
+    {label:"Payload",value:fmtBytes(t.payload_bytes)},
+  ].map(c=>`<div style="border:1px solid var(--border);border-radius:6px;padding:8px 10px"><div style="font-size:10.5px;color:var(--muted)">${c.label}</div><div style="font-size:18px;font-weight:600;margin-top:2px">${c.value}</div></div>`).join("");
+  const models=Object.entries(d.by_model||{}).map(([m,v])=>({m,...v})).sort((a,b)=>(b.input_tokens+b.output_tokens)-(a.input_tokens+a.output_tokens));
+  if(!models.length){$("#totalsByModel").innerHTML=`<p style="color:var(--muted)">尚無資料。</p>`;return;}
+  $("#totalsByModel").innerHTML=`<table class="reqs"><thead><tr><th>模型</th><th>請求數</th><th>input</th><th>output</th><th>payload</th></tr></thead><tbody>${
+    models.map(r=>`<tr><td>${esc(r.m)}</td><td>${r.requests}</td><td>${fmtNum(r.input_tokens)}</td><td>${fmtNum(r.output_tokens)}</td><td>${fmtBytes(r.payload_bytes)}</td></tr>`).join("")
+  }</tbody></table>`;
 }
 
 async function restartGateway(){if(!confirm("確定要重啟 Gateway？進行中的請求會中斷。"))return;
