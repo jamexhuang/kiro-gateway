@@ -804,15 +804,18 @@ class AccountManager:
             account.stats.successful_requests += 1
             self._dirty = True
             
-            # GLOBAL STICKY: Update global current_account_index
-            all_account_ids = list(self._accounts.keys())
-            try:
-                successful_index = all_account_ids.index(account_id)
-                if self._current_account_index != successful_index:
-                    self._current_account_index = successful_index
-                    self._dirty = True
-            except ValueError:
-                pass
+            # Update global cursor on success — ONLY in sticky mode.
+            # In round_robin mode, the cursor is advanced inside get_next_account()
+            # on every fresh call; pinning it here would defeat rotation.
+            if ACCOUNT_STRATEGY == "sticky":
+                all_account_ids = list(self._accounts.keys())
+                try:
+                    successful_index = all_account_ids.index(account_id)
+                    if self._current_account_index != successful_index:
+                        self._current_account_index = successful_index
+                        self._dirty = True
+                except ValueError:
+                    pass
     
     async def report_failure(
         self,

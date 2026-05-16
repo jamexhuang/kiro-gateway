@@ -1529,6 +1529,46 @@ class TestAccountManagerRoundRobinStrategy:
         assert second.id != first.id
         assert second.id in {ids[0], ids[2]}
 
+    @pytest.mark.asyncio
+    async def test_round_robin_report_success_does_not_reset_cursor(
+        self, tmp_path, mock_list_models_response, monkeypatch,
+    ):
+        """In round_robin mode, report_success() must NOT pin the cursor to the
+        winning account — otherwise rotation degenerates back to sticky."""
+        print("\n=== Test: round_robin report_success keeps rotating ===")
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "round_robin")
+
+        manager = await self._build_three_account_manager(tmp_path, mock_list_models_response)
+        ids = list(manager._accounts.keys())
+        manager._current_account_index = 0
+
+        a = await manager.get_next_account("claude-opus-4.5")
+        await manager.report_success(a.id, "claude-opus-4.5")
+        b = await manager.get_next_account("claude-opus-4.5")
+        await manager.report_success(b.id, "claude-opus-4.5")
+        c = await manager.get_next_account("claude-opus-4.5")
+
+        print(f"Picked: {[a.id, b.id, c.id]}")
+        assert {a.id, b.id, c.id} == set(ids)  # all three visited
+
+    @pytest.mark.asyncio
+    async def test_sticky_report_success_still_pins_cursor(
+        self, tmp_path, mock_list_models_response, monkeypatch,
+    ):
+        """In sticky mode, report_success() still pins cursor (regression guard)."""
+        print("\n=== Test: sticky report_success pins cursor ===")
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "sticky")
+
+        manager = await self._build_three_account_manager(tmp_path, mock_list_models_response)
+        ids = list(manager._accounts.keys())
+        manager._current_account_index = 0
+
+        # Manually pick the 3rd account and report success
+        target_id = ids[2]
+        await manager.report_success(target_id, "claude-opus-4.5")
+
+        assert manager._current_account_index == 2
+
 
 class TestAccountStrategyConfig:
     """Tests for ACCOUNT_STRATEGY env var parsing."""
