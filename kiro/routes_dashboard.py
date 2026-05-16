@@ -395,6 +395,40 @@ async def set_account_strategy(request: Request) -> Dict[str, str]:
     return {"strategy": manager.get_strategy()}
 
 
+@router.get("/dashboard/api/payload-settings", dependencies=[Security(verify_dashboard_api_key)])
+async def get_payload_settings(request: Request) -> Dict[str, Any]:
+    """Return current runtime payload settings."""
+    cp = request.app.state.control_panel
+    return cp.get_payload_settings()
+
+
+@router.put("/dashboard/api/payload-settings", dependencies=[Security(verify_dashboard_api_key)])
+async def set_payload_settings(request: Request) -> Dict[str, Any]:
+    """Update runtime payload settings.
+
+    Does NOT affect in-flight requests — only the next call to build_kiro_payload()
+    observes the new value.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    max_bytes = body.get("max_bytes")
+    auto_trim = body.get("auto_trim")
+    if not isinstance(max_bytes, int):
+        raise HTTPException(status_code=400, detail="max_bytes must be an integer")
+    if not isinstance(auto_trim, bool):
+        raise HTTPException(status_code=400, detail="auto_trim must be a boolean")
+    cp = request.app.state.control_panel
+    try:
+        cp.set_payload_settings(max_bytes=max_bytes, auto_trim=auto_trim)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return cp.get_payload_settings()
+
+
 @router.post("/dashboard/api/restart", dependencies=[Security(verify_dashboard_api_key)])
 async def restart_gateway() -> Dict[str, str]:
     """

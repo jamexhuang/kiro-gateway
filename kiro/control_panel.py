@@ -27,12 +27,21 @@ from kiro.config import (
     MAX_CONCURRENT_UPSTREAM_REQUESTS,
     REQUEST_JITTER_MS,
     THROTTLE_FAST_FAIL,
+    KIRO_MAX_PAYLOAD_BYTES as _ENV_MAX_PAYLOAD_BYTES,
+    AUTO_TRIM_PAYLOAD as _ENV_AUTO_TRIM_PAYLOAD,
 )
 from kiro.latency_tracer import LatencyTracer, get_tracer, is_enabled as latency_enabled
 
 
 ROUTING_MODES = {"passthrough", "manual", "redirect"}
 MODEL_FAILURE_STATUS_CODES = {400, 403, 404, 422, 429, 502, 504}
+
+# Module-level defaults (env-driven, used as bootstrap before state.json loads).
+DEFAULT_MAX_PAYLOAD_BYTES: int = _ENV_MAX_PAYLOAD_BYTES
+DEFAULT_AUTO_TRIM_PAYLOAD: bool = _ENV_AUTO_TRIM_PAYLOAD
+
+_PAYLOAD_MAX_BYTES_MIN: int = 50_000
+_PAYLOAD_MAX_BYTES_MAX: int = 2_000_000
 MODEL_QUALITY_ORDER = {"haiku": 1, "sonnet": 2, "opus": 3}
 
 
@@ -44,6 +53,13 @@ class ThrottleConfig:
     jitter_ms: int = REQUEST_JITTER_MS
     throttle_fast_fail: bool = THROTTLE_FAST_FAIL
     enabled: bool = True
+
+
+@dataclass
+class PayloadConfig:
+    """Runtime payload-size controls."""
+    max_bytes: int = DEFAULT_MAX_PAYLOAD_BYTES
+    auto_trim: bool = DEFAULT_AUTO_TRIM_PAYLOAD
 
 
 @dataclass
@@ -180,6 +196,7 @@ class RequestRecord:
     trim_after_bytes: Optional[int] = None
     # Per-stage latency breakdown (populated when LATENCY_TRACING is enabled).
     trace: Optional[Dict[str, Any]] = None
+    request_bytes: Optional[int] = None
 
 
 def _dedupe_models(models: List[str]) -> List[str]:
@@ -287,6 +304,10 @@ class ControlPanelState:
         self._lock = RLock()
         self._routing = RoutingConfig()
         self._throttle = ThrottleConfig()
+        self._payload = PayloadConfig(
+            max_bytes=DEFAULT_MAX_PAYLOAD_BYTES,
+            auto_trim=DEFAULT_AUTO_TRIM_PAYLOAD,
+        )
         self._active_requests: Dict[str, RequestRecord] = {}
         self._completed_requests: Deque[RequestRecord] = deque(maxlen=max_completed_requests)
         self._max_chunks_per_request = max_chunks_per_request
@@ -315,17 +336,24 @@ class ControlPanelState:
                     filtered = {k: v for k, v in throttle_data.items() if k in allowed}
                     self._throttle = ThrottleConfig(**filtered)
                     logger.info(f"Loaded persisted throttle: enabled={self._throttle.enabled}")
+                payload_data = data.get("payload")
+                if payload_data:
+                    allowed = set(PayloadConfig.__dataclass_fields__.keys())
+                    filtered = {k: v for k, v in payload_data.items() if k in allowed}
+                    self._payload = PayloadConfig(**filtered)
+                    logger.info(f"Loaded persisted payload: max_bytes={self._payload.max_bytes}, auto_trim={self._payload.auto_trim}")
         except Exception as e:
             logger.warning(f"Failed to load routing state: {e}")
 
     def _save_routing_state(self) -> None:
-        """Persist routing + throttle config to disk."""
+        """Persist routing + throttle + payload config to disk."""
         if not self._persist:
             return
         try:
             data = {
                 "routing": asdict(self._routing),
                 "throttle": asdict(self._throttle),
+                "payload": asdict(self._payload),
             }
             with open(self.ROUTING_STATE_FILE, "w") as f:
                 json.dump(data, f, indent=2)
@@ -336,6 +364,38 @@ class ControlPanelState:
         """Add a subscriber for real-time events."""
         with self._lock:
             self._subscribers.append(fn)
+
+    def get_payload_settings(self) -> Dict[str, Any]:
+        """Return current runtime payload settings."""
+        with self._lock:
+            return {"max_bytes": self._payload.max_bytes, "auto_trim": self._payload.auto_trim}
+
+    def set_payload_settings(self, max_bytes: int, auto_trim: bool) -> None:
+        """Update runtime payload settings.
+
+        Raises:
+            ValueError: if max_bytes outside [50_000, 2_000_000].
+        """
+        if not isinstance(max_bytes, int) or max_bytes < _PAYLOAD_MAX_BYTES_MIN or max_bytes > _PAYLOAD_MAX_BYTES_MAX:
+            raise ValueError(
+                f"max_bytes must be int in [{_PAYLOAD_MAX_BYTES_MIN}, {_PAYLOAD_MAX_BYTES_MAX}], got {max_bytes!r}"
+            )
+        with self._lock:
+            self._payload = PayloadConfig(max_bytes=max_bytes, auto_trim=bool(auto_trim))
+        self._save_routing_state()
+        logger.info(f"Payload settings updated: max_bytes={max_bytes}, auto_trim={auto_trim}")
+
+    def record_request_bytes(self, request_id: str, request_bytes: int) -> None:
+        """Record the raw payload byte-count sent upstream for a request."""
+        with self._lock:
+            record = self._active_requests.get(request_id) or next(
+                (r for r in self._completed_requests if r.id == request_id), None
+            )
+            if record is None:
+                return
+            record.request_bytes = int(request_bytes)
+            record.updated_at = time.time()
+            self._emit("request_updated", asdict(record))
 
     def unsubscribe(self, fn: Callable[[Dict[str, Any]], None]) -> None:
         """Remove a subscriber."""

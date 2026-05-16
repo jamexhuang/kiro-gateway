@@ -311,3 +311,79 @@ def test_record_metrics_and_trim_populate_record():
     assert rec["trim_before_messages"] == 280
     assert rec["trim_after_messages"] == 78
     assert rec["trim_before_bytes"] == 5083328
+
+
+class TestPayloadSettings:
+    """Runtime-mutable payload settings via ControlPanelState."""
+
+    def test_defaults_seeded_from_env(self, tmp_path, monkeypatch):
+        """Fresh ControlPanelState seeds payload settings from config defaults."""
+        monkeypatch.setattr("kiro.control_panel.DEFAULT_MAX_PAYLOAD_BYTES", 600000)
+        monkeypatch.setattr("kiro.control_panel.DEFAULT_AUTO_TRIM_PAYLOAD", True)
+        monkeypatch.setattr(
+            "kiro.control_panel.ControlPanelState.ROUTING_STATE_FILE",
+            str(tmp_path / "routing_state.json"),
+        )
+        cp = ControlPanelState(persist=False)
+        s = cp.get_payload_settings()
+        assert s == {"max_bytes": 600000, "auto_trim": True}
+
+    def test_set_payload_settings_updates_values(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "kiro.control_panel.ControlPanelState.ROUTING_STATE_FILE",
+            str(tmp_path / "routing_state.json"),
+        )
+        cp = ControlPanelState(persist=False)
+        cp.set_payload_settings(max_bytes=300000, auto_trim=False)
+        assert cp.get_payload_settings() == {"max_bytes": 300000, "auto_trim": False}
+
+    def test_set_payload_settings_rejects_out_of_range(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "kiro.control_panel.ControlPanelState.ROUTING_STATE_FILE",
+            str(tmp_path / "routing_state.json"),
+        )
+        cp = ControlPanelState(persist=False)
+        import pytest
+        with pytest.raises(ValueError):
+            cp.set_payload_settings(max_bytes=10, auto_trim=True)
+        with pytest.raises(ValueError):
+            cp.set_payload_settings(max_bytes=9_999_999, auto_trim=True)
+
+    def test_payload_settings_persist_and_reload(self, tmp_path, monkeypatch):
+        state_file = str(tmp_path / "routing_state.json")
+        monkeypatch.setattr("kiro.control_panel.ControlPanelState.ROUTING_STATE_FILE", state_file)
+        cp1 = ControlPanelState(persist=True)
+        cp1.set_payload_settings(max_bytes=450000, auto_trim=False)
+
+        cp2 = ControlPanelState(persist=True)
+        assert cp2.get_payload_settings() == {"max_bytes": 450000, "auto_trim": False}
+
+    def test_load_state_without_payload_falls_back_to_defaults(self, tmp_path, monkeypatch):
+        """Old routing_state.json files (no payload key) use env defaults."""
+        import json as _json
+        state_file = tmp_path / "routing_state.json"
+        state_file.write_text(_json.dumps({"routing": {}, "throttle": {}}))
+        monkeypatch.setattr("kiro.control_panel.DEFAULT_MAX_PAYLOAD_BYTES", 600000)
+        monkeypatch.setattr("kiro.control_panel.DEFAULT_AUTO_TRIM_PAYLOAD", True)
+        monkeypatch.setattr("kiro.control_panel.ControlPanelState.ROUTING_STATE_FILE", str(state_file))
+        cp = ControlPanelState(persist=True)
+        assert cp.get_payload_settings() == {"max_bytes": 600000, "auto_trim": True}
+
+    def test_record_request_bytes_sets_field(self, tmp_path, monkeypatch):
+        from kiro.control_panel import RoutingDecision
+        monkeypatch.setattr("kiro.control_panel.ControlPanelState.ROUTING_STATE_FILE", str(tmp_path / "rs.json"))
+        cp = ControlPanelState(persist=False)
+        decision = RoutingDecision(
+            original_model="claude-opus-4.5",
+            routed_model="claude-opus-4.5",
+            applied=False,
+            mode="disabled",
+            reason="off",
+            fallback_models=[],
+        )
+        req_id = cp.start_request("anthropic", "/v1/messages", False, decision)
+        cp.record_request_bytes(req_id, 12345)
+        snap = cp.snapshot()
+        active = snap.get("active_requests", [])
+        assert len(active) == 1
+        assert active[0]["request_bytes"] == 12345
