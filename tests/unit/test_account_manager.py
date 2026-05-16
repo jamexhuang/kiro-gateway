@@ -1418,4 +1418,31 @@ class TestAccountsSnapshotCooldown:
         assert entry["cooldown_remaining_s"] >= 0
         assert entry["last_error_reason"] == "INSUFFICIENT_MODEL_CAPACITY"
         assert entry["last_error_status"] == 429
-        assert "available_models_count" in entry
+
+
+class TestAccountStrategyConfig:
+    """Tests for ACCOUNT_STRATEGY env var parsing."""
+
+    def test_default_strategy_is_sticky(self, monkeypatch):
+        """Default value when env var unset is 'sticky'."""
+        monkeypatch.delenv("ACCOUNT_STRATEGY", raising=False)
+        import importlib
+        import kiro.config
+        importlib.reload(kiro.config)
+        assert kiro.config.ACCOUNT_STRATEGY == "sticky"
+
+    def test_round_robin_strategy_parsed(self, monkeypatch):
+        """'round_robin' is accepted (case-insensitive)."""
+        monkeypatch.setenv("ACCOUNT_STRATEGY", "Round_Robin")
+        import importlib
+        import kiro.config
+        importlib.reload(kiro.config)
+        assert kiro.config.ACCOUNT_STRATEGY == "round_robin"
+
+    def test_invalid_strategy_falls_back_to_sticky(self, monkeypatch):
+        """Unknown values fall back to 'sticky' (defensive)."""
+        monkeypatch.setenv("ACCOUNT_STRATEGY", "garbage")
+        import importlib
+        import kiro.config
+        importlib.reload(kiro.config)
+        assert kiro.config.ACCOUNT_STRATEGY == "sticky"

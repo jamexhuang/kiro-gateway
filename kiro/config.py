@@ -597,6 +597,16 @@ ACCOUNT_MAX_BACKOFF_MULTIPLIER: float = float(os.getenv("ACCOUNT_MAX_BACKOFF_MUL
 # Default: 0.1 (10% chance) - prevents permanent "stuck" state
 ACCOUNT_PROBABILISTIC_RETRY_CHANCE: float = float(os.getenv("ACCOUNT_PROBABILISTIC_RETRY_CHANCE", "0.1"))
 
+# Account selection strategy for multi-account mode (ignored when only 1 account)
+# Options:
+#   - "sticky"      : (default) Keep using the last successful account until it fails.
+#                     Best for cache hit rate and minimising token refresh churn.
+#   - "round_robin" : Rotate to the next account on every request to spread load.
+#                     Failover loop (Circuit Breaker, exclude_accounts) still applies.
+# Unknown values fall back to "sticky".
+_ACCOUNT_STRATEGY_RAW: str = os.getenv("ACCOUNT_STRATEGY", "sticky").lower().strip()
+ACCOUNT_STRATEGY: str = _ACCOUNT_STRATEGY_RAW if _ACCOUNT_STRATEGY_RAW in ("sticky", "round_robin") else "sticky"
+
 # ==================================================================================================
 # Account Cache Settings
 # ==================================================================================================
