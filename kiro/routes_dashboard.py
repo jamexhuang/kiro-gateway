@@ -162,11 +162,10 @@ async def dashboard_page(request: Request) -> str:
     host = request.headers.get("host", "")
     client_host = request.client.host if request.client else ""
 
+    host_name = host.split(":")[0]
     is_local_or_private = (
         client_host in ("127.0.0.1", "::1", "localhost") or
-        "127.0.0.1" in host or
-        "localhost" in host or
-        "::1" in host or
+        host_name in ("127.0.0.1", "localhost", "::1") or
         # Private network ranges (RFC 1918 + link-local)
         client_host.startswith("10.") or
         _is_private_172(client_host) or
