@@ -225,7 +225,30 @@ class AccountManager:
         self._dirty = False
         self._credentials_config: List[Dict] = []
         self._current_account_index: int = 0  # GLOBAL sticky index for all models
-    
+        self._strategy: str = ACCOUNT_STRATEGY  # runtime-mutable; seeded from env
+
+    def get_strategy(self) -> str:
+        """Return current account-selection strategy ('sticky' or 'round_robin')."""
+        return self._strategy
+
+    async def set_strategy(self, value: str) -> None:
+        """
+        Update the runtime strategy. Validated; persisted on next save.
+
+        Args:
+            value: 'sticky' or 'round_robin'.
+
+        Raises:
+            ValueError: if value is not a recognised strategy.
+        """
+        if value not in ("sticky", "round_robin"):
+            raise ValueError(f"Invalid strategy: {value!r} (expected 'sticky' or 'round_robin')")
+        async with self._lock:
+            if self._strategy != value:
+                self._strategy = value
+                self._dirty = True
+                logger.info(f"Account selection strategy changed to: {value}")
+
     async def load_credentials(self) -> None:
         """
         Load credentials from credentials.json.
@@ -358,7 +381,9 @@ class AccountManager:
                 state_data = json.load(f)
             # Restore global current_account_index
             self._current_account_index = state_data.get("current_account_index", 0)
-            
+            # Restore runtime strategy (falls back to env default if field missing)
+            self._strategy = state_data.get("strategy", ACCOUNT_STRATEGY)
+
             # Restore model_to_accounts mapping (without next_index)
             for model, data in state_data.get("model_to_accounts", {}).items():
                 self._model_to_accounts[model] = ModelAccountList(
@@ -393,6 +418,7 @@ class AccountManager:
         """
         state_data = {
             "current_account_index": self._current_account_index,
+            "strategy": self._strategy,
             "accounts": {
                 account_id: {
                     "failures": account.failures,
@@ -716,7 +742,7 @@ class AccountManager:
             #              accounts in the same rotation order.
             # sticky:     always start from the current cursor.
             if (
-                ACCOUNT_STRATEGY == "round_robin"
+                self._strategy == "round_robin"
                 and not exclude_accounts
                 and len(all_account_ids) > 1
             ):
@@ -807,7 +833,7 @@ class AccountManager:
             # Update global cursor on success — ONLY in sticky mode.
             # In round_robin mode, the cursor is advanced inside get_next_account()
             # on every fresh call; pinning it here would defeat rotation.
-            if ACCOUNT_STRATEGY == "sticky":
+            if self._strategy == "sticky":
                 all_account_ids = list(self._accounts.keys())
                 try:
                     successful_index = all_account_ids.index(account_id)

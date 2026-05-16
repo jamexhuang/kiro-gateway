@@ -1596,3 +1596,139 @@ class TestAccountStrategyConfig:
         import kiro.config
         importlib.reload(kiro.config)
         assert kiro.config.ACCOUNT_STRATEGY == "sticky"
+
+
+class TestAccountManagerRuntimeStrategy:
+    """
+    Tests for runtime-mutable strategy via AccountManager.set_strategy().
+
+    Verifies the strategy is per-instance state (not a module constant),
+    persists to state.json, and reloads correctly on restart.
+    """
+
+    @pytest.mark.asyncio
+    async def test_get_strategy_defaults_to_module_constant(self, tmp_path, monkeypatch):
+        """Fresh AccountManager seeds self._strategy from ACCOUNT_STRATEGY env default."""
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "sticky")
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text("[]")
+        manager = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(tmp_path / "state.json"),
+        )
+        assert manager.get_strategy() == "sticky"
+
+    @pytest.mark.asyncio
+    async def test_set_strategy_updates_value_and_marks_dirty(self, tmp_path, monkeypatch):
+        """set_strategy('round_robin') updates the attribute and marks dirty."""
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "sticky")
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text("[]")
+        manager = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(tmp_path / "state.json"),
+        )
+        manager._dirty = False
+        await manager.set_strategy("round_robin")
+        assert manager.get_strategy() == "round_robin"
+        assert manager._dirty is True
+
+    @pytest.mark.asyncio
+    async def test_set_strategy_rejects_invalid_value(self, tmp_path, monkeypatch):
+        """set_strategy('garbage') raises ValueError, value unchanged."""
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "sticky")
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text("[]")
+        manager = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(tmp_path / "state.json"),
+        )
+        with pytest.raises(ValueError):
+            await manager.set_strategy("garbage")
+        assert manager.get_strategy() == "sticky"
+
+    @pytest.mark.asyncio
+    async def test_strategy_persists_in_state_file(self, tmp_path, monkeypatch):
+        """_save_state writes strategy, load_state restores it."""
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "sticky")
+        state_file = tmp_path / "state.json"
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text("[]")
+
+        manager1 = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(state_file),
+        )
+        await manager1.set_strategy("round_robin")
+        await manager1._save_state()
+
+        # Simulate restart with a different env default; state should win
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "sticky")
+        manager2 = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(state_file),
+        )
+        await manager2.load_state()
+        assert manager2.get_strategy() == "round_robin"
+
+    @pytest.mark.asyncio
+    async def test_load_state_without_strategy_field_falls_back_to_env(self, tmp_path, monkeypatch):
+        """Old state.json files without 'strategy' use the env-driven default."""
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "round_robin")
+        state_file = tmp_path / "state.json"
+        # Write a state file missing the 'strategy' field
+        state_file.write_text(json.dumps({"current_account_index": 0, "accounts": {}, "model_to_accounts": {}}))
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text("[]")
+        manager = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(state_file),
+        )
+        await manager.load_state()
+        assert manager.get_strategy() == "round_robin"
+
+    @pytest.mark.asyncio
+    async def test_get_next_account_uses_instance_strategy_not_module_constant(
+        self, tmp_path, mock_list_models_response, monkeypatch,
+    ):
+        """Critical: changing manager._strategy at runtime must take effect immediately."""
+        # Module constant set to sticky; instance set to round_robin → should rotate
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "sticky")
+
+        creds_entries = []
+        for i in range(3):
+            jf = tmp_path / f"acct_{i}.json"
+            jf.write_text(json.dumps({
+                "refreshToken": f"token_{i}",
+                "accessToken": f"access_{i}",
+                "expiresAt": "2099-01-01T00:00:00.000Z",
+            }))
+            creds_entries.append({"type": "json", "path": str(jf), "enabled": True})
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text(json.dumps(creds_entries))
+
+        manager = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(tmp_path / "state.json"),
+        )
+        await manager.load_credentials()
+        with patch('kiro.account_manager.KiroHttpClient') as mock_http_class:
+            mock_client = AsyncMock()
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_list_models_response
+            mock_client.request_with_retry = AsyncMock(return_value=mock_response)
+            mock_client.close = AsyncMock()
+            mock_http_class.return_value = mock_client
+            for acct_id in list(manager._accounts.keys()):
+                await manager._initialize_account(acct_id)
+
+        ids = list(manager._accounts.keys())
+        manager._current_account_index = 0
+        await manager.set_strategy("round_robin")  # flip at runtime
+
+        a = await manager.get_next_account("claude-opus-4.5")
+        b = await manager.get_next_account("claude-opus-4.5")
+        c = await manager.get_next_account("claude-opus-4.5")
+
+        assert [a.id, b.id, c.id] == [ids[1], ids[2], ids[0]]
