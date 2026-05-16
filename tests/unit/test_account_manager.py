@@ -1421,6 +1421,115 @@ class TestAccountsSnapshotCooldown:
         assert "available_models_count" in entry
 
 
+class TestAccountManagerRoundRobinStrategy:
+    """
+    Tests for round_robin strategy in get_next_account().
+
+    Verifies the selection cursor advances by one on every fresh
+    get_next_account() call, while preserving failover semantics
+    when exclude_accounts is non-empty.
+    """
+
+    async def _build_three_account_manager(self, tmp_path, mock_list_models_response):
+        """Helper: build a manager with 3 initialised accounts."""
+        creds_entries = []
+        for i in range(3):
+            jf = tmp_path / f"acct_{i}.json"
+            jf.write_text(json.dumps({
+                "refreshToken": f"token_{i}",
+                "accessToken": f"access_{i}",
+                "expiresAt": "2099-01-01T00:00:00.000Z",
+            }))
+            creds_entries.append({"type": "json", "path": str(jf), "enabled": True})
+
+        creds_file = tmp_path / "credentials.json"
+        creds_file.write_text(json.dumps(creds_entries))
+
+        manager = AccountManager(
+            credentials_file=str(creds_file),
+            state_file=str(tmp_path / "state.json"),
+        )
+        await manager.load_credentials()
+
+        with patch('kiro.account_manager.KiroHttpClient') as mock_http_class:
+            mock_client = AsyncMock()
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_list_models_response
+            mock_client.request_with_retry = AsyncMock(return_value=mock_response)
+            mock_client.close = AsyncMock()
+            mock_http_class.return_value = mock_client
+
+            for acct_id in list(manager._accounts.keys()):
+                await manager._initialize_account(acct_id)
+
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_round_robin_advances_cursor_each_call(
+        self, tmp_path, mock_list_models_response, monkeypatch,
+    ):
+        """Three consecutive get_next_account calls return three different accounts."""
+        print("\n=== Test: round_robin advances cursor each call ===")
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "round_robin")
+
+        manager = await self._build_three_account_manager(tmp_path, mock_list_models_response)
+        ids = list(manager._accounts.keys())
+        manager._current_account_index = 0
+
+        a = await manager.get_next_account("claude-opus-4.5")
+        b = await manager.get_next_account("claude-opus-4.5")
+        c = await manager.get_next_account("claude-opus-4.5")
+
+        picked = [a.id, b.id, c.id]
+        print(f"Picked: {picked}")
+        assert picked == [ids[1], ids[2], ids[0]]
+
+    @pytest.mark.asyncio
+    async def test_sticky_keeps_same_account(
+        self, tmp_path, mock_list_models_response, monkeypatch,
+    ):
+        """In sticky mode, three calls without failure return the same account."""
+        print("\n=== Test: sticky mode keeps same account ===")
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "sticky")
+
+        manager = await self._build_three_account_manager(tmp_path, mock_list_models_response)
+        ids = list(manager._accounts.keys())
+        manager._current_account_index = 0
+
+        a = await manager.get_next_account("claude-opus-4.5")
+        b = await manager.get_next_account("claude-opus-4.5")
+        c = await manager.get_next_account("claude-opus-4.5")
+
+        print(f"Picked: {[a.id, b.id, c.id]}")
+        assert a.id == b.id == c.id == ids[0]
+
+    @pytest.mark.asyncio
+    async def test_round_robin_failover_walks_remaining(
+        self, tmp_path, mock_list_models_response, monkeypatch,
+    ):
+        """When exclude_accounts is given (mid-failover), cursor is NOT advanced;
+        the loop must walk the remaining accounts starting from cursor."""
+        print("\n=== Test: round_robin honours exclude_accounts ===")
+        monkeypatch.setattr("kiro.account_manager.ACCOUNT_STRATEGY", "round_robin")
+
+        manager = await self._build_three_account_manager(tmp_path, mock_list_models_response)
+        ids = list(manager._accounts.keys())
+        manager._current_account_index = 0
+
+        first = await manager.get_next_account("claude-opus-4.5")
+        # Simulate failover: caller adds first.id to exclude and asks again
+        second = await manager.get_next_account(
+            "claude-opus-4.5",
+            exclude_accounts={first.id},
+        )
+
+        print(f"First={first.id}, second={second.id}")
+        assert first.id == ids[1]
+        assert second.id != first.id
+        assert second.id in {ids[0], ids[2]}
+
+
 class TestAccountStrategyConfig:
     """Tests for ACCOUNT_STRATEGY env var parsing."""
 

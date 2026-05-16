@@ -57,6 +57,7 @@ from kiro.config import (
     ACCOUNT_MAX_BACKOFF_MULTIPLIER,
     ACCOUNT_PROBABILISTIC_RETRY_CHANCE,
     ACCOUNT_CACHE_TTL,
+    ACCOUNT_STRATEGY,
     STATE_SAVE_INTERVAL_SECONDS,
     FALLBACK_MODELS,
 )
@@ -703,14 +704,26 @@ class AccountManager:
                 # Always return single account (ignore cooldown/failures)
                 return account
             
-            # Multi-account logic: GLOBAL sticky
+            # Multi-account logic
             normalized_model = normalize_model_name(model)
-            
-            # ALWAYS start from GLOBAL index (one current account for ALL models)
-            start_index = self._current_account_index
-            
-            # ALWAYS iterate over ALL accounts
+
             all_account_ids = list(self._accounts.keys())
+
+            # Compute starting index based on strategy.
+            # round_robin: advance cursor on every *fresh* call (no exclude set).
+            #              During an in-flight failover loop (exclude_accounts present),
+            #              we keep the existing cursor so the walk visits the remaining
+            #              accounts in the same rotation order.
+            # sticky:     always start from the current cursor.
+            if (
+                ACCOUNT_STRATEGY == "round_robin"
+                and not exclude_accounts
+                and len(all_account_ids) > 1
+            ):
+                self._current_account_index = (self._current_account_index + 1) % len(all_account_ids)
+                self._dirty = True
+
+            start_index = self._current_account_index
             
             for i in range(len(all_account_ids)):
                 current_index = (start_index + i) % len(all_account_ids)
