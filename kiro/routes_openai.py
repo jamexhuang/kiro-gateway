@@ -371,6 +371,7 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                     conversation_id,
                     profile_arn_for_payload,
                     monitor_request_id=monitor_request_id,
+                    payload_settings=request.app.state.control_panel.get_payload_settings(),
                 )
             except ValueError as e:
                 control_panel.finish_request(
@@ -379,7 +380,6 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                     error=str(e),
                 )
                 raise HTTPException(status_code=400, detail=str(e))
-            
             # Log Kiro payload
             try:
                 kiro_request_body = json.dumps(kiro_payload, ensure_ascii=False, indent=2).encode('utf-8')
@@ -433,6 +433,7 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                             conversation_id,
                             profile_arn_for_payload,
                             monitor_request_id=monitor_request_id,
+                            payload_settings=request.app.state.control_panel.get_payload_settings(),
                         )
                     except ValueError as e:
                         raise HTTPException(status_code=400, detail=str(e))
@@ -734,6 +735,7 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
             conversation_id,
             profile_arn_for_payload,
             monitor_request_id=monitor_request_id,
+            payload_settings=request.app.state.control_panel.get_payload_settings(),
         )
     except ValueError as e:
         control_panel.finish_request(
@@ -802,6 +804,7 @@ async def chat_completions(request: Request, request_data: ChatCompletionRequest
                     conversation_id,
                     profile_arn_for_payload,
                     monitor_request_id=monitor_request_id,
+                    payload_settings=request.app.state.control_panel.get_payload_settings(),
                 )
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))

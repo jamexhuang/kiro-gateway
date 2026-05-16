@@ -425,6 +425,7 @@ async def messages(
                     conversation_id,
                     profile_arn_for_payload,
                     monitor_request_id=monitor_request_id,
+                    payload_settings=request.app.state.control_panel.get_payload_settings(),
                 )
             except ValueError as e:
                 logger.error(f"Conversion error: {e}")
@@ -507,6 +508,7 @@ async def messages(
                             conversation_id,
                             profile_arn_for_payload,
                             monitor_request_id=monitor_request_id,
+                            payload_settings=request.app.state.control_panel.get_payload_settings(),
                         )
                     except ValueError as e:
                         logger.error(f"Conversion error: {e}")
@@ -866,6 +868,7 @@ async def messages(
             conversation_id,
             profile_arn_for_payload,
             monitor_request_id=monitor_request_id,
+            payload_settings=request.app.state.control_panel.get_payload_settings(),
         )
     except ValueError as e:
         logger.error(f"Conversion error: {e}")
@@ -953,6 +956,7 @@ async def messages(
                     conversation_id,
                     profile_arn_for_payload,
                     monitor_request_id=monitor_request_id,
+                    payload_settings=request.app.state.control_panel.get_payload_settings(),
                 )
             except ValueError as e:
                 logger.error(f"Conversion error: {e}")

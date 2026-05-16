@@ -56,10 +56,16 @@ from kiro.config import (
     FAKE_REASONING_ENABLED,
     FAKE_REASONING_MAX_TOKENS,
     FAKE_REASONING_BUDGET_CAP,
-    KIRO_MAX_PAYLOAD_BYTES,
-    AUTO_TRIM_PAYLOAD,
 )
 from kiro.payload_guards import check_payload_size, trim_payload_to_limit
+
+
+def _resolve_payload_settings(settings: Optional[Dict[str, Any]]) -> Tuple[int, bool]:
+    """Return (max_bytes, auto_trim) — explicit settings win, else env defaults."""
+    if settings is not None:
+        return int(settings.get("max_bytes", 600_000)), bool(settings.get("auto_trim", True))
+    from kiro.config import KIRO_MAX_PAYLOAD_BYTES, AUTO_TRIM_PAYLOAD
+    return int(KIRO_MAX_PAYLOAD_BYTES), bool(AUTO_TRIM_PAYLOAD)
 
 
 # ==================================================================================================
@@ -1422,7 +1428,8 @@ def build_kiro_payload(
     profile_arn: str,
     thinking_config: ThinkingConfig,
     *,
-    monitor_request_id: Optional[str] = None
+    monitor_request_id: Optional[str] = None,
+    payload_settings: Optional[Dict[str, Any]] = None,
 ) -> KiroPayloadResult:
     """
     Builds complete payload for Kiro API from unified data.
@@ -1603,11 +1610,12 @@ def build_kiro_payload(
     if history_list:
         images_evicted, bytes_saved = evict_images_from_history(history_list)
 
-    # Payload size guard — auto-trim if enabled
-    if AUTO_TRIM_PAYLOAD:
+    # Payload size guard — auto-trim if enabled (settings can come from runtime control panel)
+    max_bytes, auto_trim = _resolve_payload_settings(payload_settings)
+    if auto_trim:
         payload_size = check_payload_size(payload)
-        if payload_size > KIRO_MAX_PAYLOAD_BYTES:
-            stats = trim_payload_to_limit(payload, KIRO_MAX_PAYLOAD_BYTES)
+        if payload_size > max_bytes:
+            stats = trim_payload_to_limit(payload, max_bytes)
             logger.info(
                 f"Trimmed conversation history: {stats.original_entries} -> {stats.final_entries} messages "
                 f"({stats.original_bytes} -> {stats.final_bytes} bytes)"
@@ -1624,5 +1632,14 @@ def build_kiro_payload(
                     )
             except Exception:
                 pass
+
+    # Record the actual size sent upstream (always, regardless of trim)
+    try:
+        from kiro.control_panel import control_panel as _cp2
+        if monitor_request_id:
+            final_size = check_payload_size(payload)
+            _cp2.record_request_bytes(monitor_request_id, final_size)
+    except Exception:
+        pass
 
     return KiroPayloadResult(payload=payload, tool_documentation=tool_documentation)

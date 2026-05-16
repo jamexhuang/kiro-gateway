@@ -395,7 +395,8 @@ def build_kiro_payload(
     conversation_id: str,
     profile_arn: str,
     *,
-    monitor_request_id: Optional[str] = None
+    monitor_request_id: Optional[str] = None,
+    payload_settings: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """
     Builds complete payload for Kiro API from OpenAI request.
@@ -444,6 +445,7 @@ def build_kiro_payload(
         profile_arn=profile_arn,
         thinking_config=thinking_config,
         monitor_request_id=monitor_request_id,
+        payload_settings=payload_settings,
     )
     
     return result.payload
