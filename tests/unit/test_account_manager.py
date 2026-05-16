@@ -1418,6 +1418,7 @@ class TestAccountsSnapshotCooldown:
         assert entry["cooldown_remaining_s"] >= 0
         assert entry["last_error_reason"] == "INSUFFICIENT_MODEL_CAPACITY"
         assert entry["last_error_status"] == 429
+        assert "available_models_count" in entry
 
 
 class TestAccountStrategyConfig:
