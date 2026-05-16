@@ -859,6 +859,14 @@ DASHBOARD_HTML = r"""<!doctype html>
       <p style="font-size:11px;color:var(--muted);margin-bottom:8px">顯示所有 API 帳號的即時狀態。「使用中」為當前輪轉到的帳號；「冷卻中」表示該帳號因錯誤觸發指數退避，倒數結束後自動恢復。<br>
         策略 <strong>Sticky</strong>＝沿用上次成功帳號；<strong>Round-Robin</strong>＝每次請求輪換。切換即時生效，不影響進行中的連線。</p>
       <div id="accounts" class="accounts"><p style="color:var(--muted)">等待資料…</p></div>
+      <div class="payload-settings" style="margin-top:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="color:var(--muted)">Payload 上限：</span>
+        <input id="payloadMaxBytes" type="range" min="50000" max="2000000" step="10000" value="600000" style="flex:1;min-width:160px;max-width:320px">
+        <span id="payloadMaxBytesLabel" class="tag" style="font-size:11px;min-width:80px;text-align:right">600 KB</span>
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer"><input id="payloadAutoTrim" type="checkbox"> 自動修剪</label>
+        <button class="btn" onclick="applyPayloadSettings()" style="font-size:11px;padding:4px 10px">套用</button>
+        <span id="payloadSaveResult" style="font-size:11px;color:var(--muted)"></span>
+      </div>
     </section>
 
     <section id="panel-latency" class="panel">
@@ -946,6 +954,7 @@ const LOG_MAX_VIEW=2000;let logLevelFilter="ALL";let reqFilterText="";
 
 function fmtTime(ts){if(!ts)return"";return new Date(ts*1000).toLocaleTimeString();}
 function fmtMs(s){if(s==null)return"—";return s<1?`${(s*1000).toFixed(0)}ms`:`${s.toFixed(2)}s`;}
+function fmtBytes(n){if(n==null)return "—";if(n<1024)return n+" B";if(n<1024*1024)return (n/1024).toFixed(1)+" KB";return (n/1024/1024).toFixed(2)+" MB";}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);}
 
 function saveKey(){if(!hasKey()){setConn(false,"未輸入金鑰");return;}
@@ -964,6 +973,7 @@ function connect(){
   pullLogs();
   initLatencyToggle();
   initAccountStrategy();
+  initPayloadSettings();
 }
 async function streamEvents(){
   setConn(null,"連線中");
@@ -1106,7 +1116,7 @@ function reqRow(r){
     <td>${esc(r.api_format)} ${r.stream?"⋯":""}</td>
     <td>${esc(r.original_model)}${r.original_model!==r.active_model?`→${esc(r.active_model)}`:""}</td>
     <td>${totalCell}</td>
-    <td>${ttft}</td><td>${tps}</td><td>${r.output_tokens??"—"}</td><td>${attempts}</td><td>${esc(trim)}</td>
+    <td>${ttft}</td><td>${tps}</td><td>${(r.input_tokens??"—")} / ${(r.output_tokens??"—")}</td><td>${attempts}</td><td>${esc(trim)}</td><td>${r.request_bytes!=null?fmtBytes(r.request_bytes):"—"}</td>
     <td>${r.error?`<span class="statusbadge err">${esc(r.error.slice(0,60))}</span>`:""}</td></tr>`;
 }
 
@@ -1118,7 +1128,7 @@ function renderRequests(){
   const rows=all.filter(r=>!f||JSON.stringify(r).toLowerCase().includes(f));
   const el=$("#requestsWrap");
   if(!rows.length){el.innerHTML=`<p style="color:var(--muted)">${f?"沒有符合篩選的請求。":"尚無請求。"}</p>`;return;}
-  el.innerHTML=`<table class="reqs"><thead><tr><th>開始</th><th>狀態</th><th>格式</th><th>模型</th><th>總耗時</th><th>首字</th><th>速度</th><th>token</th><th>重試</th><th>裁剪</th><th>錯誤</th></tr></thead>
+  el.innerHTML=`<table class="reqs"><thead><tr><th>開始</th><th>狀態</th><th>格式</th><th>模型</th><th>總耗時</th><th>首字</th><th>速度</th><th>in/out</th><th>重試</th><th>裁剪</th><th>payload</th><th>錯誤</th></tr></thead>
     <tbody>${rows.slice(0,500).map(r=>reqRow(r)).join("")}</tbody></table>`;
   wireRowExpand();
 }
@@ -1300,6 +1310,33 @@ document.querySelectorAll(".strategy-btn").forEach(btn=>{
     }
   });
 });
+
+// -------- payload settings --------
+async function initPayloadSettings(){
+  try{
+    const d=await api("/dashboard/api/payload-settings");
+    $("#payloadMaxBytes").value=d.max_bytes;
+    $("#payloadMaxBytesLabel").textContent=fmtBytes(d.max_bytes);
+    $("#payloadAutoTrim").checked=!!d.auto_trim;
+  }catch{}
+}
+$("#payloadMaxBytes").addEventListener("input",()=>{
+  $("#payloadMaxBytesLabel").textContent=fmtBytes(parseInt($("#payloadMaxBytes").value,10));
+});
+async function applyPayloadSettings(){
+  const max_bytes=parseInt($("#payloadMaxBytes").value,10);
+  const auto_trim=$("#payloadAutoTrim").checked;
+  try{
+    const d=await api("/dashboard/api/payload-settings",{method:"PUT",body:JSON.stringify({max_bytes,auto_trim})});
+    $("#payloadMaxBytes").value=d.max_bytes;
+    $("#payloadMaxBytesLabel").textContent=fmtBytes(d.max_bytes);
+    $("#payloadAutoTrim").checked=!!d.auto_trim;
+    $("#payloadSaveResult").textContent="已套用 "+new Date().toLocaleTimeString();
+  }catch(e){
+    $("#payloadSaveResult").textContent=e.message||"套用失敗";
+    initPayloadSettings();
+  }
+}
 
 async function restartGateway(){if(!confirm("確定要重啟 Gateway？進行中的請求會中斷。"))return;
   try{await api("/dashboard/api/restart",{method:"POST",body:"{}"});setConn(null,"重啟中…");setTimeout(()=>location.reload(),3000);}catch(e){alert(e.message);}}
