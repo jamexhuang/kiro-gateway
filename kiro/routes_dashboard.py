@@ -144,6 +144,46 @@ def _is_private_172(ip: str) -> bool:
     except ValueError:
         return False
 
+
+# Headers added by reverse proxies / tunnels (Cloudflare, nginx, etc.).
+# Their presence proves the request did NOT arrive directly from the peer we
+# observe in request.client.host, so network-position trust is unsafe.
+_PROXY_FORWARDING_HEADERS: tuple = (
+    "x-forwarded-for",
+    "x-real-ip",
+    "forwarded",
+    "cf-connecting-ip",
+    "cf-ray",
+    "x-forwarded-host",
+)
+
+
+def _should_auto_inject_key(request: Request) -> bool:
+    """
+    Decide whether to auto-inject the proxy API key into the dashboard HTML.
+
+    The key is injected ONLY for genuine direct loopback access (local
+    development convenience). It is NEVER injected for requests that arrived
+    through a reverse proxy or tunnel, because behind cloudflared/nginx the
+    observed ``request.client.host`` is the proxy's own (often private) IP for
+    every visitor — including the public internet. Trusting that IP would leak
+    the admin key to anyone who opens the public dashboard URL.
+
+    Args:
+        request: The incoming HTTP request.
+
+    Returns:
+        True only when the request is a direct, non-proxied loopback request.
+    """
+    # Any forwarding header means a proxy/tunnel sits in front: never trust it.
+    headers = request.headers
+    for header_name in _PROXY_FORWARDING_HEADERS:
+        if headers.get(header_name):
+            return False
+
+    client_host = request.client.host if request.client else ""
+    return client_host in ("127.0.0.1", "::1", "localhost")
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_page(request: Request) -> str:
     """
@@ -158,29 +198,16 @@ async def dashboard_page(request: Request) -> str:
     Returns:
         HTML dashboard.
     """
-    # Check if request is from localhost or private network to auto-bring cred
-    host = request.headers.get("host", "")
+    # Auto-inject the admin key ONLY for direct loopback access (local dev).
+    # Never for proxied/tunnelled requests — see _should_auto_inject_key.
     client_host = request.client.host if request.client else ""
+    auto_inject = _should_auto_inject_key(request)
 
-    is_local_or_private = (
-        client_host in ("127.0.0.1", "::1", "localhost") or
-        "127.0.0.1" in host or
-        "localhost" in host or
-        "::1" in host or
-        # Private network ranges (RFC 1918 + link-local)
-        client_host.startswith("10.") or
-        _is_private_172(client_host) or
-        client_host.startswith("192.168.") or
-        client_host.startswith("fe80:") or
-        client_host.startswith("fd")
-    )
-
-    # Debug log for non-private access
-    if not is_local_or_private:
-        logger.debug(f"Dashboard access from non-local source: client={client_host}, host_header={host}")
+    if not auto_inject:
+        logger.debug(f"Dashboard served without key injection: client={client_host}")
 
     html = DASHBOARD_HTML
-    if is_local_or_private:
+    if auto_inject:
         # Inject the key into the HTML so the JS can pick it up
         # Escape quotes in key just in case
         escaped_key = PROXY_API_KEY.replace('"', '\\"')

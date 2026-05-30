@@ -4,12 +4,13 @@
 Unit tests for runtime control panel routing and dashboard APIs.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from kiro.config import PROXY_API_KEY
 from kiro.control_panel import ControlPanelState
 from kiro.routes_dashboard import router as dashboard_router
+from kiro.routes_dashboard import _should_auto_inject_key
 from kiro.control_panel import control_panel
 
 
@@ -311,3 +312,119 @@ def test_record_metrics_and_trim_populate_record():
     assert rec["trim_before_messages"] == 280
     assert rec["trim_after_messages"] == 78
     assert rec["trim_before_bytes"] == 5083328
+
+
+class TestDashboardKeyInjectionSecurity:
+    """
+    Tests for the dashboard admin-key auto-injection guard.
+
+    Regression coverage for the leak where every request arriving through a
+    reverse proxy / tunnel was treated as "local" (because request.client.host
+    is the proxy's private IP) and got the admin key injected into the public
+    HTML.
+    """
+
+    def _client(self) -> TestClient:
+        """Create a test app exposing only the dashboard routes."""
+        app = FastAPI()
+        app.include_router(dashboard_router)
+        return TestClient(app)
+
+    def _make_request(self, client_ip: str, headers: dict) -> Request:
+        """
+        Build a minimal Starlette Request for the injection guard.
+
+        Args:
+            client_ip: The peer IP the server observes (request.client.host).
+            headers: Mapping of header name to value.
+
+        Returns:
+            A Request instance with the given client and headers.
+        """
+        header_pairs = [
+            (k.lower().encode("latin-1"), v.encode("latin-1"))
+            for k, v in headers.items()
+        ]
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/dashboard",
+            "headers": header_pairs,
+            "client": (client_ip, 12345),
+            "scheme": "https",
+        }
+        return Request(scope)
+
+    def test_direct_loopback_injects_key(self):
+        """
+        What it does: Direct loopback request with no proxy headers.
+        Purpose: Preserve the local-development convenience.
+        """
+        req = self._make_request("127.0.0.1", {"host": "127.0.0.1:8000"})
+        assert _should_auto_inject_key(req) is True
+
+    def test_ipv6_loopback_injects_key(self):
+        """
+        What it does: Direct IPv6 loopback request.
+        Purpose: ::1 is also genuine local access.
+        """
+        req = self._make_request("::1", {"host": "[::1]:8000"})
+        assert _should_auto_inject_key(req) is True
+
+    def test_private_lan_ip_does_not_inject(self):
+        """
+        What it does: Request whose peer is a private LAN IP.
+        Purpose: A private peer IP is NOT proof of trusted access; behind a
+        tunnel every public visitor looks like this.
+        """
+        for ip in ("192.168.90.166", "10.0.0.5", "172.16.0.1", "172.31.255.9"):
+            req = self._make_request(ip, {"host": "edge.example.com"})
+            assert _should_auto_inject_key(req) is False, ip
+
+    def test_cloudflare_forwarding_headers_block_injection(self):
+        """
+        What it does: Loopback peer but Cloudflare forwarding headers present.
+        Purpose: The exact production leak — cloudflared connecting from the
+        same host (loopback) must still NOT leak the key to remote visitors.
+        """
+        for header in ("cf-connecting-ip", "x-forwarded-for", "x-real-ip", "forwarded", "cf-ray"):
+            req = self._make_request("127.0.0.1", {"host": "edge.example.com", header: "203.0.113.7"})
+            assert _should_auto_inject_key(req) is False, header
+
+    def test_public_ip_does_not_inject(self):
+        """
+        What it does: Request from a public peer IP.
+        Purpose: Public clients must never receive the key.
+        """
+        req = self._make_request("203.0.113.7", {"host": "edge.example.com"})
+        assert _should_auto_inject_key(req) is False
+
+    def test_no_client_does_not_inject(self):
+        """
+        What it does: Request with no client information.
+        Purpose: Fail closed when the peer is unknown.
+        """
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/dashboard",
+            "headers": [(b"host", b"edge.example.com")],
+            "client": None,
+            "scheme": "https",
+        }
+        assert _should_auto_inject_key(Request(scope)) is False
+
+    def test_dashboard_route_does_not_leak_key_to_proxied_request(self):
+        """
+        What it does: GET /dashboard through the TestClient with a Cloudflare
+        forwarding header set.
+        Purpose: End-to-end guarantee the served HTML carries no admin key.
+        """
+        with self._client() as client:
+            response = client.get("/dashboard", headers={"cf-connecting-ip": "203.0.113.7"})
+
+        assert response.status_code == 200
+        # The static JS references window.KIRO_AUTO_KEY, but the server must NOT
+        # have injected an assignment carrying the real key.
+        assert 'window.KIRO_AUTO_KEY = "' not in response.text
+        assert PROXY_API_KEY not in response.text
