@@ -1230,6 +1230,11 @@ async function submitAddAccount() {
       $("#addAcctError").textContent = "JSON 格式無效: " + e.message;
       return;
     }
+    // Cockpit exports an array — send it as-is; backend handles both formats.
+    // Only inject comment for single-object input (arrays carry their own metadata).
+    if (!Array.isArray(payload) && comment) {
+      payload.comment = comment;
+    }
   } else {
     const rt = $("#new-acct-rt").value.trim();
     if (!rt) {
@@ -1237,10 +1242,7 @@ async function submitAddAccount() {
       return;
     }
     payload = { refresh_token: rt };
-  }
-  
-  if (comment) {
-    payload.comment = comment;
+    if (comment) payload.comment = comment;
   }
   
   try {
@@ -1250,6 +1252,7 @@ async function submitAddAccount() {
     });
     
     if (res.success) {
+      const count = res.added || 1;
       hideAddAccountModal();
       $("#new-acct-token").value = "";
       $("#new-acct-rt").value = "";
@@ -1258,6 +1261,7 @@ async function submitAddAccount() {
       const d = await api("/dashboard/api/state");
       state.accounts = d.accounts || [];
       renderAccounts();
+      if (count > 1) alert(`成功新增 ${count} 個帳號！`);
     } else {
       $("#addAcctError").textContent = "新增失敗: " + (res.error || "未知錯誤");
     }

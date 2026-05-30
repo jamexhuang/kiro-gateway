@@ -154,8 +154,25 @@ class TestAccountCRUDEndpoints:
 
         r = c.post("/dashboard/api/accounts", json={"type": "refresh_token", "refresh_token": "token"})
         assert r.status_code == 200
-        assert r.json() == {"success": True, "account_id": "acc-new"}
+        assert r.json() == {"success": True, "account_id": "acc-new", "account_ids": ["acc-new"], "added": 1}
         mock_manager.add_account_entry.assert_called_once()
+
+    def test_create_account_batch(self, client, monkeypatch):
+        c, store, _ = client
+        mock_manager = AsyncMock()
+        mock_manager.add_account_entry.side_effect = ["acc-1", "acc-2"]
+        c.app.state.account_manager = mock_manager
+
+        token = store.issue_session(now=_frozen_now())
+        c.cookies.set("kiro_dash_session", token)
+
+        r = c.post("/dashboard/api/accounts", json=[
+            {"type": "refresh_token", "refresh_token": "token1"},
+            {"type": "refresh_token", "refresh_token": "token2"}
+        ])
+        assert r.status_code == 200
+        assert r.json() == {"success": True, "account_id": "acc-1", "account_ids": ["acc-1", "acc-2"], "added": 2}
+        assert mock_manager.add_account_entry.call_count == 2
 
     def test_delete_account_success(self, client, monkeypatch):
         c, store, _ = client

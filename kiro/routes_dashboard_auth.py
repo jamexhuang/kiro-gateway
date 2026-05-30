@@ -263,21 +263,65 @@ async def list_accounts(request: Request) -> Dict[str, Any]:
 
 
 @auth_router.post("/dashboard/api/accounts")
-async def create_account(request: Request, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Add a new account (auth required)."""
+async def create_account(request: Request) -> Dict[str, Any]:
+    """
+    Add one or more accounts (auth required).
+
+    Accepts a single credential dict ``{...}`` or a Kiro Cockpit-style
+    array ``[{...}, ...]``.  When a list is provided each element is added
+    individually and the response contains all created account IDs.
+    """
     await require_dashboard_auth(request)
     account_manager = getattr(request.app.state, "account_manager", None)
     if not account_manager:
         raise HTTPException(status_code=500, detail="Account system not enabled")
-    
+
     try:
-        account_id = await account_manager.add_account_entry(body)
-        return {"success": True, "account_id": account_id}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Failed to add account: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    # Normalise: single dict → one-element list for uniform processing.
+    entries: list
+    if isinstance(body, list):
+        entries = [e for e in body if isinstance(e, dict)]
+        if not entries:
+            raise HTTPException(
+                status_code=400,
+                detail="JSON array is empty or contains non-object elements",
+            )
+    elif isinstance(body, dict):
+        entries = [body]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Body must be a JSON object or array of objects",
+        )
+
+    added_ids: list[str] = []
+    errors: list[str] = []
+    for idx, entry in enumerate(entries):
+        try:
+            account_id = await account_manager.add_account_entry(entry)
+            added_ids.append(account_id)
+        except ValueError as e:
+            errors.append(f"#{idx + 1}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to add account entry #{idx + 1}: {e}")
+            errors.append(f"#{idx + 1}: {e}")
+
+    if not added_ids and errors:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+
+    result: Dict[str, Any] = {
+        "success": True,
+        "account_ids": added_ids,
+        "account_id": added_ids[0] if added_ids else None,
+        "added": len(added_ids),
+    }
+    if errors:
+        result["partial_errors"] = errors
+    return result
 
 
 @auth_router.delete("/dashboard/api/accounts/{account_id:path}")
