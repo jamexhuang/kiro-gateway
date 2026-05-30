@@ -87,6 +87,7 @@ from kiro.account_manager import AccountManager
 from kiro.routes_openai import router as openai_router
 from kiro.routes_anthropic import router as anthropic_router
 from kiro.routes_dashboard import router as dashboard_router
+from kiro.routes_dashboard_auth import auth_router as dashboard_auth_router
 from kiro.exceptions import validation_exception_handler
 from kiro.debug_middleware import DebugLoggerMiddleware
 
@@ -590,6 +591,7 @@ app.include_router(openai_router)
 app.include_router(anthropic_router)
 
 # Runtime dashboard: /dashboard and /dashboard/api/*
+app.include_router(dashboard_auth_router)
 app.include_router(dashboard_router)
 
 

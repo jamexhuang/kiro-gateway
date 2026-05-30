@@ -18,6 +18,16 @@ from kiro.auth import KiroAuthManager
 from kiro.config import MAX_RETRIES, BASE_RETRY_DELAY, FIRST_TOKEN_MAX_RETRIES, STREAMING_READ_TIMEOUT
 
 
+@pytest.fixture(autouse=True)
+def disable_burst_protection():
+    """Disables adaptive burst protection for unit tests to avoid extra sleep calls."""
+    import kiro.http_client
+    old_enabled = kiro.http_client._burst_enabled
+    kiro.http_client._burst_enabled = False
+    yield
+    kiro.http_client._burst_enabled = old_enabled
+
+
 @pytest.fixture
 def mock_auth_manager_for_http():
     """Creates a mocked KiroAuthManager for HTTP client tests."""
@@ -576,11 +586,12 @@ class TestKiroHttpClientExponentialBackoff:
         with patch.object(http_client, '_get_client', return_value=mock_client):
             with patch('kiro.http_client.get_kiro_headers', return_value={}):
                 with patch('kiro.http_client.asyncio.sleep', side_effect=capture_sleep):
-                    response = await http_client.request_with_retry(
-                        "POST",
-                        "https://api.example.com/test",
-                        {"data": "value"}
-                    )
+                    with patch('kiro.http_client.random.uniform', return_value=0.0):
+                        response = await http_client.request_with_retry(
+                            "POST",
+                            "https://api.example.com/test",
+                            {"data": "value"}
+                        )
         
         print(f"Verification: Delays increase exponentially...")
         print(f"Delays: {sleep_delays}")
@@ -1250,11 +1261,12 @@ class TestKiroHttpClientCapacityFastFail:
         print("Action: Executing request expecting fast-fail...")
         with patch.object(http_client, '_get_client', return_value=mock_client):
             with patch('kiro.http_client.get_kiro_headers', return_value={}):
-                response = await http_client.request_with_retry(
-                    "POST",
-                    "https://api.example.com/test",
-                    {"data": "value"}
-                )
+                with patch('kiro.http_client._throttle_fast_fail', True):
+                    response = await http_client.request_with_retry(
+                        "POST",
+                        "https://api.example.com/test",
+                        {"data": "value"}
+                    )
 
         print("Verification: Fast-fail without retry...")
         assert response.status_code == 429

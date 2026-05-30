@@ -36,3 +36,16 @@ htmlcov/
 # Secrets - account tokens
 accounts/*.json
 routing_state.json
+
+# Environment virtualenvs
+.venv/
+venv/
+
+# Backup directories
+kiro_backups/
+
+# Passkey authentication registry
+dashboard_auth.json
+
+# Local workspace files
+.antigravitycli/

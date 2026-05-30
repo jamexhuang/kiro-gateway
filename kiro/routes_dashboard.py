@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from kiro.config import PROXY_API_KEY, APP_VERSION
 from kiro.control_panel import RoutingConfig, ThrottleConfig, control_panel
+from kiro.routes_dashboard_auth import require_dashboard_auth, optional_dashboard_auth
 
 
 router = APIRouter(tags=["Dashboard"])
@@ -67,67 +68,28 @@ class ThrottleUpdateRequest(BaseModel):
     max_gap_ms: Optional[int] = Field(default=None, ge=500, le=30000)
 
 
-async def verify_dashboard_api_key(
-    authorization: Optional[str] = Security(dashboard_auth_header),
-    x_api_key: Optional[str] = Security(dashboard_x_api_key_header),
-) -> bool:
+async def verify_dashboard_api_key(request: Request) -> bool:
     """
-    Verify dashboard API key.
+    Authorize a dashboard request via passkey session OR admin API key.
 
-    Args:
-        authorization: Authorization header value.
-        x_api_key: x-api-key header value.
-
-    Returns:
-        True when authenticated.
+    Delegates to the unified dependency in ``routes_dashboard_auth`` so all
+    dashboard endpoints accept either a valid session cookie (passkey login) or
+    the admin API key (CLI/programmatic).
 
     Raises:
-        HTTPException: 401 when the API key is missing or invalid.
+        HTTPException: 401 when neither a valid session nor API key is present.
     """
-    if _is_valid_dashboard_api_key(authorization, x_api_key):
-        return True
-    raise HTTPException(status_code=401, detail="Invalid or missing dashboard API key")
+    return await require_dashboard_auth(request)
 
 
-async def optional_dashboard_api_key(
-    authorization: Optional[str] = Security(dashboard_auth_header),
-    x_api_key: Optional[str] = Security(dashboard_x_api_key_header),
-) -> bool:
+async def optional_dashboard_api_key(request: Request) -> bool:
     """
-    Check dashboard API authentication without raising 401.
+    Non-raising authorization check (session OR API key).
 
-    This keeps unauthenticated dashboard pages from producing repeated 401 log
-    noise while still withholding routing and monitoring data.
-
-    Args:
-        authorization: Authorization header value.
-        x_api_key: x-api-key header value.
-
-    Returns:
-        True when the supplied dashboard API key is valid.
+    Keeps unauthenticated dashboard polling from producing 401 log noise while
+    still withholding routing and monitoring data.
     """
-    return _is_valid_dashboard_api_key(authorization, x_api_key)
-
-
-def _is_valid_dashboard_api_key(
-    authorization: Optional[str],
-    x_api_key: Optional[str],
-) -> bool:
-    """
-    Validate dashboard API key header values.
-
-    Args:
-        authorization: Authorization header value.
-        x_api_key: x-api-key header value.
-
-    Returns:
-        True when either supported auth header contains the proxy API key.
-    """
-    if x_api_key and x_api_key == PROXY_API_KEY:
-        return True
-    if authorization and authorization == f"Bearer {PROXY_API_KEY}":
-        return True
-    return False
+    return await optional_dashboard_auth(request)
 
 
 
@@ -582,14 +544,6 @@ async def dashboard_events(
                 summary_task.cancel()
             control_panel.unsubscribe(on_panel_event)
             log_buffer.unsubscribe(on_log_event)
-
-    return StreamingResponse(
-        gen(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
 DASHBOARD_HTML = r"""<!doctype html>
 <html lang="zh-Hant">
 <head>
@@ -636,6 +590,8 @@ DASHBOARD_HTML = r"""<!doctype html>
     .btn.primary{background:var(--ink);color:#fffaf0;border-color:var(--ink)}
     .btn.warn{background:var(--danger);color:#fff;border-color:var(--danger)}
     .btn.ghost{background:transparent}
+    .btn.warn.ghost{color:var(--danger);border-color:transparent}
+    .btn.warn.ghost:hover{background:rgba(155,45,32,.08)}
     .btn+.btn{margin-left:6px}
     .accounts{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
     .acct{border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fffcf3;font-size:12px}
@@ -645,6 +601,7 @@ DASHBOARD_HTML = r"""<!doctype html>
       text-transform:uppercase;letter-spacing:.08em}
     .tag.on{background:var(--accent-2);color:#fff}
     .tag.err{background:var(--danger);color:#fff}
+    .tag.dis{background:#aaa;color:#fff}
     .acct dl{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin:0;font-size:11px}
     .acct dt{color:var(--muted)}.acct dd{margin:0;font-weight:700}
     .acct .cooldown{margin-top:6px;font-size:11px;color:var(--danger)}
@@ -679,6 +636,19 @@ DASHBOARD_HTML = r"""<!doctype html>
     .filter-chip{background:#fff;border:1px solid var(--line);border-radius:999px;padding:2px 8px;font-size:11px;color:var(--muted);cursor:pointer}
     .filter-chip.on{background:var(--ink);color:#fffaf0;border-color:var(--ink)}
     .hidden{display:none!important}
+    
+    /* Auth overlay styles */
+    .auth-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--paper);z-index:9999;
+      display:flex;align-items:center;justify-content:center}
+    .auth-card{width:380px;background:var(--card);border:1px solid var(--line);border-radius:12px;
+      padding:24px;box-shadow:var(--shadow);text-align:center}
+    .auth-card h2{margin:0 0 12px;font:700 16px/1.2 "Iowan Old Style",Georgia,serif;letter-spacing:-.01em}
+    .auth-card .input-group{margin-bottom:12px;text-align:left}
+    .auth-card .input-group label{display:block;font-size:10px;color:var(--muted);margin-bottom:4px;
+      text-transform:uppercase;letter-spacing:.08em}
+    .auth-card input{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;
+      background:#fff;font-size:12px}
+
     /* Mobile responsive */
     @media (max-width: 960px){
       .app{grid-template-columns:1fr}
@@ -711,6 +681,34 @@ DASHBOARD_HTML = r"""<!doctype html>
   </style>
 </head>
 <body>
+
+<!-- Passkey Secure Authentication Screen -->
+<div id="auth-overlay" class="auth-overlay hidden">
+  <div class="auth-card">
+    <h2 id="auth-title">Kiro Gateway 安全驗證</h2>
+    
+    <div id="register-form" class="hidden">
+      <p style="font-size:11px;color:var(--muted);margin-bottom:12px;text-align:left">系統尚未設定任何通行密鑰，請輸入目前的代理 API 金鑰以註冊第一個管理員通行密鑰（FIDO2 Passkey）：</p>
+      <div class="input-group">
+        <label>密鑰名稱 (例如：個人筆電)</label>
+        <input id="reg-nickname" type="text" value="主管理員密鑰">
+      </div>
+      <div class="input-group">
+        <label>代理 API 金鑰 (PROXY_API_KEY)</label>
+        <input id="reg-bootstrap-key" type="password" placeholder="輸入 PROXY_API_KEY 進行 Bootstrap">
+      </div>
+      <button class="btn primary" style="width:100%;padding:8px;margin-top:6px" onclick="doRegister()">註冊通行密鑰</button>
+    </div>
+    
+    <div id="login-form" class="hidden">
+      <p style="font-size:11.5px;color:var(--muted);margin-bottom:18px">請使用您在此裝置或安全金鑰中註冊的通行密鑰登入控制台。</p>
+      <button class="btn primary" style="width:100%;padding:10px;font-size:13px" onclick="doLogin()">使用通行密鑰安全登入</button>
+    </div>
+    
+    <div id="auth-error" style="color:var(--danger);font-size:11px;margin-top:12px;text-align:center;word-break:break-all"></div>
+  </div>
+</div>
+
 <div class="app">
   <nav class="sidebar">
     <h1>Kiro Gateway</h1>
@@ -720,10 +718,12 @@ DASHBOARD_HTML = r"""<!doctype html>
     <a data-jump="panel-routing">路由設定</a>
     <a data-jump="panel-throttle">流量控制</a>
     <a data-jump="panel-accounts">帳號</a>
+    <a data-jump="panel-passkeys">通行密鑰</a>
     <a data-jump="panel-requests">請求總覽</a>
     <a data-jump="panel-logs">即時日誌</a>
     <a data-jump="panel-models">遠端模型</a>
-    <div class="key">
+    <div class="key" id="sidebar-auth-area">
+      <!-- Session managed dynamically by checkAuth -->
       <label>代理 API 金鑰</label>
       <input id="apiKey" type="password" placeholder="輸入 Bearer 金鑰">
       <div style="margin-top:6px"><button class="btn primary" onclick="saveKey()">連線</button><button class="btn ghost" onclick="forgetKey()">清除</button></div>
@@ -739,35 +739,41 @@ DASHBOARD_HTML = r"""<!doctype html>
         <div class="stat"><div class="lbl">P95 延遲</div><div class="val" id="mP95">—</div></div>
         <div class="stat"><div class="lbl">錯誤率</div><div class="val" id="mErr">—</div></div>
         <div class="stat"><div class="lbl">進行中</div><div class="val" id="mActive">—</div></div>
-        <div class="spark"><svg id="sparkRps" viewBox="0 0 200 36" preserveAspectRatio="none"></svg><svg id="sparkErr" viewBox="0 0 200 36" preserveAspectRatio="none"></svg></div>
+        <div class="spark"><div class="lbl">RPS</div><svg id="sparkRps"></svg><div class="lbl">ERR</div><svg id="sparkErr"></svg></div>
       </div>
       <p style="font-size:11px;color:var(--muted);margin-top:8px">滾動窗口統計近 5 分鐘的請求量、延遲百分位數和錯誤率。火花圖顯示每 5 秒一個桶的趨勢。</p>
     </section>
 
     <section id="panel-routing" class="panel">
-      <header><h2>路由設定</h2><div class="toolbar">
-        <button class="btn" onclick="quickSwap('claude-opus-4.6')">強制 4.6</button>
-        <button class="btn" onclick="quickSwap('claude-opus-4.7')">強制 4.7</button>
-        <button class="btn warn" onclick="resetRouting()">重設</button>
-      </div></header>
-      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">即時調整模型路由策略。「直通」不做任何修改；「手動」強制使用指定模型；「重導向」依 JSON 規則映射。啟用降級後，主模型失敗會自動嘗試備用模型。</p>
-      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">
-        <label class="chip"><input id="enabled" type="checkbox"> 啟用路由</label>
-        <label class="chip"><input id="safeFallback" type="checkbox"> 失敗時重試原模型</label>
-        <label class="chip"><input id="fallbackEnabled" type="checkbox"> 模型降級</label>
+      <header><h2>路由與快取設定</h2><button class="btn warn ghost" onclick="resetRouting()">重設預設</button></header>
+      <div style="display:flex;gap:12px;margin-bottom:8px">
+        <label class="chip"><input id="enabled" type="checkbox"> 啟用自訂路由</label>
+        <label class="chip"><input id="fallbackEnabled" type="checkbox"> 啟用故障自動降級</label>
+        <label class="chip"><input id="safeFallback" type="checkbox"> 降級時保留原始內容</label>
         <label class="chip"><input id="captureContent" type="checkbox"> 擷取請求內容</label>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
         <div><label style="font-size:10.5px;color:var(--muted)">模式</label>
           <select id="mode" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"><option value="passthrough">直通</option><option value="manual">手動</option><option value="redirect">重導向</option></select></div>
         <div><label style="font-size:10.5px;color:var(--muted)">手動指定模型</label>
-          <input id="manualModel" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px" placeholder="claude-opus-4.6"></div>
+          <select id="manualModel" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"></select></div>
         <div><label style="font-size:10.5px;color:var(--muted)">降級模型（逗號分隔）</label>
           <input id="fallbackModels" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px"></div>
       </div>
       <label style="font-size:10.5px;color:var(--muted);display:block;margin-top:8px">重導向規則 JSON</label>
       <textarea id="redirects" style="width:100%;min-height:64px;padding:6px;border:1px solid var(--line);border-radius:6px;font:12px 'SF Mono',Menlo,monospace"></textarea>
-      <div style="margin-top:8px"><button class="btn primary" onclick="applyRouting()">套用</button><span id="saveResult" style="margin-left:10px;color:var(--muted)"></span></div>
+      
+      <!-- Routing Simulator Preview Panel -->
+      <div id="routing-preview-wrap" class="hidden" style="margin-top:10px;padding:8px;border:1px solid var(--line);border-radius:6px;background:rgba(24,33,31,.02)">
+        <h3 style="margin:0 0 6px;font-size:11px;text-transform:uppercase;color:var(--muted)">預估路由效果 (Preview)</h3>
+        <div id="routing-preview-results" style="font-family:'SF Mono',Menlo,monospace;font-size:11.5px"></div>
+      </div>
+
+      <div style="margin-top:8px">
+        <button class="btn primary" onclick="applyRouting()">套用</button>
+        <button class="btn ghost" onclick="previewRouting()">測試預覽</button>
+        <span id="saveResult" style="margin-left:10px;color:var(--muted)"></span>
+      </div>
     </section>
 
     <section id="panel-throttle" class="panel">
@@ -797,9 +803,53 @@ DASHBOARD_HTML = r"""<!doctype html>
     </section>
 
     <section id="panel-accounts" class="panel">
-      <header><h2>帳號 <span id="accountCount" class="tag">0</span></h2></header>
+      <header>
+        <h2>帳號 <span id="accountCount" class="tag">0</span></h2>
+        <button class="btn primary" onclick="showAddAccountModal()">新增帳號</button>
+      </header>
       <p style="font-size:11px;color:var(--muted);margin-bottom:8px">顯示所有 API 帳號的即時狀態。「使用中」為當前輪轉到的帳號；「冷卻中」表示該帳號因錯誤觸發指數退避，倒數結束後自動恢復。</p>
+      
+      <!-- Add Account Section -->
+      <div id="add-account-wrap" class="hidden" style="margin-bottom:12px;padding:12px;border:1px solid var(--line);border-radius:8px;background:rgba(24,33,31,.02)">
+        <h3 style="margin:0 0 8px;font-size:12px;text-transform:uppercase;color:var(--muted)">新增 Kiro 帳號憑證</h3>
+        <div style="display:grid;grid-template-columns:1fr 2fr auto;gap:8px;align-items:end">
+          <div>
+            <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">憑證類型</label>
+            <select id="new-acct-type" onchange="toggleNewAcctType()" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px">
+              <option value="json">JSON 檔案 / Token 內容</option>
+              <option value="refresh_token">Refresh Token 直填</option>
+            </select>
+          </div>
+          <div id="new-acct-token-wrap">
+            <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">憑證 JSON 內容 (支援 Kiro Cockpit/IDE 格式)</label>
+            <input id="new-acct-token" type="text" placeholder='貼上完整 JSON 例如 {"refreshToken": "..."}' style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px">
+          </div>
+          <div id="new-acct-rt-wrap" class="hidden" style="display:none">
+            <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">Refresh Token</label>
+            <input id="new-acct-rt" type="text" placeholder="貼上 128 位元 Refresh Token" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--muted);display:block;margin-bottom:4px">備註暱稱 (Email / 用途)</label>
+            <input id="new-acct-comment" type="text" placeholder="例如: user@gmail.com" style="width:100%;padding:5px;border:1px solid var(--line);border-radius:6px">
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <button class="btn primary" onclick="submitAddAccount()">提交新增</button>
+          <button class="btn ghost" onclick="hideAddAccountModal()">取消</button>
+          <span id="addAcctError" style="margin-left:8px;color:var(--danger);font-size:11px"></span>
+        </div>
+      </div>
+
       <div id="accounts" class="accounts"><p style="color:var(--muted)">等待資料…</p></div>
+    </section>
+
+    <section id="panel-passkeys" class="panel">
+      <header>
+        <h2>通行密鑰 (Passkeys)</h2>
+        <button class="btn primary" onclick="addNewPasskey()">新增通行密鑰</button>
+      </header>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">此裝置或其他安全密鑰的 FIDO2 / WebAuthn 憑證。註冊新密鑰時，將提示瀏覽器新增本機或外部金鑰。</p>
+      <div id="passkeysWrap" style="max-height:240px;overflow:auto"><p style="color:var(--muted)">載入中…</p></div>
     </section>
 
     <section id="panel-latency" class="panel">
@@ -837,11 +887,11 @@ DASHBOARD_HTML = r"""<!doctype html>
       <p style="font-size:11px;color:var(--muted);margin-bottom:8px">透過 SSE 即時串流伺服器日誌（最多保留 2000 筆）。可依等級篩選或用關鍵字搜尋。日誌包含請求路由決策、帳號切換、錯誤堆疊等資訊。</p>
       <div class="log-console">
         <header>
-          <input class="filter" id="logSearch" placeholder="搜尋日誌（子字串，不分大小寫）">
-          <label><input id="logAutoScroll" type="checkbox" checked> 自動捲動</label>
-          <button class="btn" onclick="clearLogView()">清除畫面</button>
+          <input id="logSearch" class="filter" placeholder="搜尋日誌關鍵字…">
+          <label><input id="logAutoScroll" type="checkbox" checked> 自動滾動</label>
+          <button class="btn ghost" style="color:#e5e0d1;border-color:#334" onclick="clearLogView()">清空畫面</button>
         </header>
-        <div class="body" id="logBody"></div>
+        <div id="logBody" class="body"></div>
       </div>
     </section>
 
@@ -852,7 +902,7 @@ DASHBOARD_HTML = r"""<!doctype html>
           <span id="modelsStatus" style="font-size:11px;color:var(--muted)"></span>
         </div>
       </header>
-      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">查詢 Kiro 遠端 API 目前可用的模型清單，包含各模型的輸入/輸出 token 上限。可用於確認帳號權限和模型可用性。</p>
+      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">查詢 Kiro 遠端 API 目前可用的模型清單，包含各模型的輸入/輸出 token 上限。可用於確認帳號權限 and 模型可用性。</p>
       <div id="modelsWrap"><p style="color:var(--muted)">點擊「重新載入」查詢遠端模型。</p></div>
     </section>
   </main>
@@ -862,15 +912,34 @@ DASHBOARD_HTML = r"""<!doctype html>
 const $=s=>document.querySelector(s);const $$=s=>document.querySelectorAll(s);
 const autoKey=window.KIRO_AUTO_KEY;let storedKey=localStorage.getItem("kiro-dashboard-key");
 if(autoKey&&(!storedKey||storedKey.length<3)){localStorage.setItem("kiro-dashboard-key",autoKey);storedKey=autoKey;}
-$("#apiKey").value=storedKey||"";
+if($("#apiKey")) $("#apiKey").value=storedKey||"";
 
-function authHeaders(){return{"Authorization":`Bearer ${$("#apiKey").value.trim()}`,"Content-Type":"application/json"};}
-function hasKey(){return $("#apiKey").value.trim().length>0;}
-async function api(p,o={}){if(!hasKey())throw new Error("請先輸入 API 金鑰");
-  const r=await fetch(p,{...o,headers:{...authHeaders(),...(o.headers||{})}});
-  if(r.status===401)throw new Error("驗證失敗");
+function authHeaders(){
+  const headers = {"Content-Type":"application/json"};
+  const key = $("#apiKey") ? $("#apiKey").value.trim() : "";
+  if(key) {
+    headers["Authorization"] = `Bearer ${key}`;
+  }
+  return headers;
+}
+function hasKey(){
+  const key = $("#apiKey") ? $("#apiKey").value.trim() : "";
+  return key.length > 0 || authState.authenticated;
+}
+async function api(p,o={}){
+  const headers = {"Content-Type":"application/json", ...(o.headers||{})};
+  const key = $("#apiKey") ? $("#apiKey").value.trim() : "";
+  if(key) {
+    headers["Authorization"] = `Bearer ${key}`;
+  }
+  const r=await fetch(p,{...o,headers});
+  if(r.status===401) {
+    checkAuth();
+    throw new Error("驗證失敗");
+  }
   if(!r.ok)throw new Error(await r.text());
-  return r.json();}
+  return r.json();
+}
 
 function setConn(ok,msg){$("#connStatus").innerHTML=`<span class="status-dot ${ok?'':'off'} ${ok===false?'err':''}"></span>${msg}`;}
 
@@ -889,21 +958,27 @@ function fmtTime(ts){if(!ts)return"";return new Date(ts*1000).toLocaleTimeString
 function fmtMs(s){if(s==null)return"—";return s<1?`${(s*1000).toFixed(0)}ms`:`${s.toFixed(2)}s`;}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);}
 
-function saveKey(){if(!hasKey()){setConn(false,"未輸入金鑰");return;}
-  localStorage.setItem("kiro-dashboard-key",$("#apiKey").value.trim());connect();}
-function forgetKey(){localStorage.removeItem("kiro-dashboard-key");$("#apiKey").value="";if(es)es.close();setConn(false,"未連線");}
+function saveKey(){
+  if(!$("#apiKey").value.trim()){setConn(false,"未輸入金鑰");return;}
+  localStorage.setItem("kiro-dashboard-key",$("#apiKey").value.trim());connect();
+}
+function forgetKey(){
+  localStorage.removeItem("kiro-dashboard-key");
+  if($("#apiKey")) $("#apiKey").value="";
+  if(es)es.close();
+  setConn(false,"未連線");
+}
 
 // -------- SSE --------
 let es=null;
 function connect(){
   if(es)es.close();
-  if(!hasKey()){setConn(false,"未輸入金鑰");return;}
-  const url=`/dashboard/api/events?_auth=${encodeURIComponent($("#apiKey").value.trim())}`;
-  // fall back to fetch+reader because EventSource can't set headers
   streamEvents();
   pullMetrics();setInterval(pullMetrics,5000);
   pullLogs();
   initLatencyToggle();
+  loadPasskeys();
+  loadModelsDropdown();
 }
 async function streamEvents(){
   setConn(null,"連線中");
@@ -945,23 +1020,23 @@ function handleEvent(ev,d){
    }
    else if(ev==="stream_progress"){
      const r=state.active[d.id];if(r){
-       if(d.ttft_s!=null)r.ttft_s=d.ttft_s;if(d.tps!=null)r.tps=d.tps;
-       if(d.output_tokens!=null)r.output_tokens=d.output_tokens;
-       if(d.content_delta){r.chunks=r.chunks||[];r.chunks.push(d.content_delta);if(r.chunks.length>80)r.chunks=r.chunks.slice(-80);}
-       const tr=document.querySelector(`#requestsWrap tr[data-id="${d.id}"]`);
-       if(tr){
-         const cells=tr.querySelectorAll("td");
-         if(cells.length>=8){
-           cells[5].textContent=r.ttft_s!=null?r.ttft_s.toFixed(2)+"s":"…";
-           cells[6].textContent=r.tps!=null?r.tps.toFixed(1)+" t/s":"…";
-           cells[7].textContent=r.output_tokens??"…";
-         }
-         const exp=tr.nextElementSibling;
-         if(exp&&exp.classList.contains("exp")&&d.content_delta){
-           const pre=exp.querySelector("pre.code.streamlive");
-           if(pre){pre.textContent+=d.content_delta;pre.scrollTop=pre.scrollHeight;}
-         }
-       }else{renderRequests();}
+        if(d.ttft_s!=null)r.ttft_s=d.ttft_s;if(d.tps!=null)r.tps=d.tps;
+        if(d.output_tokens!=null)r.output_tokens=d.output_tokens;
+        if(d.content_delta){r.chunks=r.chunks||[];r.chunks.push(d.content_delta);if(r.chunks.length>80)r.chunks=r.chunks.slice(-80);}
+        const tr=document.querySelector(`#requestsWrap tr[data-id="${d.id}"]`);
+        if(tr){
+          const cells=tr.querySelectorAll("td");
+          if(cells.length>=8){
+            cells[5].textContent=r.ttft_s!=null?r.ttft_s.toFixed(2)+"s":"…";
+            cells[6].textContent=r.tps!=null?r.tps.toFixed(1)+" t/s":"…";
+            cells[7].textContent=r.output_tokens??"…";
+          }
+          const exp=tr.nextElementSibling;
+          if(exp&&exp.classList.contains("exp")&&d.content_delta){
+            const pre=exp.querySelector("pre.code.streamlive");
+            if(pre){pre.textContent+=d.content_delta;pre.scrollTop=pre.scrollHeight;}
+          }
+        }else{renderRequests();}
      }
    }
    else if(ev==="latency_summary"){state.latencySummary=d;renderLatency();}
@@ -1026,11 +1101,22 @@ function renderAccounts(){
     const cool=a.cooldown_remaining_s>0
       ? `<div class="cooldown">冷卻中 ${a.cooldown_remaining_s}秒 / ${a.cooldown_total_s}秒（第 ${a.backoff_tier} 級）</div>`:"";
     const lastErr=a.last_error_reason?`<div style="font-size:10.5px;color:var(--muted)">last: ${esc(a.last_error_reason)} (${a.last_error_status||"-"})</div>`:"";
-    return `<div class="acct ${cur}">
-      <div class="name"><span>${esc(a.display_id)}</span><span class="tag ${a.is_current?'on':''} ${a.failures>0?'err':''}">${a.is_current?'使用中':(a.failures>0?'冷卻中':'待命')}</span></div>
+    
+    let tagHtml = `<span class="tag ${a.is_current?'on':''} ${a.failures>0?'err':''}">${a.is_current?'使用中':(a.failures>0?'冷卻中':'待命')}</span>`;
+    if(!a.enabled) {
+      tagHtml = `<span class="tag dis">已停用</span>`;
+    }
+
+    return `<div class="acct ${cur}" style="${a.enabled?'':'opacity:0.65;background:#f5f5f5'}">
+      <div class="name"><span>${esc(a.display_id)}</span>${tagHtml}</div>
       <dl><dt>總計</dt><dt>成功</dt><dt>失敗</dt>
         <dd>${a.stats.total_requests}</dd><dd>${a.stats.successful_requests}</dd><dd>${a.stats.failed_requests}</dd></dl>
-      ${cool}${lastErr}</div>`;
+      ${cool}${lastErr}
+      <div style="margin-top:8px;display:flex;justify-content:flex-end;gap:4px">
+        <button class="btn ghost" style="padding:2px 6px;font-size:10px" onclick="toggleAccount('${esc(a.id)}', ${a.enabled})">${a.enabled?'停用':'啟用'}</button>
+        <button class="btn warn ghost" style="padding:2px 6px;font-size:10px" onclick="deleteAccount('${esc(a.id)}')">刪除</button>
+      </div>
+    </div>`;
   }).join("");
 }
 
@@ -1178,9 +1264,66 @@ function renderLogLine(e){
 }
 function redrawLogs(){const b=$("#logBody");b.innerHTML="";state.logs.forEach(renderLogLine);}
 
-// -------- routing form (unchanged behavior) --------
+// -------- routing form --------
+const DEFAULT_MODELS = [
+  "claude-haiku-4.5", "claude-sonnet-4.7", "claude-opus-4.7", "claude-opus-4.8", "claude-opus-4.6"
+];
+
+function populateManualModelDropdown(modelsList) {
+  const select = $("#manualModel");
+  if(!select) return;
+  const currentVal = select.value;
+  const models = Array.from(new Set([...DEFAULT_MODELS, ...(modelsList || []).map(m => m.modelId || m)]));
+  select.innerHTML = models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+  if(currentVal && models.includes(currentVal)) {
+    select.value = currentVal;
+  }
+}
+
+async function loadModelsDropdown() {
+  try {
+    const d = await api("/dashboard/api/models");
+    const models = d.models || [];
+    populateManualModelDropdown(models);
+  } catch(e) {
+    populateManualModelDropdown([]);
+  }
+}
+
+function previewRouting() {
+  const form = readRoutingForm();
+  $("#routing-preview-wrap").classList.remove("hidden");
+  const results = $("#routing-preview-results");
+  
+  const testModels = ["claude-opus-4.7", "claude-opus-4.8", "claude-sonnet-4.7", "claude-haiku-4.5"];
+  let html = `<table class="reqs" style="margin-top:4px;width:100%"><thead><tr><th>原始請求模型</th><th>路由後目標模型</th><th>自訂重導向</th></tr></thead><tbody>`;
+  
+  testModels.forEach(m => {
+    let target = m;
+    let via = "直通 (Passthrough)";
+    if (form.enabled) {
+      if (form.mode === "manual") {
+        target = form.manual_model;
+        via = `手動覆寫 (Manual Override)`;
+      } else if (form.mode === "redirect") {
+        if (form.redirects && form.redirects[m]) {
+          target = form.redirects[m];
+          via = `規則映射: ${m} → ${target}`;
+        } else {
+          via = "直通 (Passthrough)";
+        }
+      }
+    }
+    html += `<tr><td><code>${esc(m)}</code></td><td><span class="statusbadge ok">${esc(target)}</span></td><td><span style="color:var(--muted)">${esc(via)}</span></td></tr>`;
+  });
+  html += `</tbody></table>`;
+  results.innerHTML = html;
+}
+
 function writeRoutingForm(r){if(!r)return;
-  $("#enabled").checked=r.enabled;$("#mode").value=r.mode;$("#manualModel").value=r.manual_model;
+  $("#enabled").checked=r.enabled;$("#mode").value=r.mode;
+  populateManualModelDropdown([]); // ensure dropdown populated before setting value
+  $("#manualModel").value=r.manual_model;
   $("#redirects").value=JSON.stringify(r.redirects,null,2);
   $("#fallbackModels").value=r.fallback_models.join(", ");
   $("#fallbackEnabled").checked=r.fallback_enabled;$("#safeFallback").checked=r.safe_fallback_to_original;
@@ -1192,7 +1335,6 @@ function readRoutingForm(){let red={};try{red=JSON.parse($("#redirects").value||
     safe_fallback_to_original:$("#safeFallback").checked,capture_content:$("#captureContent").checked};}
 async function applyRouting(){try{const d=await api("/dashboard/api/routing",{method:"PUT",body:JSON.stringify(readRoutingForm())});
   writeRoutingForm(d.routing);$("#saveResult").textContent="已套用 "+new Date().toLocaleTimeString();}catch(e){$("#saveResult").textContent=e.message;}}
-async function quickSwap(m){$("#enabled").checked=true;$("#mode").value="manual";$("#manualModel").value=m;await applyRouting();}
 async function resetRouting(){await api("/dashboard/api/routing/reset",{method:"POST",body:"{}"});$("#saveResult").textContent="已重設";}
 async function clearMonitor(){await api("/dashboard/api/monitor/clear",{method:"POST",body:"{}"});state.completed=[];renderRequests();}
 
@@ -1224,8 +1366,6 @@ function readThrottleForm(){return{
   max_gap_ms:parseInt($("#maxGapMs").value)||8000};}
 async function applyThrottle(){try{const d=await api("/dashboard/api/throttle",{method:"PUT",body:JSON.stringify(readThrottleForm())});
   writeThrottleForm(d.throttle);$("#throttleResult").textContent="已套用 "+new Date().toLocaleTimeString();}catch(e){$("#throttleResult").textContent=e.message;}}
-
-if(hasKey())connect();else setConn(false,"未輸入金鑰");
 
 // -------- models panel --------
 async function loadModels(){

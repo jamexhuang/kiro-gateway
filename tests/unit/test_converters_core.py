@@ -5986,52 +5986,48 @@ class TestValidateToolNames:
             print(f"ERROR: Validation failed: {e}")
             raise AssertionError("64-character names should be accepted")
     
-    def test_rejects_65_character_name(self):
+    def test_warns_65_character_name(self):
         """
-        What it does: Verifies that 65-character names are rejected.
-        Purpose: Ensure names exceeding limit are caught.
+        What it does: Verifies that 65-character names do not raise ValueError but log a warning.
+        Purpose: Ensure the transition to auto-shortening does not break request flows.
         """
+        from unittest.mock import patch
         print("Setup: Tool with 65-character name...")
         name_65 = "a" * 65
         tools = [UnifiedTool(name=name_65, description="Test")]
         
-        print(f"Tool name length: {len(name_65)}")
-        print("Action: Validating tool names (should raise ValueError)...")
-        try:
-            from kiro.converters_core import validate_tool_names
+        print("Action: Validating tool names...")
+        from kiro.converters_core import validate_tool_names
+        with patch('kiro.converters_core.logger.warning') as mock_warn:
             validate_tool_names(tools)
-            print("ERROR: Validation passed but should have failed")
-            raise AssertionError("65-character names should be rejected")
-        except ValueError as e:
-            print(f"Validation correctly rejected: {str(e)[:100]}...")
-            assert "exceed Kiro API limit" in str(e)
-            assert name_65 in str(e)
+            
+        print("Verification: Warning was logged...")
+        mock_warn.assert_called_once_with("Auto-shortening tool names exceeding 64 characters limit")
     
-    def test_rejects_very_long_tool_names(self):
+    def test_warns_very_long_tool_names(self):
         """
-        What it does: Verifies that very long tool names are rejected.
-        Purpose: Ensure the validation works for extreme cases.
+        What it does: Verifies that very long tool names do not raise ValueError but log a warning.
+        Purpose: Ensure extreme cases log warnings instead of throwing.
         """
+        from unittest.mock import patch
         print("Setup: Tool with 100-character name...")
         name_100 = "mcp__GitHub__" + "a" * 87
         tools = [UnifiedTool(name=name_100, description="Test")]
         
-        print(f"Tool name length: {len(name_100)}")
-        print("Action: Validating tool names (should raise ValueError)...")
-        try:
-            from kiro.converters_core import validate_tool_names
+        print("Action: Validating tool names...")
+        from kiro.converters_core import validate_tool_names
+        with patch('kiro.converters_core.logger.warning') as mock_warn:
             validate_tool_names(tools)
-            raise AssertionError("Very long names should be rejected")
-        except ValueError as e:
-            print(f"Validation correctly rejected: {str(e)[:100]}...")
-            assert "exceed Kiro API limit" in str(e)
-            assert "100 characters" in str(e)
+            
+        print("Verification: Warning was logged...")
+        mock_warn.assert_called_once_with("Auto-shortening tool names exceeding 64 characters limit")
     
-    def test_rejects_multiple_long_names(self):
+    def test_warns_multiple_long_names(self):
         """
-        What it does: Verifies that all long names are listed in error message.
-        Purpose: Ensure user sees all problematic tools at once.
+        What it does: Verifies that multiple long names do not raise ValueError but log a warning.
+        Purpose: Ensure multiple problematic tool names are logged without raising.
         """
+        from unittest.mock import patch
         print("Setup: Multiple tools with long names...")
         tools = [
             UnifiedTool(name="a" * 65, description="Test 1"),
@@ -6039,18 +6035,13 @@ class TestValidateToolNames:
             UnifiedTool(name="b" * 70, description="Test 3")
         ]
         
-        print("Action: Validating tool names (should raise ValueError)...")
-        try:
-            from kiro.converters_core import validate_tool_names
+        print("Action: Validating tool names...")
+        from kiro.converters_core import validate_tool_names
+        with patch('kiro.converters_core.logger.warning') as mock_warn:
             validate_tool_names(tools)
-            raise AssertionError("Should reject multiple long names")
-        except ValueError as e:
-            error_msg = str(e)
-            print(f"Error message: {error_msg[:200]}...")
             
-            print("Checking that both long names are listed...")
-            assert "65 characters" in error_msg
-            assert "70 characters" in error_msg
+        print("Verification: Warning was logged...")
+        mock_warn.assert_called_once_with("Auto-shortening tool names exceeding 64 characters limit")
     
     def test_handles_none_tools(self):
         """
@@ -6084,33 +6075,12 @@ class TestValidateToolNames:
             print(f"ERROR: Unexpected exception: {e}")
             raise AssertionError("Empty list should be handled gracefully")
     
-    def test_error_message_includes_solution(self):
+    def test_warns_real_world_mcp_tool_names(self):
         """
-        What it does: Verifies that error message includes solution guidance.
-        Purpose: Ensure user knows how to fix the problem.
+        What it does: Verifies that real MCP tool names from Issue #41 do not raise ValueError but log a warning.
+        Purpose: Ensure real-world problematic cases do not cause failures.
         """
-        print("Setup: Tool with long name...")
-        tools = [UnifiedTool(name="mcp__GitHub__" + "a" * 60, description="Test")]
-        
-        print("Action: Validating tool names (should raise ValueError)...")
-        try:
-            from kiro.converters_core import validate_tool_names
-            validate_tool_names(tools)
-            raise AssertionError("Should reject long name")
-        except ValueError as e:
-            error_msg = str(e)
-            print(f"Error message: {error_msg[:300]}...")
-            
-            print("Checking that error message includes solution...")
-            assert "Solution:" in error_msg
-            assert "64 characters" in error_msg
-            assert "Example:" in error_msg
-    
-    def test_real_world_mcp_tool_names(self):
-        """
-        What it does: Verifies rejection of real MCP tool names from Issue #41.
-        Purpose: Ensure the fix works for actual problematic tool names.
-        """
+        from unittest.mock import patch
         print("Setup: Real MCP tool names from Issue #41...")
         problematic_names = [
             "mcp__GitHub__check_if_a_person_is_followed_by_the_authenticated_user",
@@ -6120,24 +6090,54 @@ class TestValidateToolNames:
         
         tools = [UnifiedTool(name=name, description="Test") for name in problematic_names]
         
-        print("Action: Validating real MCP tool names (should raise ValueError)...")
-        try:
-            from kiro.converters_core import validate_tool_names
+        print("Action: Validating real MCP tool names...")
+        from kiro.converters_core import validate_tool_names
+        with patch('kiro.converters_core.logger.warning') as mock_warn:
             validate_tool_names(tools)
-            raise AssertionError("Should reject real MCP tool names")
-        except ValueError as e:
-            error_msg = str(e)
-            print(f"Error message length: {len(error_msg)} chars")
-            print(f"Error message: {error_msg[:400]}...")
             
-            print("Checking that all problematic names are listed...")
-            for name in problematic_names:
-                assert name in error_msg, f"Tool name '{name}' should be in error message"
-            
-            print("Checking that character counts are shown...")
-            assert "68 characters" in error_msg
-            assert "71 characters" in error_msg
-            assert "74 characters" in error_msg
+        print("Verification: Warning was logged...")
+        mock_warn.assert_called_once_with("Auto-shortening tool names exceeding 64 characters limit")
+
+
+class TestToolNameShortening:
+    """
+    Tests for get_short_tool_name and restore_tool_name functions.
+    
+    Verifies that tool names exceeding 64-character limit are shortened correctly,
+    cached, and correctly restored when needed.
+    """
+    
+    def test_leaves_short_tool_names_unchanged(self):
+        """
+        What it does: Verifies that tool names <= 64 characters are left as-is.
+        Purpose: Ensure normal tool names are not modified or cached unnecessarily.
+        """
+        from kiro.converters_core import get_short_tool_name, restore_tool_name
+        
+        name = "get_weather_data"
+        short_name = get_short_tool_name(name)
+        assert short_name == name
+        
+        restored = restore_tool_name(short_name)
+        assert restored == name
+        
+    def test_shortens_and_restores_long_tool_names(self):
+        """
+        What it does: Verifies that tool names > 64 characters are shortened and restored.
+        Purpose: Ensure long tool names are mapped to unique shortened names and correctly restored.
+        """
+        from kiro.converters_core import get_short_tool_name, restore_tool_name
+        
+        long_name = "mcp__GitHub__check_if_a_repository_is_starred_by_the_authenticated_user"
+        assert len(long_name) == 71
+        
+        short_name = get_short_tool_name(long_name)
+        assert len(short_name) <= 64
+        assert short_name != long_name
+        
+        # Original name should be cacheable and restorable
+        restored = restore_tool_name(short_name)
+        assert restored == long_name
 
 
 # ==================================================================================================

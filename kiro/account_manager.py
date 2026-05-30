@@ -339,6 +339,315 @@ class AccountManager:
         
         logger.info(f"Loaded {len(self._accounts)} account(s) from credentials")
     
+    async def reload_credentials(self) -> None:
+        """
+        Reload credentials from credentials.json at runtime without losing active accounts or connection state.
+        """
+        async with self._lock:
+            creds_path = Path(self._credentials_file).expanduser()
+            if not creds_path.exists():
+                logger.warning(f"Credentials file not found: {self._credentials_file}")
+                return
+            
+            try:
+                with open(creds_path, 'r', encoding='utf-8') as f:
+                    new_config = json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load credentials: {e}")
+                return
+            
+            # Save new config
+            self._credentials_config = new_config
+            
+            # Determine which accounts should be active based on the new config
+            active_account_ids = set()
+            
+            for entry in self._credentials_config:
+                cred_type = entry.get("type")
+                path = entry.get("path")
+                fallback_path = entry.get("fallback_path")
+                enabled = entry.get("enabled", True)
+                
+                if not enabled:
+                    continue
+                
+                if not cred_type:
+                    continue
+                
+                if cred_type in ("json", "sqlite") and not path:
+                    continue
+                
+                if cred_type == "refresh_token" and not entry.get("refresh_token"):
+                    continue
+                
+                if cred_type == "refresh_token":
+                    token = entry.get('refresh_token', '')
+                    token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+                    account_id = f"refresh_token_{token_hash}"
+                    active_account_ids.add(account_id)
+                    continue
+                
+                preferred_path = Path(path).expanduser()
+                expanded_path = _resolve_credential_path(path, fallback_path)
+                
+                if expanded_path.is_dir():
+                    for file_path in expanded_path.iterdir():
+                        if not file_path.is_file():
+                            continue
+                        
+                        account_id = str(file_path.resolve())
+                        is_valid = False
+                        if cred_type == "json":
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    data = json.load(f)
+                                    if _is_supported_json_credentials_payload(data):
+                                        is_valid = True
+                            except Exception as e:
+                                pass
+                        elif cred_type == "sqlite":
+                            try:
+                                import sqlite3
+                                conn = sqlite3.connect(str(file_path))
+                                cursor = conn.cursor()
+                                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='auth_kv'")
+                                if cursor.fetchone():
+                                    is_valid = True
+                                conn.close()
+                            except Exception as e:
+                                pass
+                        
+                        if is_valid:
+                            active_account_ids.add(account_id)
+                elif expanded_path.is_file():
+                    account_id = str(preferred_path.resolve())
+                    active_account_ids.add(account_id)
+            
+            # Clean up accounts that are no longer active
+            removed_ids = set(self._accounts.keys()) - active_account_ids
+            for r_id in removed_ids:
+                logger.info(f"Removing account: {r_id}")
+                self._accounts.pop(r_id, None)
+            
+            # Add new active accounts, keeping existing ones in place (preserving stats/failures/auth_manager!)
+            for account_id in active_account_ids:
+                if account_id not in self._accounts:
+                    logger.info(f"Adding new account at runtime: {account_id}")
+                    self._accounts[account_id] = Account(id=account_id)
+            
+            # Rebuild self._model_to_accounts from only active and initialized accounts
+            self._model_to_accounts.clear()
+            for account_id, account in self._accounts.items():
+                if account.model_resolver:
+                    available_models = account.model_resolver.get_available_models()
+                    for model in available_models:
+                        if model not in self._model_to_accounts:
+                            self._model_to_accounts[model] = ModelAccountList()
+                        if account_id not in self._model_to_accounts[model].accounts:
+                            self._model_to_accounts[model].accounts.append(account_id)
+            
+            # Adjust current index if it went out of bounds
+            if len(self._accounts) > 0:
+                self._current_account_index = self._current_account_index % len(self._accounts)
+            else:
+                self._current_account_index = 0
+            
+            self._dirty = True
+            await self._save_state()
+
+    async def add_account_entry(self, entry: Dict[str, Any]) -> str:
+        """
+        Add a new account entry, write its credential file (if json), append to credentials.json, and reload.
+        
+        Args:
+            entry: Dictionary containing credential configuration. Can also contain raw credential payload.
+            
+        Returns:
+            The account ID of the added account.
+        """
+        creds_path = Path(self._credentials_file).expanduser()
+        if not creds_path.exists():
+            current_config = []
+        else:
+            try:
+                with open(creds_path, 'r', encoding='utf-8') as f:
+                    current_config = json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load credentials for update: {e}")
+                current_config = []
+
+        cred_type = entry.get("type", "json")
+        comment = entry.get("comment", "")
+        
+        if cred_type == "refresh_token":
+            new_entry = {
+                "type": "refresh_token",
+                "refresh_token": entry.get("refresh_token"),
+                "comment": comment,
+                "enabled": True
+            }
+            if entry.get("profile_arn"):
+                new_entry["profile_arn"] = entry.get("profile_arn")
+            if entry.get("region"):
+                new_entry["region"] = entry.get("region")
+            current_config.append(new_entry)
+            
+            with open(creds_path, 'w', encoding='utf-8') as f:
+                json.dump(current_config, f, indent=2, ensure_ascii=False)
+            
+            await self.reload_credentials()
+            
+            token = entry.get('refresh_token', '')
+            token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+            account_id = f"refresh_token_{token_hash}"
+            
+            await self._initialize_account(account_id)
+            return account_id
+            
+        else:
+            raw_payload = entry.get("raw_payload")
+            if not raw_payload:
+                raw_payload = entry
+            
+            if not _is_supported_json_credentials_payload(raw_payload):
+                raise ValueError("Invalid Kiro credential payload: missing refreshToken or clientId")
+            
+            import uuid
+            os.makedirs("accounts", exist_ok=True)
+            unique_id = uuid.uuid4().hex
+            filename = f"accounts/account_{unique_id}.json"
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(raw_payload, f, indent=2, ensure_ascii=False)
+            
+            new_entry = {
+                "type": "json",
+                "path": filename,
+                "comment": comment or raw_payload.get("comment", ""),
+                "enabled": True
+            }
+            
+            current_config.append(new_entry)
+            
+            with open(creds_path, 'w', encoding='utf-8') as f:
+                json.dump(current_config, f, indent=2, ensure_ascii=False)
+            
+            await self.reload_credentials()
+            
+            account_id = str(Path(filename).expanduser().resolve())
+            await self._initialize_account(account_id)
+            return account_id
+
+    async def remove_account_entry(self, account_id: str) -> bool:
+        """
+        Remove an account entry from credentials.json, delete its local file if stored under accounts/, and reload.
+        """
+        creds_path = Path(self._credentials_file).expanduser()
+        if not creds_path.exists():
+            return False
+            
+        try:
+            with open(creds_path, 'r', encoding='utf-8') as f:
+                current_config = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load credentials for removal: {e}")
+            return False
+            
+        found = False
+        new_config = []
+        file_to_delete = None
+        
+        for entry in current_config:
+            cred_type = entry.get("type")
+            path = entry.get("path")
+            
+            entry_account_id = None
+            if cred_type == "refresh_token":
+                token = entry.get('refresh_token', '')
+                token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+                entry_account_id = f"refresh_token_{token_hash}"
+            elif path:
+                preferred_path = Path(path).expanduser()
+                entry_account_id = str(preferred_path.resolve())
+            
+            if entry_account_id == account_id:
+                found = True
+                if path and "accounts/" in path:
+                    file_to_delete = path
+                continue
+            
+            new_config.append(entry)
+            
+        if not found:
+            return False
+            
+        with open(creds_path, 'w', encoding='utf-8') as f:
+            json.dump(new_config, f, indent=2, ensure_ascii=False)
+            
+        if file_to_delete:
+            try:
+                p = Path(file_to_delete).expanduser()
+                if p.exists():
+                    p.unlink()
+                    logger.info(f"Deleted local credential file: {file_to_delete}")
+            except Exception as e:
+                logger.error(f"Failed to delete credential file {file_to_delete}: {e}")
+                
+        await self.reload_credentials()
+        return True
+
+    async def update_account_entry(
+        self,
+        account_id: str,
+        disabled: Optional[bool] = None,
+        comment: Optional[str] = None
+    ) -> bool:
+        """
+        Update enabling state or comment for an account in credentials.json, then reload.
+        """
+        creds_path = Path(self._credentials_file).expanduser()
+        if not creds_path.exists():
+            return False
+            
+        try:
+            with open(creds_path, 'r', encoding='utf-8') as f:
+                current_config = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load credentials for updating: {e}")
+            return False
+            
+        found = False
+        
+        for entry in current_config:
+            cred_type = entry.get("type")
+            path = entry.get("path")
+            
+            entry_account_id = None
+            if cred_type == "refresh_token":
+                token = entry.get('refresh_token', '')
+                token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+                entry_account_id = f"refresh_token_{token_hash}"
+            elif path:
+                preferred_path = Path(path).expanduser()
+                entry_account_id = str(preferred_path.resolve())
+            
+            if entry_account_id == account_id:
+                if disabled is not None:
+                    entry["enabled"] = not disabled
+                if comment is not None:
+                    entry["comment"] = comment
+                found = True
+                break
+                
+        if not found:
+            return False
+            
+        with open(creds_path, 'w', encoding='utf-8') as f:
+            json.dump(current_config, f, indent=2, ensure_ascii=False)
+            
+        await self.reload_credentials()
+        return True
+    
     async def load_state(self) -> None:
         """
         Load runtime state from state.json.
@@ -883,7 +1192,7 @@ class AccountManager:
 
     def get_accounts_snapshot(self) -> List[Dict[str, Any]]:
         """
-        Return a snapshot of all accounts for the dashboard.
+        Return a snapshot of all accounts (including disabled ones) for the dashboard.
 
         Returns:
             List of account status dictionaries with cooldown and error info.
@@ -891,18 +1200,51 @@ class AccountManager:
         from dataclasses import asdict
         now = time.time()
         snapshot: List[Dict[str, Any]] = []
-        all_account_ids = list(self._accounts.keys())
 
-        for idx, account_id in enumerate(all_account_ids):
-            account = self._accounts[account_id]
+        # Build map of configs
+        configs_map = {}
+        for entry in self._credentials_config:
+            cred_type = entry.get("type")
+            path = entry.get("path")
+            enabled = entry.get("enabled", True)
+            
+            entry_account_id = None
+            if cred_type == "refresh_token":
+                token = entry.get('refresh_token', '')
+                token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
+                entry_account_id = f"refresh_token_{token_hash}"
+            elif path:
+                preferred_path = Path(path).expanduser()
+                entry_account_id = str(preferred_path.resolve())
+                
+            if entry_account_id:
+                configs_map[entry_account_id] = {
+                    "enabled": enabled,
+                    "comment": entry.get("comment", "")
+                }
+                
+        # Gather all unique IDs from configs and active accounts
+        all_ids = list(configs_map.keys())
+        for a_id in self._accounts.keys():
+            if a_id not in all_ids:
+                all_ids.append(a_id)
+
+        for idx, account_id in enumerate(all_ids):
+            # Check if active
+            is_active = account_id in self._accounts
+            account = self._accounts[account_id] if is_active else None
+            cfg = configs_map.get(account_id, {"enabled": False, "comment": ""})
 
             display_id = account_id
             if os.sep in account_id:
                 display_id = os.path.basename(account_id)
             elif account_id.startswith("refresh_token_"):
-                display_id = "Token Account (" + account_id[-8:] + ")"
+                display_id = "Token (" + account_id[-8:] + ")"
 
-            if account.failures > 0:
+            if cfg.get("comment"):
+                display_id = f"{cfg['comment']} ({display_id})"
+
+            if account and account.failures > 0:
                 backoff_mult = min(
                     2 ** (account.failures - 1),
                     ACCOUNT_MAX_BACKOFF_MULTIPLIER,
@@ -916,7 +1258,7 @@ class AccountManager:
                 cooldown_remaining = 0
 
             current_models: List[str] = []
-            if account.model_resolver:
+            if account and account.model_resolver:
                 try:
                     current_models = list(account.model_resolver.get_available_models())
                 except Exception:
@@ -925,18 +1267,19 @@ class AccountManager:
             snapshot.append({
                 "id": account_id,
                 "display_id": display_id,
-                "failures": account.failures,
-                "last_failure_time": account.last_failure_time,
-                "models_cached_at": account.models_cached_at,
-                "stats": asdict(account.stats),
-                "is_initialized": account.auth_manager is not None,
-                "is_current": idx == self._current_account_index,
-                "backoff_tier": account.failures,
+                "enabled": cfg.get("enabled", False),
+                "failures": account.failures if account else 0,
+                "last_failure_time": account.last_failure_time if account else 0.0,
+                "models_cached_at": account.models_cached_at if account else 0.0,
+                "stats": asdict(account.stats) if account else {"total_requests": 0, "successful_requests": 0, "failed_requests": 0},
+                "is_initialized": (account is not None and account.auth_manager is not None),
+                "is_current": is_active and idx == self._current_account_index,
+                "backoff_tier": account.failures if account else 0,
                 "backoff_multiplier": backoff_mult,
                 "cooldown_total_s": cooldown_total,
                 "cooldown_remaining_s": cooldown_remaining,
-                "last_error_reason": getattr(account, 'last_error_reason', None),
-                "last_error_status": getattr(account, 'last_error_status', None),
+                "last_error_reason": getattr(account, 'last_error_reason', None) if account else None,
+                "last_error_status": getattr(account, 'last_error_status', None) if account else None,
                 "available_models_count": len(current_models),
             })
         return snapshot

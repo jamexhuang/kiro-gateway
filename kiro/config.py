@@ -255,6 +255,7 @@ MODEL_ALIASES: Dict[str, str] = {
     "automatic": "claude-opus-4.6",
     "自動": "claude-opus-4.6",
     "claude-opus-4.7": "claude-opus-4.6",
+    "claude-opus-4.8": "claude-opus-4.6",
 }
 
 # Model family aliases - redirect entire families of models (e.g., Haiku → Sonnet).
@@ -264,6 +265,9 @@ MODEL_ALIASES: Dict[str, str] = {
 # Example: {"haiku": "sonnet"} will redirect all claude-haiku-* to claude-sonnet-*
 #
 # Default: {}
+# MODEL_FAMILY_ALIASES: Dict[str, str] = {
+#     "haiku": "sonnet",
+# }
 MODEL_FAMILY_ALIASES: Dict[str, str] = {
     "haiku": "sonnet",
 }
@@ -271,6 +275,7 @@ MODEL_FAMILY_ALIASES: Dict[str, str] = {
 # Dynamic Fallbacks: If the primary model fails, try these alternatives.
 MODEL_FALLBACKS: Dict[str, List[str]] = {
     "claude-opus-4.7": ["claude-opus-4.6"],
+    "claude-opus-4.8": ["claude-opus-4.6"],
 }
 
 # Models to hide from /v1/models endpoint.
@@ -577,6 +582,26 @@ ACCOUNTS_CONFIG_FILE: str = os.getenv("ACCOUNTS_CONFIG_FILE", "credentials.json"
 
 # Path to runtime state file
 ACCOUNTS_STATE_FILE: str = os.getenv("ACCOUNTS_STATE_FILE", "state.json")
+
+# ==================================================================================================
+# Dashboard Passkey (WebAuthn/FIDO2) Authentication
+# ==================================================================================================
+# Relying Party id — must be the dashboard's registrable domain (no scheme/port).
+# For local development this should be "localhost".
+DASHBOARD_RP_ID: str = os.getenv("DASHBOARD_RP_ID", "edge.jamex.me")
+
+# Human-readable Relying Party name shown by the authenticator.
+DASHBOARD_RP_NAME: str = os.getenv("DASHBOARD_RP_NAME", "Kiro Gateway")
+
+# Expected origin(s) of dashboard requests (scheme + host [+ port]).
+# Comma-separated to allow multiple (e.g. prod + localhost dev).
+DASHBOARD_ORIGIN: str = os.getenv("DASHBOARD_ORIGIN", "https://edge.jamex.me")
+
+# Path to the persistent passkey/session store.
+DASHBOARD_AUTH_FILE: str = os.getenv("DASHBOARD_AUTH_FILE", "dashboard_auth.json")
+
+# Dashboard session cookie lifetime in seconds (default 12h).
+DASHBOARD_SESSION_TTL: int = int(os.getenv("DASHBOARD_SESSION_TTL", str(12 * 60 * 60)))
 
 # ==================================================================================================
 # Circuit Breaker Settings

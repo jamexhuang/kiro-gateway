@@ -70,7 +70,10 @@ class RoutingConfig:
     mode: str = "passthrough"
     manual_model: str = "claude-opus-4.6"
     redirects: Dict[str, str] = field(
-        default_factory=lambda: {"claude-opus-4.7": "claude-opus-4.6"}
+        default_factory=lambda: {
+            "claude-opus-4.7": "claude-opus-4.6",
+            "claude-opus-4.8": "claude-opus-4.6"
+        }
     )
     fallback_enabled: bool = True
     fallback_models: List[str] = field(
