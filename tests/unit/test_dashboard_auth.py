@@ -189,3 +189,46 @@ class TestRegistrationGate:
         store.add_credential(credential_id="c", public_key="pk", sign_count=0, transports=[], nickname="k")
         assert store.may_register(has_valid_session=False, has_valid_api_key=True) is False
         assert store.may_register(has_valid_session=True, has_valid_api_key=False) is True
+
+
+class TestWebAuthnService:
+    """Tests for the WebAuthn ceremony service option generation."""
+
+    def _ctx(self, tmp_path):
+        from kiro.dashboard_auth import ChallengeStore
+        store = DashboardAuthStore(path=str(tmp_path / "dashboard_auth.json"))
+        return store, ChallengeStore(ttl_seconds=300)
+
+    def test_begin_registration_returns_options_and_stores_challenge(self, tmp_path):
+        from kiro import dashboard_auth_service as svc
+        store, challenges = self._ctx(tmp_path)
+        flow_id, options = svc.begin_registration(
+            store, challenges, rp_id="localhost", rp_name="Kiro", origin="http://localhost", now=1000.0)
+        assert options["rp"]["id"] == "localhost"
+        assert "challenge" in options
+        # The flow id resolves to a stored challenge (single-use).
+        assert challenges.consume(flow_id, now=1000.0) is not None
+
+    def test_begin_authentication_returns_options_and_stores_challenge(self, tmp_path):
+        from kiro import dashboard_auth_service as svc
+        store, challenges = self._ctx(tmp_path)
+        store.add_credential(credential_id="Y3JlZA", public_key="pk", sign_count=0,
+                             transports=["internal"], nickname="k")
+        flow_id, options = svc.begin_authentication(
+            store, challenges, rp_id="localhost", now=1000.0)
+        assert "challenge" in options
+        assert challenges.consume(flow_id, now=1000.0) is not None
+
+    def test_complete_registration_rejects_expired_flow(self, tmp_path):
+        from kiro import dashboard_auth_service as svc
+        store, challenges = self._ctx(tmp_path)
+        with pytest.raises(svc.WebAuthnFlowError):
+            svc.complete_registration(store, challenges, rp_id="localhost", origin="http://localhost",
+                                      flow_id="unknown", credential={}, nickname="k", now=1000.0)
+
+    def test_complete_authentication_rejects_expired_flow(self, tmp_path):
+        from kiro import dashboard_auth_service as svc
+        store, challenges = self._ctx(tmp_path)
+        assert svc.complete_authentication(store, challenges, rp_id="localhost",
+                                           origin="http://localhost", flow_id="unknown",
+                                           credential={}, now=1000.0) is False
