@@ -528,24 +528,38 @@ async def dashboard_events(
 
         summary_task = asyncio.create_task(push_summaries())  # Always create; loop checks enabled flag
         try:
-            snap = control_panel.snapshot()
-            snap["accounts"] = (
-                account_manager.get_accounts_snapshot() if account_manager else []
-            )
-            yield f"event: snapshot\ndata: {_json.dumps(snap, default=str)}\n\n"
+            try:
+                snap = control_panel.snapshot()
+                snap["accounts"] = (
+                    account_manager.get_accounts_snapshot() if account_manager else []
+                )
+                yield f"event: snapshot\ndata: {_json.dumps(snap, default=str)}\n\n"
+            except Exception as exc:
+                logger.warning(f"SSE snapshot serialization failed: {exc}")
+                yield f"event: snapshot\ndata: {{}}\n\n"
             while True:
                 try:
                     evt = await asyncio.wait_for(queue.get(), timeout=15.0)
                     yield f"event: {evt['event']}\ndata: {_json.dumps(evt['data'], default=str)}\n\n"
                 except asyncio.TimeoutError:
                     yield ": keep-alive\n\n"
+                except Exception as exc:
+                    logger.debug(f"SSE event serialization error: {exc}")
         finally:
             if summary_task is not None:
                 summary_task.cancel()
             control_panel.unsubscribe(on_panel_event)
             log_buffer.unsubscribe(on_log_event)
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 DASHBOARD_HTML = r"""<!doctype html>
 <html lang="zh-Hant">
 <head>
@@ -1331,16 +1345,21 @@ function saveKey(){
 function forgetKey(){
   localStorage.removeItem("kiro-dashboard-key");
   if($("#apiKey")) $("#apiKey").value="";
-  if(es)es.close();
+  disconnectSSE();
   setConn(false,"未連線");
 }
 
 // -------- SSE --------
-let es=null;
+let sseAbort=null;let metricsTimer=null;let sseReconnectTimer=null;
+function disconnectSSE(){
+  if(sseAbort){sseAbort.abort();sseAbort=null;}
+  if(metricsTimer){clearInterval(metricsTimer);metricsTimer=null;}
+  if(sseReconnectTimer){clearTimeout(sseReconnectTimer);sseReconnectTimer=null;}
+}
 function connect(){
-  if(es)es.close();
+  disconnectSSE();
   streamEvents();
-  pullMetrics();setInterval(pullMetrics,5000);
+  pullMetrics();metricsTimer=setInterval(pullMetrics,5000);
   pullLogs();
   initLatencyToggle();
   loadPasskeys();
@@ -1348,9 +1367,12 @@ function connect(){
 }
 async function streamEvents(){
   setConn(null,"連線中");
+  const ctrl=new AbortController();
+  sseAbort=ctrl;
   try{
-    const r=await fetch("/dashboard/api/events",{headers:authHeaders()});
-    if(r.status===401){setConn(false,"驗證失敗");return;}
+    const r=await fetch("/dashboard/api/events",{headers:authHeaders(),credentials:"same-origin",signal:ctrl.signal});
+    if(r.status===401){setConn(false,"驗證失敗");checkAuth();return;}
+    if(!r.ok){setConn(false,"連線失敗: HTTP "+r.status);sseReconnectTimer=setTimeout(streamEvents,3000);return;}
     setConn(true,"已連線");
     const reader=r.body.getReader();const dec=new TextDecoder();let buf="";
     while(true){
@@ -1364,11 +1386,14 @@ async function streamEvents(){
           if(line.startsWith("event: "))ev=line.slice(7);
           else if(line.startsWith("data: "))data+=line.slice(6);
         });
-        try{handleEvent(ev,JSON.parse(data));}catch(e){}
+        try{handleEvent(ev,JSON.parse(data));}catch(e){console.warn("[SSE] handleEvent error:",ev,e);}
       }
     }
-    setConn(false,"串流已關閉");setTimeout(streamEvents,2000);
-  }catch(e){setConn(false,"錯誤: "+e.message);setTimeout(streamEvents,3000);}
+    setConn(false,"串流已關閉");sseReconnectTimer=setTimeout(streamEvents,2000);
+  }catch(e){
+    if(e.name==="AbortError")return;
+    setConn(false,"錯誤: "+e.message);sseReconnectTimer=setTimeout(streamEvents,3000);
+  }
 }
 
 function handleEvent(ev,d){
@@ -1436,7 +1461,10 @@ function pushLog(e){
 }
 
 // -------- rendering --------
-function renderAll(){renderStripe();renderAccounts();renderRequests();renderLatency();}
+function renderAll(){try{renderStripe();}catch(e){console.warn("[render] renderStripe:",e);}
+try{renderAccounts();}catch(e){console.warn("[render] renderAccounts:",e);}
+try{renderRequests();}catch(e){console.warn("[render] renderRequests:",e);}
+try{renderLatency();}catch(e){console.warn("[render] renderLatency:",e);}}
 
 function renderStripe(){
   const m=state.metrics;
