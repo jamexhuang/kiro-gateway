@@ -940,26 +940,24 @@ function base64urlToBuffer(base64url) {
 }
 
 function prepareRegisterOptions(options) {
-  const publicKey = options.publicKey;
-  publicKey.challenge = base64urlToBuffer(publicKey.challenge);
-  publicKey.user.id = base64urlToBuffer(publicKey.user.id);
-  if (publicKey.excludeCredentials) {
-    publicKey.excludeCredentials.forEach(cred => {
+  options.challenge = base64urlToBuffer(options.challenge);
+  options.user.id = base64urlToBuffer(options.user.id);
+  if (options.excludeCredentials) {
+    options.excludeCredentials.forEach(cred => {
       cred.id = base64urlToBuffer(cred.id);
     });
   }
-  return options;
+  return { publicKey: options };
 }
 
 function prepareLoginOptions(options) {
-  const publicKey = options.publicKey;
-  publicKey.challenge = base64urlToBuffer(publicKey.challenge);
-  if (publicKey.allowCredentials) {
-    publicKey.allowCredentials.forEach(cred => {
+  options.challenge = base64urlToBuffer(options.challenge);
+  if (options.allowCredentials) {
+    options.allowCredentials.forEach(cred => {
       cred.id = base64urlToBuffer(cred.id);
     });
   }
-  return options;
+  return { publicKey: options };
 }
 
 function credentialToJSON(cred) {
