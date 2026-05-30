@@ -914,6 +914,372 @@ const autoKey=window.KIRO_AUTO_KEY;let storedKey=localStorage.getItem("kiro-dash
 if(autoKey&&(!storedKey||storedKey.length<3)){localStorage.setItem("kiro-dashboard-key",autoKey);storedKey=autoKey;}
 if($("#apiKey")) $("#apiKey").value=storedKey||"";
 
+// -------- WebAuthn / Passkey JS Helpers --------
+function bufferToBase64url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let string = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    string += String.fromCharCode(bytes[i]);
+  }
+  const base64 = btoa(string);
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function base64urlToBuffer(base64url) {
+  let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4) {
+    base64 += '=';
+  }
+  const string = atob(base64);
+  const buffer = new ArrayBuffer(string.length);
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < string.length; i++) {
+    bytes[i] = string.charCodeAt(i);
+  }
+  return buffer;
+}
+
+function prepareRegisterOptions(options) {
+  const publicKey = options.publicKey;
+  publicKey.challenge = base64urlToBuffer(publicKey.challenge);
+  publicKey.user.id = base64urlToBuffer(publicKey.user.id);
+  if (publicKey.excludeCredentials) {
+    publicKey.excludeCredentials.forEach(cred => {
+      cred.id = base64urlToBuffer(cred.id);
+    });
+  }
+  return options;
+}
+
+function prepareLoginOptions(options) {
+  const publicKey = options.publicKey;
+  publicKey.challenge = base64urlToBuffer(publicKey.challenge);
+  if (publicKey.allowCredentials) {
+    publicKey.allowCredentials.forEach(cred => {
+      cred.id = base64urlToBuffer(cred.id);
+    });
+  }
+  return options;
+}
+
+function credentialToJSON(cred) {
+  const response = {};
+  if (cred.response.clientDataJSON) {
+    response.clientDataJSON = bufferToBase64url(cred.response.clientDataJSON);
+  }
+  if (cred.response.attestationObject) {
+    response.attestationObject = bufferToBase64url(cred.response.attestationObject);
+  }
+  if (cred.response.authenticatorData) {
+    response.authenticatorData = bufferToBase64url(cred.response.authenticatorData);
+  }
+  if (cred.response.signature) {
+    response.signature = bufferToBase64url(cred.response.signature);
+  }
+  if (cred.response.userHandle) {
+    response.userHandle = bufferToBase64url(cred.response.userHandle);
+  }
+  
+  const transports = typeof cred.response.getTransports === 'function' ? cred.response.getTransports() : [];
+  
+  return {
+    id: cred.id,
+    rawId: bufferToBase64url(cred.rawId),
+    type: cred.type,
+    response: response,
+    clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {},
+    transports: transports
+  };
+}
+
+let authState = { registered: false, authenticated: false };
+
+async function checkAuth() {
+  try {
+    const res = await fetch("/dashboard/api/auth/status");
+    if (!res.ok) throw new Error(await res.text());
+    const d = await res.json();
+    authState.registered = d.registered;
+    authState.authenticated = d.authenticated;
+    
+    if (d.authenticated) {
+      $("#auth-overlay").classList.add("hidden");
+      connect();
+    } else {
+      $("#auth-overlay").classList.remove("hidden");
+      $("#auth-error").textContent = "";
+      if (!d.registered) {
+        $("#register-form").classList.remove("hidden");
+        $("#login-form").classList.add("hidden");
+      } else {
+        $("#register-form").classList.add("hidden");
+        $("#login-form").classList.remove("hidden");
+        doLogin();
+      }
+    }
+  } catch (e) {
+    $("#auth-overlay").classList.remove("hidden");
+    $("#auth-error").textContent = "無法取得認證狀態: " + e.message;
+  }
+}
+
+async function doRegister() {
+  const nickname = $("#reg-nickname").value.trim() || "主管理員密鑰";
+  const bootstrapKey = $("#reg-bootstrap-key").value.trim();
+  $("#auth-error").textContent = "";
+  
+  if (!bootstrapKey && !storedKey) {
+    $("#auth-error").textContent = "請輸入代理 API 金鑰 (PROXY_API_KEY)";
+    return;
+  }
+  
+  const authKey = bootstrapKey || storedKey;
+  
+  try {
+    const beginRes = await fetch("/dashboard/api/auth/register/begin", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${authKey}`
+      }
+    });
+    if (beginRes.status === 401 || beginRes.status === 403) {
+      throw new Error("金鑰錯誤，無法驗證");
+    }
+    if (!beginRes.ok) throw new Error(await beginRes.text());
+    const beginData = await beginRes.json();
+    const flowId = beginData.flow_id;
+    
+    const options = prepareRegisterOptions(beginData.options);
+    const credential = await navigator.credentials.create(options);
+    const credentialJSON = credentialToJSON(credential);
+    
+    const completeRes = await fetch("/dashboard/api/auth/register/complete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${authKey}`
+      },
+      body: JSON.stringify({
+        flow_id: flowId,
+        credential: credentialJSON,
+        nickname: nickname
+      })
+    });
+    
+    if (!completeRes.ok) throw new Error(await completeRes.text());
+    
+    localStorage.setItem("kiro-dashboard-key", authKey);
+    if ($("#apiKey")) $("#apiKey").value = authKey;
+    
+    $("#auth-error").textContent = "註冊成功，正在進行通行密鑰登入...";
+    setTimeout(doLogin, 500);
+  } catch (e) {
+    $("#auth-error").textContent = "註冊失敗: " + e.message;
+  }
+}
+
+async function doLogin() {
+  $("#auth-error").textContent = "";
+  try {
+    const beginRes = await fetch("/dashboard/api/auth/login/begin", { method: "POST" });
+    if (!beginRes.ok) throw new Error(await beginRes.text());
+    const beginData = await beginRes.json();
+    const flowId = beginData.flow_id;
+    
+    const options = prepareLoginOptions(beginData.options);
+    const credential = await navigator.credentials.get(options);
+    const credentialJSON = credentialToJSON(credential);
+    
+    const completeRes = await fetch("/dashboard/api/auth/login/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        flow_id: flowId,
+        credential: credentialJSON
+      })
+    });
+    
+    if (!completeRes.ok) throw new Error(await completeRes.text());
+    
+    checkAuth();
+  } catch (e) {
+    if (e.name === "NotAllowedError") {
+      $("#auth-error").textContent = "使用者取消了通行密鑰驗證。";
+    } else {
+      $("#auth-error").textContent = "登入失敗: " + e.message;
+    }
+  }
+}
+
+async function addNewPasskey() {
+  const nickname = prompt("請輸入新通行密鑰的暱稱 (例如：手機、備用金鑰):");
+  if (!nickname) return;
+  try {
+    const beginData = await api("/dashboard/api/auth/register/begin", { method: "POST" });
+    const flowId = beginData.flow_id;
+    const options = prepareRegisterOptions(beginData.options);
+    const credential = await navigator.credentials.create(options);
+    const credentialJSON = credentialToJSON(credential);
+    
+    await api("/dashboard/api/auth/register/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        flow_id: flowId,
+        credential: credentialJSON,
+        nickname: nickname
+      })
+    });
+    
+    alert("成功新增通行密鑰！");
+    loadPasskeys();
+  } catch (e) {
+    alert("新增通行密鑰失敗: " + e.message);
+  }
+}
+
+async function loadPasskeys() {
+  const wrap = $("#passkeysWrap");
+  if (!wrap) return;
+  try {
+    const d = await api("/dashboard/api/auth/passkeys");
+    const passkeys = d.passkeys || [];
+    if (!passkeys.length) {
+      wrap.innerHTML = `<p style="color:var(--muted)">尚未設定任何通行密鑰。</p>`;
+      return;
+    }
+    let html = `<table class="reqs" style="width:100%"><thead><tr><th>暱稱</th><th>註冊時間</th><th>最後使用</th><th>Credential ID</th><th>操作</th></tr></thead><tbody>`;
+    passkeys.forEach(p => {
+      const created = p.created_at ? new Date(p.created_at * 1000).toLocaleString() : "未知";
+      const lastUsed = p.last_used ? new Date(p.last_used * 1000).toLocaleString() : "從未使用";
+      const shortId = p.credential_id ? p.credential_id.substring(0, 15) + "..." : "";
+      html += `<tr><td><strong>${esc(p.nickname)}</strong></td><td>${created}</td><td>${lastUsed}</td><td><code title="${esc(p.credential_id)}">${esc(shortId)}</code></td>
+        <td><button class="btn warn ghost" style="padding:2px 6px;font-size:10px" onclick="deletePasskey('${esc(p.credential_id)}')">刪除</button></td></tr>`;
+    });
+    html += `</tbody></table>`;
+    wrap.innerHTML = html;
+  } catch (e) {
+    wrap.innerHTML = `<p style="color:var(--danger)">載入失敗: ${esc(e.message)}</p>`;
+  }
+}
+
+async function deletePasskey(id) {
+  if (!confirm("確定要刪除此通行密鑰？如果這是您唯一的密鑰，您將無法再次登入！")) return;
+  try {
+    await api(`/dashboard/api/auth/passkeys/${encodeURIComponent(id)}`, { method: "DELETE" });
+    loadPasskeys();
+  } catch (e) {
+    alert("刪除失敗: " + e.message);
+  }
+}
+
+// -------- Account CRUD JS Helpers --------
+function showAddAccountModal() {
+  $("#add-account-wrap").classList.remove("hidden");
+  $("#addAcctError").textContent = "";
+}
+
+function hideAddAccountModal() {
+  $("#add-account-wrap").classList.add("hidden");
+}
+
+function toggleNewAcctType() {
+  const type = $("#new-acct-type").value;
+  if (type === "json") {
+    $("#new-acct-token-wrap").style.display = "block";
+    $("#new-acct-token-wrap").classList.remove("hidden");
+    $("#new-acct-rt-wrap").style.display = "none";
+    $("#new-acct-rt-wrap").classList.add("hidden");
+  } else {
+    $("#new-acct-token-wrap").style.display = "none";
+    $("#new-acct-token-wrap").classList.add("hidden");
+    $("#new-acct-rt-wrap").style.display = "block";
+    $("#new-acct-rt-wrap").classList.remove("hidden");
+  }
+}
+
+async function submitAddAccount() {
+  const type = $("#new-acct-type").value;
+  const comment = $("#new-acct-comment").value.trim();
+  $("#addAcctError").textContent = "";
+  
+  let payload = {};
+  if (type === "json") {
+    const rawJSON = $("#new-acct-token").value.trim();
+    if (!rawJSON) {
+      $("#addAcctError").textContent = "請貼上 JSON 內容";
+      return;
+    }
+    try {
+      payload = JSON.parse(rawJSON);
+    } catch(e) {
+      $("#addAcctError").textContent = "JSON 格式無效: " + e.message;
+      return;
+    }
+  } else {
+    const rt = $("#new-acct-rt").value.trim();
+    if (!rt) {
+      $("#addAcctError").textContent = "請輸入 Refresh Token";
+      return;
+    }
+    payload = { refresh_token: rt };
+  }
+  
+  if (comment) {
+    payload.comment = comment;
+  }
+  
+  try {
+    const res = await api("/dashboard/api/accounts", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    
+    if (res.success) {
+      hideAddAccountModal();
+      $("#new-acct-token").value = "";
+      $("#new-acct-rt").value = "";
+      $("#new-acct-comment").value = "";
+      
+      const d = await api("/dashboard/api/state");
+      state.accounts = d.accounts || [];
+      renderAccounts();
+    } else {
+      $("#addAcctError").textContent = "新增失敗: " + (res.error || "未知錯誤");
+    }
+  } catch (e) {
+    $("#addAcctError").textContent = "提交失敗: " + e.message;
+  }
+}
+
+async function toggleAccount(id, enabled) {
+  try {
+    await api(`/dashboard/api/accounts/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ disabled: enabled })
+    });
+    const d = await api("/dashboard/api/state");
+    state.accounts = d.accounts || [];
+    renderAccounts();
+  } catch (e) {
+    alert("更新帳號狀態失敗: " + e.message);
+  }
+}
+
+async function deleteAccount(id) {
+  if (!confirm(`確定要刪除帳號 ${id} 嗎？此操作不可逆。`)) return;
+  try {
+    await api(`/dashboard/api/accounts/${encodeURIComponent(id)}`, {
+      method: "DELETE"
+    });
+    const d = await api("/dashboard/api/state");
+    state.accounts = d.accounts || [];
+    renderAccounts();
+  } catch (e) {
+    alert("刪除帳號失敗: " + e.message);
+  }
+}
+
 function authHeaders(){
   const headers = {"Content-Type":"application/json"};
   const key = $("#apiKey") ? $("#apiKey").value.trim() : "";
@@ -1388,6 +1754,9 @@ async function loadModels(){
     $("#modelsWrap").innerHTML=html;
   }catch(e){$("#modelsStatus").textContent="錯誤: "+e.message;}
 }
+
+// Bootstrap auth check on load
+checkAuth();
 </script>
 </body></html>
 """
