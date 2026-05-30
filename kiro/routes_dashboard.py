@@ -544,6 +544,8 @@ async def dashboard_events(
                 summary_task.cancel()
             control_panel.unsubscribe(on_panel_event)
             log_buffer.unsubscribe(on_log_event)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 DASHBOARD_HTML = r"""<!doctype html>
 <html lang="zh-Hant">
 <head>
